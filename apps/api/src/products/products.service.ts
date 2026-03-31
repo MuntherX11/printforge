@@ -171,11 +171,11 @@ export class ProductsService {
       materials: allMaterials,
     });
 
-    const defaultMargin = parseFloat(
-      (await this.prisma.systemSetting.findUnique({ where: { key: 'default_margin_percent' } }))?.value || '40',
+    const markupMultiplier = parseFloat(
+      (await this.prisma.systemSetting.findUnique({ where: { key: 'markup_multiplier' } }))?.value || '2.5',
     );
 
-    const suggestedPrice = fullBreakdown.totalCost * (1 + defaultMargin / 100);
+    const suggestedPrice = fullBreakdown.totalCost * markupMultiplier;
 
     // Update cached basePrice
     await this.prisma.product.update({
@@ -186,7 +186,7 @@ export class ProductsService {
     return {
       ...fullBreakdown,
       suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
-      marginPercent: defaultMargin,
+      markupMultiplier,
       components: componentResults,
     };
   }

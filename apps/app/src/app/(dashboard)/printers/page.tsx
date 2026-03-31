@@ -31,8 +31,9 @@ export default function PrintersPage() {
         model: form.get('model') || undefined,
         connectionType: form.get('connectionType'),
         moonrakerUrl: form.get('moonrakerUrl') || undefined,
-        hourlyRate: parseFloat(form.get('hourlyRate') as string) || 0.5,
+        hourlyRate: parseFloat(form.get('hourlyRate') as string) || 0.40,
         wattage: parseFloat(form.get('wattage') as string) || 200,
+        markupMultiplier: parseFloat(form.get('markupMultiplier') as string) || 2.5,
       });
       setShowAdd(false);
       load();
@@ -86,9 +87,10 @@ export default function PrintersPage() {
             { value: 'CREALITY_CLOUD', label: 'Creality Cloud' },
           ]} />
           <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input name="hourlyRate" label="Hourly Rate (OMR)" type="number" step="0.01" defaultValue="0.5" />
+          <div className="grid grid-cols-3 gap-4">
+            <Input name="hourlyRate" label="Hourly Rate (OMR)" type="number" step="0.001" defaultValue="0.400" />
             <Input name="wattage" label="Wattage (W)" type="number" step="1" defaultValue="200" />
+            <Input name="markupMultiplier" label="Markup (×)" type="number" step="0.1" defaultValue="2.5" />
           </div>
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>

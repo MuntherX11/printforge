@@ -109,11 +109,16 @@ export default function SettingsPage() {
               <Input name="tax_rate" label="Tax Rate (%)" type="number" step="0.1" defaultValue={settings.tax_rate || '0'} />
               <Input name="overhead_percent" label="Overhead (%)" type="number" step="0.1" defaultValue={settings.overhead_percent || '15'} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Input name="default_margin_percent" label="Default Quote Margin (%)" type="number" step="0.1" defaultValue={settings.default_margin_percent || '40'} />
+            <div className="grid grid-cols-3 gap-4">
+              <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.1" defaultValue={settings.markup_multiplier || '2.5'} />
+              <Input name="machine_hourly_rate" label="Default Machine Rate (OMR/hr)" type="number" step="0.001" defaultValue={settings.machine_hourly_rate || '0.400'} />
               <Input name="electricity_rate_kwh" label="Electricity Rate (OMR/kWh)" type="number" step="0.001" defaultValue={settings.electricity_rate_kwh || '0.025'} />
             </div>
-            <p className="text-xs text-gray-400">Oman residential rates: Slab 1 (0-4000 kWh) = 0.010, Slab 2 (4001-6000) = 0.015, Slab 3 (6001+) = 0.025 OMR/kWh. Commercial may differ.</p>
+            <p className="text-xs text-gray-400">
+              <strong>Markup &amp; hourly rate</strong> are global defaults — each printer can override them in its own Costing section.
+              Filament cost is auto-calculated per material type from spool prices in inventory.
+            </p>
+            <p className="text-xs text-gray-400">Oman residential electricity: Slab 1 (0-4000 kWh) = 0.010, Slab 2 (4001-6000) = 0.015, Slab 3 (6001+) = 0.025 OMR/kWh.</p>
           </CardContent>
         </Card>
 

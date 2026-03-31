@@ -240,7 +240,7 @@ export interface UpdateProductComponentDto {
 
 export interface ProductCostResult extends CostBreakdown {
   suggestedPrice: number;
-  marginPercent: number;
+  markupMultiplier: number;
   components: Array<{
     description: string;
     materialName: string;
@@ -260,6 +260,7 @@ export interface CreatePrinterDto {
   moonrakerUrl?: string;
   hourlyRate?: number;
   wattage?: number;
+  markupMultiplier?: number;
 }
 
 export interface UpdatePrinterDto extends Partial<CreatePrinterDto> {
@@ -342,7 +343,7 @@ export interface MultiColorCostBreakdown extends CostBreakdown {
   purgeTransitions: PurgeTransition[];
   totalPurgeGrams: number;
   suggestedPrice: number;
-  marginPercent: number;
+  markupMultiplier: number;
 }
 
 export interface MultiColorEstimateInput {
@@ -353,7 +354,7 @@ export interface MultiColorEstimateInput {
 
 export interface QuoteEstimate extends CostBreakdown {
   suggestedPrice: number;
-  marginPercent: number;
+  markupMultiplier: number;
   confidence: 'high' | 'estimated';
   estimatedGrams?: number;
   estimatedMinutes?: number;

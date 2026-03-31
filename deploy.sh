@@ -117,7 +117,7 @@ async function main() {
     { key: 'company_address', value: '' },
     { key: 'company_phone', value: '' },
     { key: 'company_email', value: '' },
-    { key: 'default_margin_percent', value: '40' },
+    { key: 'default_margin_percent', value: '40' },  // legacy — kept for existing quotes
     { key: 'bank_details', value: '' },
     { key: 'invoice_notes', value: '' },
     { key: 'smtp_host', value: 'smtp.gmail.com' },
@@ -125,7 +125,9 @@ async function main() {
     { key: 'smtp_user', value: '' },
     { key: 'smtp_pass', value: '' },
     { key: 'whatsapp_template', value: 'Hello {name}, this is {company}. ' },
-    { key: 'electricity_rate_kwh', value: '0.025' }
+    { key: 'electricity_rate_kwh', value: '0.025' },
+    { key: 'markup_multiplier', value: '2.5' },
+    { key: 'machine_hourly_rate', value: '0.400' }
   ];
   for (const s of settings) {
     await prisma.systemSetting.upsert({ where: { key: s.key }, update: {}, create: s });
@@ -136,11 +138,11 @@ async function main() {
   const matCount = await prisma.material.count();
   if (matCount === 0) {
     await prisma.material.createMany({ data: [
-      { name: 'PLA White', type: 'PLA', color: 'White', brand: 'eSUN', costPerGram: 0.025, density: 1.24 },
-      { name: 'PLA Black', type: 'PLA', color: 'Black', brand: 'eSUN', costPerGram: 0.025, density: 1.24 },
-      { name: 'PETG White', type: 'PETG', color: 'White', brand: 'eSUN', costPerGram: 0.030, density: 1.27 },
-      { name: 'PETG Black', type: 'PETG', color: 'Black', brand: 'eSUN', costPerGram: 0.030, density: 1.27 },
-      { name: 'TPU Black', type: 'TPU', color: 'Black', brand: 'eSUN', costPerGram: 0.045, density: 1.21 }
+      { name: 'PLA White', type: 'PLA', color: 'White', brand: 'eSUN', costPerGram: 0.009, density: 1.24 },
+      { name: 'PLA Black', type: 'PLA', color: 'Black', brand: 'eSUN', costPerGram: 0.009, density: 1.24 },
+      { name: 'PETG White', type: 'PETG', color: 'White', brand: 'eSUN', costPerGram: 0.012, density: 1.27 },
+      { name: 'PETG Black', type: 'PETG', color: 'Black', brand: 'eSUN', costPerGram: 0.012, density: 1.27 },
+      { name: 'TPU Black', type: 'TPU', color: 'Black', brand: 'eSUN', costPerGram: 0.018, density: 1.21 }
     ]});
     console.log('  Default materials created');
   }

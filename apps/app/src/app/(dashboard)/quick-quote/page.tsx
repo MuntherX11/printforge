@@ -247,7 +247,7 @@ export default function QuickQuotePage() {
                       <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{result.costEstimate.overheadCost.toFixed(3)} OMR</dd></div>
                       <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{result.costEstimate.totalCost.toFixed(3)} OMR</dd></div>
                       <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{result.costEstimate.suggestedPrice.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">Margin</dt><dd>{result.costEstimate.marginPercent}%</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Markup</dt><dd>{result.costEstimate.markupMultiplier}x</dd></div>
                     </dl>
                   </CardContent>
                 </Card>
@@ -383,7 +383,7 @@ export default function QuickQuotePage() {
                     <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{multiResult.overheadCost.toFixed(3)} OMR</dd></div>
                     <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{multiResult.totalCost.toFixed(3)} OMR</dd></div>
                     <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{multiResult.suggestedPrice.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between"><dt className="text-gray-500">Margin</dt><dd>{multiResult.marginPercent}%</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Markup</dt><dd>{multiResult.markupMultiplier}x</dd></div>
                   </dl>
                 </CardContent>
               </Card>

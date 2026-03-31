@@ -145,7 +145,7 @@ export default function ProductDetailPage() {
             <div className="grid gap-4 md:grid-cols-3 border-t pt-4">
               <div><p className="text-xs text-gray-500">Total Cost</p><p className="text-xl font-bold">{formatCurrency(costResult.totalCost)}</p></div>
               <div><p className="text-xs text-gray-500">Suggested Price</p><p className="text-xl font-bold text-brand-600">{formatCurrency(costResult.suggestedPrice)}</p></div>
-              <div><p className="text-xs text-gray-500">Margin</p><p className="text-xl font-bold text-green-600">{costResult.marginPercent}%</p></div>
+              <div><p className="text-xs text-gray-500">Markup</p><p className="text-xl font-bold text-green-600">{costResult.markupMultiplier}x</p></div>
             </div>
             {costResult.components?.length > 0 && (
               <div className="mt-4 border-t pt-4">

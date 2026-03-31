@@ -158,8 +158,9 @@ model Printer {
   model           String?
   connectionType  PrinterConnectionType
   moonrakerUrl    String?
-  hourlyRate      Float               @default(0.5)
+  hourlyRate      Float               @default(0.40)
   wattage         Float               @default(200)
+  markupMultiplier Float              @default(2.5)
   isActive        Boolean             @default(true)
   status          PrinterStatus       @default(OFFLINE)
   lastSeen        DateTime?

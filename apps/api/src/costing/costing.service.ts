@@ -62,21 +62,24 @@ export class CostingService {
   }): Promise<CostBreakdown> {
     const overheadPercent = parseFloat(await this.getSetting('overhead_percent', '15'));
     const purgeWastePerChange = parseFloat(await this.getSetting('purge_waste_grams', '5'));
-    // Oman electricity rate in OMR per kWh (default 0.025 OMR — residential slab 1)
     const electricityRate = parseFloat(await this.getSetting('electricity_rate_kwh', '0.025'));
+    // Machine hourly rate from settings (covers wear, depreciation, maintenance)
+    const settingsHourlyRate = parseFloat(await this.getSetting('machine_hourly_rate', '0.400'));
 
-    // Material cost: sum of all job materials
+    // Material cost: sum of all job materials (costPerGram comes from material/spool)
     const materialCost = job.materials.reduce(
       (sum, m) => sum + m.gramsUsed * m.costPerGram, 0,
     );
 
-    // Machine cost: hourly rate * hours (wear & depreciation)
+    // Machine cost: use printer-specific rate if set, otherwise global setting
     const hours = (job.printDuration || 0) / 3600;
-    const hourlyRate = job.printer?.hourlyRate || 0;
+    const hourlyRate = (job.printer?.hourlyRate && job.printer.hourlyRate > 0)
+      ? job.printer.hourlyRate
+      : settingsHourlyRate;
     const machineCost = hours * hourlyRate;
 
     // Electricity cost: (wattage / 1000) * hours * rate per kWh
-    const wattage = job.printer?.wattage || 200; // default 200W for FDM
+    const wattage = job.printer?.wattage || 200;
     const electricityCost = (wattage / 1000) * hours * electricityRate;
 
     // Waste cost (multi-color purge)
@@ -108,14 +111,19 @@ export class CostingService {
     materialId: string;
     printerId?: string;
     colorChanges?: number;
-  }): Promise<CostBreakdown & { suggestedPrice: number; marginPercent: number }> {
+  }): Promise<CostBreakdown & { suggestedPrice: number; markupMultiplier: number }> {
     const material = await this.prisma.material.findUnique({ where: { id: params.materialId } });
     const printer = params.printerId
       ? await this.prisma.printer.findUnique({ where: { id: params.printerId } })
       : null;
 
-    const defaultMargin = parseFloat(await this.getSetting('default_margin_percent', '40'));
+    // Markup is printer-specific; fall back to global setting
+    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
+    const markupMultiplier = (printer?.markupMultiplier && printer.markupMultiplier > 0)
+      ? printer.markupMultiplier
+      : globalMarkup;
 
+    // costPerGram comes from the material record — PLA, PETG, TPU each have their own cost
     const breakdown = await this.calculateJobCost({
       printDuration: params.printMinutes * 60,
       colorChanges: params.colorChanges || 0,
@@ -126,12 +134,13 @@ export class CostingService {
         : [],
     });
 
-    const suggestedPrice = breakdown.totalCost * (1 + defaultMargin / 100);
+    // Suggested price = total cost × markup multiplier
+    const suggestedPrice = breakdown.totalCost * markupMultiplier;
 
     return {
       ...breakdown,
       suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
-      marginPercent: defaultMargin,
+      markupMultiplier,
     };
   }
 
@@ -141,8 +150,9 @@ export class CostingService {
    */
   async estimateMultiColor(input: MultiColorEstimateInput): Promise<MultiColorCostBreakdown> {
     const overheadPercent = parseFloat(await this.getSetting('overhead_percent', '15'));
-    const defaultMargin = parseFloat(await this.getSetting('default_margin_percent', '40'));
+    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
     const basePurgeGrams = parseFloat(await this.getSetting('purge_waste_grams', '5'));
+    const settingsHourlyRate = parseFloat(await this.getSetting('machine_hourly_rate', '0.400'));
 
     // Fetch all materials in one query
     const materialIds = [...new Set(input.colors.map(c => c.materialId))];
@@ -198,19 +208,27 @@ export class CostingService {
     const totalPurgeGrams = purgeTransitions.reduce((sum, t) => sum + t.purgeGrams, 0);
     const wasteCost = purgeTransitions.reduce((sum, t) => sum + t.purgeCost, 0);
 
-    // Machine cost
+    // Machine cost — printer-specific rate, fallback to global setting
     const hours = (input.printMinutes || 0) / 60;
-    const machineCost = hours * (printer?.hourlyRate || 0);
+    const hourlyRate = (printer?.hourlyRate && printer.hourlyRate > 0)
+      ? printer.hourlyRate
+      : settingsHourlyRate;
+    const machineCost = hours * hourlyRate;
 
     // Electricity cost
     const electricityRate = parseFloat(await this.getSetting('electricity_rate_kwh', '0.025'));
     const wattage = printer?.wattage || 200;
     const electricityCost = (wattage / 1000) * hours * electricityRate;
 
+    // Markup — printer-specific, fallback to global
+    const markupMultiplier = (printer?.markupMultiplier && printer.markupMultiplier > 0)
+      ? printer.markupMultiplier
+      : globalMarkup;
+
     // Overhead
     const overheadCost = (materialCost + machineCost + electricityCost + wasteCost) * (overheadPercent / 100);
     const totalCost = materialCost + machineCost + electricityCost + wasteCost + overheadCost;
-    const suggestedPrice = totalCost * (1 + defaultMargin / 100);
+    const suggestedPrice = totalCost * markupMultiplier;
 
     return {
       materialCost: Math.round(materialCost * 1000) / 1000,
@@ -223,7 +241,7 @@ export class CostingService {
       purgeTransitions,
       totalPurgeGrams: Math.round(totalPurgeGrams * 100) / 100,
       suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
-      marginPercent: defaultMargin,
+      markupMultiplier,
     };
   }
 }

@@ -103,7 +103,7 @@ export default function EstimatePage() {
                 <span className="font-bold">{formatCurrency(result.totalCost)}</span>
               </div>
               <div className="flex justify-between text-sm border-t pt-2">
-                <span className="font-medium">Suggested Price ({result.marginPercent}% margin)</span>
+                <span className="font-medium">Suggested Price ({result.markupMultiplier}x markup)</span>
                 <span className="font-bold text-lg text-brand-600">{formatCurrency(result.suggestedPrice)}</span>
               </div>
             </div>
