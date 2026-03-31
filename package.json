@@ -1,0 +1,21 @@
+{
+  "name": "printforge",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "docker compose up --build",
+    "dev:api": "npm -w apps/api run start:dev",
+    "dev:app": "npm -w apps/app run dev",
+    "build": "npm -w packages/types run build && npm -w apps/api run build && npm -w apps/app run build",
+    "db:generate": "npm -w apps/api run prisma:generate",
+    "db:migrate": "npm -w apps/api run prisma:migrate",
+    "db:seed": "npm -w apps/api run prisma:seed",
+    "lint": "npm -w apps/api run lint && npm -w apps/app run lint"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

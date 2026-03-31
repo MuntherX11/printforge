@@ -1,0 +1,516 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ AUTH & USERS ============
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          Role     @default(OPERATOR)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  auditLogs     AuditLog[]
+  assignedJobs  ProductionJob[]
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+// ============ CUSTOMERS ============
+
+model Customer {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?
+  phone        String?
+  address      String?
+  notes        String?
+  portalAccess Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders         Order[]
+  quotes         Quote[]
+  designProjects DesignProject[]
+}
+
+// ============ INVENTORY ============
+
+model Material {
+  id              String       @id @default(cuid())
+  name            String
+  type            MaterialType
+  color           String?
+  brand           String?
+  costPerGram     Float
+  density         Float        @default(1.24)
+  reorderPoint    Float        @default(500)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  spools              Spool[]
+  jobMaterials        JobMaterial[]
+  productComponents   ProductComponent[]
+}
+
+enum MaterialType {
+  PLA
+  PETG
+  ABS
+  TPU
+  ASA
+  NYLON
+  RESIN
+  OTHER
+}
+
+model StorageLocation {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  spools      Spool[]
+}
+
+model Spool {
+  id              String           @id @default(cuid())
+  materialId      String
+  material        Material         @relation(fields: [materialId], references: [id])
+  initialWeight   Float
+  currentWeight   Float
+  spoolWeight     Float            @default(200)
+  lotNumber       String?
+  purchasePrice   Float?
+  purchaseDate    DateTime?
+  locationId      String?
+  location        StorageLocation? @relation(fields: [locationId], references: [id])
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  jobMaterials    JobMaterial[]
+}
+
+// ============ PRODUCTS (BOM) ============
+
+model Product {
+  id                String   @id @default(cuid())
+  name              String
+  description       String?
+  sku               String?  @unique
+  estimatedMinutes  Float    @default(0)
+  estimatedGrams    Float    @default(0)
+  colorChanges      Int      @default(0)
+  basePrice         Float    @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  components        ProductComponent[]
+}
+
+model ProductComponent {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  materialId      String
+  material        Material @relation(fields: [materialId], references: [id])
+  description     String
+  gramsUsed       Float
+  printMinutes    Float    @default(0)
+  quantity        Int      @default(1)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+}
+
+// ============ PRINTERS ============
+
+model Printer {
+  id              String              @id @default(cuid())
+  name            String
+  model           String?
+  connectionType  PrinterConnectionType
+  moonrakerUrl    String?
+  hourlyRate      Float               @default(0.5)
+  wattage         Float               @default(200)
+  isActive        Boolean             @default(true)
+  status          PrinterStatus       @default(OFFLINE)
+  lastSeen        DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  productionJobs  ProductionJob[]
+}
+
+enum PrinterConnectionType {
+  MOONRAKER
+  CREALITY_CLOUD
+  MANUAL
+}
+
+enum PrinterStatus {
+  IDLE
+  PRINTING
+  PAUSED
+  ERROR
+  OFFLINE
+  MAINTENANCE
+}
+
+// ============ PRODUCTION ============
+
+model ProductionJob {
+  id              String     @id @default(cuid())
+  name            String
+  status          JobStatus  @default(QUEUED)
+  printerId       String?
+  printer         Printer?   @relation(fields: [printerId], references: [id])
+  assignedToId    String?
+  assignedTo      User?      @relation(fields: [assignedToId], references: [id])
+  orderId         String?
+  order           Order?     @relation(fields: [orderId], references: [id])
+  orderItemId     String?
+  orderItem       OrderItem? @relation(fields: [orderItemId], references: [id])
+
+  printDuration   Float?
+  filamentUsedMm  Float?
+
+  colorChanges    Int        @default(0)
+  purgeWasteGrams Float      @default(0)
+
+  materialCost    Float?
+  machineCost     Float?
+  wasteCost       Float?
+  overheadCost    Float?
+  totalCost       Float?
+
+  moonrakerJobId  String?
+  gcodeFilename   String?
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  materials       JobMaterial[]
+  attachments     Attachment[]
+}
+
+enum JobStatus {
+  QUEUED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model JobMaterial {
+  id              String        @id @default(cuid())
+  jobId           String
+  job             ProductionJob @relation(fields: [jobId], references: [id])
+  materialId      String
+  material        Material      @relation(fields: [materialId], references: [id])
+  spoolId         String?
+  spool           Spool?        @relation(fields: [spoolId], references: [id])
+  gramsUsed       Float
+  costPerGram     Float
+  colorIndex      Int           @default(0)
+  createdAt       DateTime      @default(now())
+}
+
+// ============ ORDERS ============
+
+model Quote {
+  id              String      @id @default(cuid())
+  quoteNumber     String      @unique
+  customerId      String
+  customer        Customer    @relation(fields: [customerId], references: [id])
+  status          QuoteStatus @default(DRAFT)
+  subtotal        Float       @default(0)
+  tax             Float       @default(0)
+  total           Float       @default(0)
+  notes           String?
+  validUntil      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items           QuoteItem[]
+  order           Order?
+  attachments     Attachment[]
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model QuoteItem {
+  id                 String   @id @default(cuid())
+  quoteId            String
+  quote              Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId          String?
+  description        String
+  quantity           Int      @default(1)
+  unitPrice          Float
+  totalPrice         Float
+  estimatedGrams     Float?
+  estimatedMinutes   Float?
+  estimatedColors    Int?
+  estimatedCost      Float?
+  marginPercent      Float?
+  createdAt          DateTime @default(now())
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  customerId      String
+  customer        Customer    @relation(fields: [customerId], references: [id])
+  quoteId         String?     @unique
+  quote           Quote?      @relation(fields: [quoteId], references: [id])
+  status          OrderStatus @default(PENDING)
+  subtotal        Float       @default(0)
+  tax             Float       @default(0)
+  total           Float       @default(0)
+  paidAmount      Float       @default(0)
+  notes           String?
+  dueDate         DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items           OrderItem[]
+  productionJobs  ProductionJob[]
+  invoices        Invoice[]
+  attachments     Attachment[]
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PRODUCTION
+  READY
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model OrderItem {
+  id              String          @id @default(cuid())
+  orderId         String
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String?
+  description     String
+  quantity        Int             @default(1)
+  unitPrice       Float
+  totalPrice      Float
+  materialCost    Float?
+  createdAt       DateTime        @default(now())
+
+  productionJobs  ProductionJob[]
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  orderId         String
+  order           Order         @relation(fields: [orderId], references: [id])
+  status          InvoiceStatus @default(DRAFT)
+  subtotal        Float
+  tax             Float
+  total           Float
+  paidAmount      Float         @default(0)
+  issuedAt        DateTime?
+  dueDate         DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  attachments     Attachment[]
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+// ============ ACCOUNTING ============
+
+model ExpenseCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+
+  expenses    Expense[]
+}
+
+model Expense {
+  id           String          @id @default(cuid())
+  categoryId   String
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  description  String
+  amount       Float
+  date         DateTime
+  recurring    Boolean         @default(false)
+  notes        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+// ============ FILE MANAGEMENT ============
+
+model Attachment {
+  id              String   @id @default(cuid())
+  filename        String
+  originalName    String
+  mimeType        String
+  sizeBytes       Int
+  storagePath     String
+  entityType      String
+  entityId        String
+  parsedMetadata  Json?
+  uploadedById    String?
+  createdAt       DateTime @default(now())
+
+  // Polymorphic relation — entityType + entityId reference different tables
+  // (Quote, Order, ProductionJob, DesignProject, Invoice) without FK constraints
+  quoteId         String?
+  quote           Quote?         @relation(fields: [quoteId], references: [id])
+  orderId         String?
+  order           Order?         @relation(fields: [orderId], references: [id])
+  jobId           String?
+  productionJob   ProductionJob? @relation(fields: [jobId], references: [id])
+  designProjectId String?
+  designProject   DesignProject? @relation(fields: [designProjectId], references: [id])
+  invoiceId       String?
+  invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
+
+  @@index([entityType, entityId])
+}
+
+// ============ DESIGN MODULE (groundwork) ============
+
+model DesignProject {
+  id              String       @id @default(cuid())
+  projectNumber   String       @unique
+  customerId      String
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  status          DesignStatus @default(REQUESTED)
+  title           String
+  brief           String?
+  budget          Float?
+  quotedPrice     Float?
+  deadline        DateTime?
+  notes           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  revisions       DesignRevision[]
+  comments        DesignComment[]
+  attachments     Attachment[]
+}
+
+enum DesignStatus {
+  REQUESTED
+  REVIEWING
+  QUOTED
+  IN_PROGRESS
+  REVISION_PENDING
+  CHANGES_REQUESTED
+  APPROVED
+  CANCELLED
+  ARCHIVED
+}
+
+model DesignRevision {
+  id              String        @id @default(cuid())
+  projectId       String
+  project         DesignProject @relation(fields: [projectId], references: [id])
+  versionNumber   Int
+  description     String?
+  internalNotes   String?
+  customerNotes   String?
+  createdAt       DateTime      @default(now())
+
+  comments        DesignComment[]
+}
+
+model DesignComment {
+  id              String          @id @default(cuid())
+  projectId       String
+  project         DesignProject   @relation(fields: [projectId], references: [id])
+  revisionId      String?
+  revision        DesignRevision? @relation(fields: [revisionId], references: [id])
+  authorId        String?
+  authorName      String
+  isCustomer      Boolean         @default(false)
+  content         String
+  createdAt       DateTime        @default(now())
+}
+
+// ============ SYSTEM ============
+
+model SystemSetting {
+  id      String @id @default(cuid())
+  key     String @unique
+  value   String
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  type        NotificationType
+  title       String
+  message     String
+  entityType  String?
+  entityId    String?
+  isRead      Boolean          @default(false)
+  userId      String?
+  createdAt   DateTime         @default(now())
+}
+
+enum NotificationType {
+  LOW_STOCK
+  ORDER_CREATED
+  ORDER_STATUS_CHANGED
+  JOB_COMPLETED
+  JOB_FAILED
+  INVOICE_OVERDUE
+  DESIGN_REVISION_UPLOADED
+  DESIGN_APPROVED
+  DESIGN_CHANGES_REQUESTED
+  SYSTEM
+}

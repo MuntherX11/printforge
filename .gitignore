@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+*.env
+!.env.example
+.env.local
+.env.production
+pf-pgdata/
+pf-redis/
+pf-uploads/
+pf-backups/
+*.log
+.DS_Store
+coverage/
+.turbo/
+.claude/

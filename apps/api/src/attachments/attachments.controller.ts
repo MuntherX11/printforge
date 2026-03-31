@@ -1,0 +1,48 @@
+import { Controller, Get, Post, Delete, Param, Query, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
+import * as fs from 'fs/promises';
+import { AttachmentsService } from './attachments.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+
+@Controller('attachments')
+@UseGuards(JwtAuthGuard)
+export class AttachmentsController {
+  constructor(private attachmentsService: AttachmentsService) {}
+
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
+  upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('entityType') entityType: string,
+    @Query('entityId') entityId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.attachmentsService.upload(file, entityType, entityId, user.id);
+  }
+
+  @Get()
+  findByEntity(@Query('entityType') entityType: string, @Query('entityId') entityId: string) {
+    return this.attachmentsService.findByEntity(entityType, entityId);
+  }
+
+  @Get(':id/download')
+  async download(@Param('id') id: string, @Res() res: Response) {
+    const attachment = await this.attachmentsService.findOne(id);
+    const filePath = await this.attachmentsService.getFilePath(id);
+
+    const fileBuffer = await fs.readFile(filePath);
+    res.set({
+      'Content-Type': attachment.mimeType,
+      'Content-Disposition': `attachment; filename="${attachment.originalName}"`,
+      'Content-Length': fileBuffer.length,
+    });
+    res.end(fileBuffer);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.attachmentsService.remove(id);
+  }
+}

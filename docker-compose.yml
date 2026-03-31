@@ -1,0 +1,199 @@
+services:
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "4032:80"
+    depends_on:
+      api:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+  app:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    expose:
+      - "3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    expose:
+      - "4000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4000/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - pf-uploads:/app/uploads
+      - pf-watch:/app/uploads/watch
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: node dist/worker/worker.main.js
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - pf-uploads:/app/uploads
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=printforge
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=printforge
+    volumes:
+      - pf-pgdata:/var/lib/postgresql/data
+    networks:
+      - printforge-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - pf-redis:/data
+    networks:
+      - printforge-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+  moonraker-bridge:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: node dist/moonraker-bridge/bridge.main.js
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  db-backup:
+    build:
+      context: ./docker/db-backup
+      dockerfile: Dockerfile
+    environment:
+      - PGHOST=db
+      - PGUSER=printforge
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=printforge
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - pf-backups:/backups
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+networks:
+  printforge-net:
+    driver: bridge
+
+volumes:
+  pf-pgdata:
+  pf-redis:
+  pf-uploads:
+  pf-watch:
+  pf-backups:
