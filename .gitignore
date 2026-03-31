@@ -14,3 +14,5 @@ pf-backups/
 coverage/
 .turbo/
 .claude/
+*.zip
+package_zip.py
