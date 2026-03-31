@@ -1,25 +1,29 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign } from 'lucide-react';
+import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2 } from 'lucide-react';
 
 export default function PrinterDetailPage() {
   const { id } = useParams();
+  const router = useRouter();
   const [printer, setPrinter] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState<any>(null);
   const [controlling, setControlling] = useState(false);
   const [savingCosting, setSavingCosting] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     api.get(`/printers/${id}`).then(setPrinter).catch(console.error).finally(() => setLoading(false));
@@ -82,6 +86,61 @@ export default function PrinterDetailPage() {
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Jobs</p><p className="text-lg font-bold">{printer._count?.productionJobs || 0}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Last Seen</p><p className="text-sm">{printer.lastSeen ? formatDate(printer.lastSeen) : 'Never'}</p></CardContent></Card>
       </div>
+
+      {/* Printer Details — Edit */}
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Settings className="h-5 w-5" /> Printer Details</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            setSavingDetails(true);
+            const form = new FormData(e.currentTarget);
+            try {
+              await api.patch(`/printers/${id}`, {
+                name: form.get('name'),
+                model: form.get('model') || undefined,
+                connectionType: form.get('connectionType'),
+                moonrakerUrl: form.get('moonrakerUrl') || undefined,
+              });
+              load();
+              alert('Printer details saved');
+            } catch (err: any) {
+              alert(err.message);
+            } finally {
+              setSavingDetails(false);
+            }
+          }} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Input name="name" label="Printer Name" defaultValue={printer.name} required />
+              <Input name="model" label="Model" defaultValue={printer.model || ''} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select name="connectionType" label="Connection Type" defaultValue={printer.connectionType} options={[
+                { value: 'MANUAL', label: 'Manual' },
+                { value: 'MOONRAKER', label: 'Moonraker (Klipper)' },
+                { value: 'CREALITY_CLOUD', label: 'Creality Cloud' },
+              ]} />
+              <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" defaultValue={printer.moonrakerUrl || ''} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Button type="submit" size="sm" disabled={savingDetails}>{savingDetails ? 'Saving...' : 'Save Details'}</Button>
+              <Button type="button" variant="outline" size="sm" className="text-red-500 border-red-300 hover:bg-red-50" disabled={deleting} onClick={async () => {
+                if (!confirm(`Delete printer "${printer.name}"? Completed jobs will be preserved but unlinked from this printer.`)) return;
+                setDeleting(true);
+                try {
+                  await api.delete(`/printers/${id}`);
+                  router.push('/printers');
+                } catch (err: any) {
+                  alert(err.message);
+                  setDeleting(false);
+                }
+              }}>
+                <Trash2 className="h-4 w-4 mr-1" /> {deleting ? 'Deleting...' : 'Delete Printer'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Live Moonraker Status */}
       {isMoonraker && liveStatus && (

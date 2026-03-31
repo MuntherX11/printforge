@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { PrintersService } from './printers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -32,5 +32,12 @@ export class PrintersController {
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdatePrinterDto) {
     return this.printersService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  remove(@Param('id') id: string) {
+    return this.printersService.remove(id);
   }
 }

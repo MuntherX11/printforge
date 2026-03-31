@@ -40,6 +40,23 @@ export class PrintersService {
     return this.prisma.printer.update({ where: { id }, data: dto as any });
   }
 
+  async remove(id: string) {
+    await this.findOne(id);
+    // Check for active jobs before deleting
+    const activeJobs = await this.prisma.productionJob.count({
+      where: { printerId: id, status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] } },
+    });
+    if (activeJobs > 0) {
+      throw new NotFoundException(`Cannot delete printer with ${activeJobs} active job(s). Complete or cancel them first.`);
+    }
+    // Unlink completed jobs so they're not lost
+    await this.prisma.productionJob.updateMany({
+      where: { printerId: id },
+      data: { printerId: null as any },
+    });
+    return this.prisma.printer.delete({ where: { id } });
+  }
+
   async updateStatus(id: string, status: string, lastSeen?: Date) {
     return this.prisma.printer.update({
       where: { id },
