@@ -193,6 +193,6 @@ export class GcodeParserService {
     if (minutes) seconds += parseInt(minutes[1]) * 60;
     if (secs) seconds += parseInt(secs[1]);
 
-    return seconds || null;
+    return seconds || 0;
   }
 }
