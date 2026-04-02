@@ -19,7 +19,7 @@ export class FileParserController {
    * Query params: ?materialId=xxx&printerId=xxx&colorChanges=1&infill=20
    */
   @Post('analyze')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
   async analyzeFile(
     @UploadedFile() file: any,
     @Query('materialId') materialId?: string,
