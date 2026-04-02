@@ -37,6 +37,7 @@ export const api = {
       credentials: 'include',
     });
     if (!res.ok) throw new Error('Upload failed');
-    return res.json();
+    const json = await res.json();
+    return json.data !== undefined ? json.data : json;
   },
 };
