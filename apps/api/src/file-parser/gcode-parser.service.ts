@@ -22,10 +22,9 @@ export class GcodeParserService {
     const text = typeof input === 'string' ? input : input.toString('utf-8');
     const lines = text.split('\n');
 
-    // Most metadata is in first ~80 and last ~80 lines
-    const headerLines = lines.slice(0, 100);
-    const footerLines = lines.slice(-100);
-    const searchLines = [...headerLines, ...footerLines];
+    // When called from parseHeader, input is already trimmed to header+footer chunks
+    // so scan ALL lines. Only comments (starting with ;) are checked, so this is fast.
+    const searchLines = lines;
 
     const result: GcodeAnalysis = {
       slicer: null,
