@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateQuoteDto, UpdateQuoteDto } from '@printforge/types';
+import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
 import { OrdersService } from '../orders/orders.service';
@@ -11,6 +11,107 @@ export class QuotesService {
     private prisma: PrismaService,
     private ordersService: OrdersService,
   ) {}
+
+  async createFromAnalysis(dto: SaveQuoteFromAnalysisDto, createdById?: string) {
+    const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+
+    const cost = dto.costEstimate;
+    const suggestedPrice = cost?.suggestedPrice || 0;
+
+    // 3-day validity
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + 3);
+
+    const isGcode = !!dto.analysis?.slicer;
+
+    return this.prisma.quote.create({
+      data: {
+        quoteNumber,
+        customerId: dto.customerId,
+        source: (dto.source as any) || 'QUICK_QUOTE',
+        notes: dto.notes || null,
+        validUntil,
+        subtotal: suggestedPrice,
+        tax: 0,
+        total: suggestedPrice,
+        gcodeMetadata: isGcode ? dto.analysis : undefined,
+        stlMetadata: !isGcode ? dto.analysis : undefined,
+        costBreakdown: cost || undefined,
+        createdById: createdById || null,
+        items: {
+          create: [{
+            description: dto.description,
+            quantity: 1,
+            unitPrice: suggestedPrice,
+            totalPrice: suggestedPrice,
+            estimatedGrams: dto.analysis?.filamentUsedGrams || dto.analysis?.estimatedGrams || null,
+            estimatedMinutes: dto.analysis?.estimatedTimeSeconds
+              ? Math.round(dto.analysis.estimatedTimeSeconds / 60)
+              : dto.analysis?.estimatedMinutes || null,
+            estimatedColors: dto.analysis?.toolCount || null,
+            estimatedCost: cost?.totalCost || null,
+          }],
+        },
+      },
+      include: { customer: true, items: true },
+    });
+  }
+
+  async findForCustomer(customerId: string, query: PaginationDto) {
+    const where = { customerId };
+    const [data, total] = await Promise.all([
+      this.prisma.quote.findMany({
+        where,
+        ...paginate(query),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: { select: { items: true } },
+        },
+      }),
+      this.prisma.quote.count({ where }),
+    ]);
+    return paginatedResponse(data, total, query);
+  }
+
+  async customerAccept(quoteId: string, customerId: string) {
+    const quote = await this.prisma.quote.findUnique({ where: { id: quoteId } });
+    if (!quote || quote.customerId !== customerId) throw new NotFoundException('Quote not found');
+    if (quote.status !== 'SENT' && quote.status !== 'DRAFT') {
+      throw new BadRequestException('Quote cannot be accepted in its current status');
+    }
+    if (quote.validUntil && quote.validUntil < new Date()) {
+      throw new BadRequestException('Quote has expired');
+    }
+    return this.prisma.quote.update({
+      where: { id: quoteId },
+      data: { status: 'ACCEPTED' },
+      include: { customer: true, items: true },
+    });
+  }
+
+  async customerReject(quoteId: string, customerId: string) {
+    const quote = await this.prisma.quote.findUnique({ where: { id: quoteId } });
+    if (!quote || quote.customerId !== customerId) throw new NotFoundException('Quote not found');
+    if (quote.status !== 'SENT' && quote.status !== 'DRAFT') {
+      throw new BadRequestException('Quote cannot be rejected in its current status');
+    }
+    return this.prisma.quote.update({
+      where: { id: quoteId },
+      data: { status: 'REJECTED' },
+      include: { customer: true, items: true },
+    });
+  }
+
+  async expireOldQuotes() {
+    const result = await this.prisma.quote.updateMany({
+      where: {
+        status: { in: ['DRAFT', 'SENT'] },
+        validUntil: { lt: new Date() },
+      },
+      data: { status: 'EXPIRED' },
+    });
+    return result.count;
+  }
 
   async create(dto: CreateQuoteDto) {
     const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');

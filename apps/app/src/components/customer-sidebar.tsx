@@ -5,50 +5,32 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
-  Package,
-  Box,
-  ShoppingCart,
   FileText,
-  Printer,
-  Users,
-  Settings,
-  DollarSign,
-  Hammer,
-  Zap,
-  FolderOpen,
   Palette,
+  User,
 } from 'lucide-react';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Quick Quote', href: '/quick-quote', icon: Zap },
-  { name: 'Watch Folder', href: '/watch-folder', icon: FolderOpen },
-  { name: 'Orders', href: '/orders', icon: ShoppingCart },
-  { name: 'Quotes', href: '/quotes', icon: FileText },
-  { name: 'Production', href: '/production', icon: Hammer },
-  { name: 'Design Center', href: '/design', icon: Palette },
-  { name: 'Inventory', href: '/inventory', icon: Package },
-  { name: 'Products', href: '/products', icon: Box },
-  { name: 'Printers', href: '/printers', icon: Printer },
-  { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Accounting', href: '/accounting', icon: DollarSign },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'My Quotes', href: '/dashboard/quotes', icon: FileText },
+  { name: 'Design Requests', href: '/dashboard/design', icon: Palette },
+  { name: 'Profile', href: '/dashboard/profile', icon: User },
 ];
 
-export function Sidebar() {
+export function CustomerSidebar() {
   const pathname = usePathname();
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-white">
       <div className="flex h-16 items-center px-6 border-b">
-        <Link href="/" className="text-xl font-bold text-brand-600">
+        <Link href="/dashboard" className="text-xl font-bold text-brand-600">
           PrintForge
         </Link>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navigation.map((item) => {
           const isActive = pathname === item.href ||
-            (item.href !== '/' && pathname.startsWith(item.href));
+            (item.href !== '/dashboard' && pathname.startsWith(item.href));
           return (
             <Link
               key={item.name}

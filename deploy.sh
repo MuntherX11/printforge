@@ -127,7 +127,10 @@ async function main() {
     { key: 'whatsapp_template', value: 'Hello {name}, this is {company}. ' },
     { key: 'electricity_rate_kwh', value: '0.025' },
     { key: 'markup_multiplier', value: '2.5' },
-    { key: 'machine_hourly_rate', value: '0.400' }
+    { key: 'machine_hourly_rate', value: '0.400' },
+    { key: 'admin_email', value: '' },
+    { key: 'design_fee_default', value: '5.000' },
+    { key: 'quote_validity_days', value: '3' }
   ];
   for (const s of settings) {
     await prisma.systemSetting.upsert({ where: { key: s.key }, update: {}, create: s });

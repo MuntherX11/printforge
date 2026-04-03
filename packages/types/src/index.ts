@@ -49,6 +49,14 @@ export enum QuoteStatus {
   EXPIRED = 'EXPIRED',
 }
 
+export enum QuoteSource {
+  MANUAL = 'MANUAL',
+  QUICK_QUOTE = 'QUICK_QUOTE',
+  CUSTOMER = 'CUSTOMER',
+  DESIGN = 'DESIGN',
+  LINK = 'LINK',
+}
+
 export enum OrderStatus {
   PENDING = 'PENDING',
   CONFIRMED = 'CONFIRMED',
@@ -67,16 +75,45 @@ export enum InvoiceStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum DesignFeeType {
+  FLAT = 'FLAT',
+  HOURLY = 'HOURLY',
+}
+
 export enum DesignStatus {
   REQUESTED = 'REQUESTED',
-  REVIEWING = 'REVIEWING',
-  QUOTED = 'QUOTED',
+  ASSIGNED = 'ASSIGNED',
   IN_PROGRESS = 'IN_PROGRESS',
-  REVISION_PENDING = 'REVISION_PENDING',
-  CHANGES_REQUESTED = 'CHANGES_REQUESTED',
+  REVIEW = 'REVIEW',
+  REVISION = 'REVISION',
   APPROVED = 'APPROVED',
+  QUOTED = 'QUOTED',
+  IN_PRODUCTION = 'IN_PRODUCTION',
+  COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
-  ARCHIVED = 'ARCHIVED',
+}
+
+// ============ DESIGN CENTER ============
+
+export interface CreateDesignProjectDto {
+  title: string;
+  brief?: string;
+  budget?: number;
+}
+
+export interface UpdateDesignProjectDto {
+  status?: DesignStatus;
+  assignedToId?: string;
+  designFeeType?: DesignFeeType;
+  designFeeAmount?: number;
+  designFeeHours?: number;
+  estimatedDelivery?: string;
+  notes?: string;
+}
+
+export interface AddDesignCommentDto {
+  content: string;
+  attachmentIds?: string[];
 }
 
 export enum NotificationType {
@@ -118,6 +155,8 @@ export interface ApiResponse<T = unknown> {
 
 // ============ AUTH ============
 
+export type UserType = 'staff' | 'customer';
+
 export interface LoginDto {
   email: string;
   password: string;
@@ -128,12 +167,30 @@ export interface AuthUser {
   email: string;
   name: string;
   role: Role;
+  userType: UserType;
+}
+
+export interface AuthCustomer {
+  id: string;
+  email: string;
+  name: string;
+  phone?: string;
+  isApproved: boolean;
+  userType: 'customer';
 }
 
 export interface JwtPayload {
   sub: string;
   email: string;
   role: Role;
+  type: UserType;
+}
+
+export interface CustomerSignupDto {
+  name: string;
+  email: string;
+  phone?: string;
+  password: string;
 }
 
 // ============ CUSTOMERS ============
@@ -409,6 +466,15 @@ export interface UpdateQuoteDto {
   status?: QuoteStatus;
   notes?: string;
   validUntil?: string;
+}
+
+export interface SaveQuoteFromAnalysisDto {
+  customerId: string;
+  description: string;
+  analysis: any;
+  costEstimate: any;
+  source?: QuoteSource;
+  notes?: string;
 }
 
 // ============ INVOICES ============

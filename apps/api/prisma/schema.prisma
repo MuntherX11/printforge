@@ -19,8 +19,9 @@ model User {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  auditLogs     AuditLog[]
-  assignedJobs  ProductionJob[]
+  auditLogs            AuditLog[]
+  assignedJobs         ProductionJob[]
+  designAssignments    DesignProject[] @relation("DesignAssignments")
 }
 
 enum Role {
@@ -45,15 +46,20 @@ model AuditLog {
 // ============ CUSTOMERS ============
 
 model Customer {
-  id           String   @id @default(cuid())
-  name         String
-  email        String?
-  phone        String?
-  address      String?
-  notes        String?
-  portalAccess Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String
+  email         String?  @unique
+  phone         String?
+  address       String?
+  notes         String?
+  portalAccess  Boolean  @default(false)
+  passwordHash  String?
+  isApproved    Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  refreshToken  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   orders         Order[]
   quotes         Quote[]
@@ -250,22 +256,36 @@ model JobMaterial {
 // ============ ORDERS ============
 
 model Quote {
-  id              String      @id @default(cuid())
-  quoteNumber     String      @unique
+  id              String       @id @default(cuid())
+  quoteNumber     String       @unique
   customerId      String
-  customer        Customer    @relation(fields: [customerId], references: [id])
-  status          QuoteStatus @default(DRAFT)
-  subtotal        Float       @default(0)
-  tax             Float       @default(0)
-  total           Float       @default(0)
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  status          QuoteStatus  @default(DRAFT)
+  source          QuoteSource  @default(MANUAL)
+  subtotal        Float        @default(0)
+  tax             Float        @default(0)
+  total           Float        @default(0)
   notes           String?
   validUntil      DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  gcodeMetadata   Json?
+  stlMetadata     Json?
+  costBreakdown   Json?
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   items           QuoteItem[]
   order           Order?
   attachments     Attachment[]
+  designProject   DesignProject?
+}
+
+enum QuoteSource {
+  MANUAL
+  QUICK_QUOTE
+  CUSTOMER
+  DESIGN
+  LINK
 }
 
 enum QuoteStatus {
@@ -426,35 +446,50 @@ model Attachment {
 // ============ DESIGN MODULE (groundwork) ============
 
 model DesignProject {
-  id              String       @id @default(cuid())
-  projectNumber   String       @unique
-  customerId      String
-  customer        Customer     @relation(fields: [customerId], references: [id])
-  status          DesignStatus @default(REQUESTED)
-  title           String
-  brief           String?
-  budget          Float?
-  quotedPrice     Float?
-  deadline        DateTime?
-  notes           String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id                String       @id @default(cuid())
+  projectNumber     String       @unique
+  customerId        String
+  customer          Customer     @relation(fields: [customerId], references: [id])
+  assignedToId      String?
+  assignedTo        User?        @relation("DesignAssignments", fields: [assignedToId], references: [id])
+  status            DesignStatus @default(REQUESTED)
+  title             String
+  brief             String?
+  budget            Float?
+  quotedPrice       Float?
+  designFeeType     DesignFeeType @default(FLAT)
+  designFeeAmount   Float?
+  designFeeHours    Float?
+  totalDesignFee    Float?
+  estimatedDelivery DateTime?
+  quoteId           String?      @unique
+  quote             Quote?       @relation(fields: [quoteId], references: [id])
+  deadline          DateTime?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  revisions       DesignRevision[]
-  comments        DesignComment[]
-  attachments     Attachment[]
+  revisions         DesignRevision[]
+  comments          DesignComment[]
+  attachments       Attachment[]
+}
+
+enum DesignFeeType {
+  FLAT
+  HOURLY
 }
 
 enum DesignStatus {
   REQUESTED
-  REVIEWING
-  QUOTED
+  ASSIGNED
   IN_PROGRESS
-  REVISION_PENDING
-  CHANGES_REQUESTED
+  REVIEW
+  REVISION
   APPROVED
+  QUOTED
+  IN_PRODUCTION
+  COMPLETED
   CANCELLED
-  ARCHIVED
 }
 
 model DesignRevision {
@@ -480,6 +515,7 @@ model DesignComment {
   authorName      String
   isCustomer      Boolean         @default(false)
   content         String
+  attachmentIds   String[]
   createdAt       DateTime        @default(now())
 }
 

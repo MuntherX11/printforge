@@ -27,7 +27,33 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; email: string; role: string }) {
+  async validate(payload: { sub: string; email: string; role?: string; type?: string }) {
+    // Customer token
+    if (payload.type === 'customer') {
+      const customer = await this.prisma.customer.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, email: true, name: true, phone: true, isApproved: true, isActive: true },
+      });
+
+      if (!customer || !customer.isActive) {
+        throw new UnauthorizedException();
+      }
+
+      if (!customer.isApproved) {
+        throw new UnauthorizedException('Account pending approval');
+      }
+
+      return {
+        id: customer.id,
+        email: customer.email,
+        name: customer.name,
+        phone: customer.phone,
+        isApproved: customer.isApproved,
+        userType: 'customer' as const,
+      };
+    }
+
+    // Staff token (default for backward compatibility)
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: { id: true, email: true, name: true, role: true, isActive: true },
@@ -37,6 +63,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
 
-    return user;
+    return {
+      ...user,
+      userType: 'staff' as const,
+    };
   }
 }

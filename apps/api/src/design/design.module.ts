@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
+import { DesignController } from './design.controller';
+import { DesignService } from './design.service';
+import { CommunicationsModule } from '../communications/communications.module';
 
 @Module({
-  // TODO: Phase 4 — Design module
-  // Will include: ProjectsController, RevisionsController, CommentsController
+  imports: [CommunicationsModule],
+  controllers: [DesignController],
+  providers: [DesignService],
+  exports: [DesignService],
 })
 export class DesignModule {}

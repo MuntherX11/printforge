@@ -1,7 +1,8 @@
-import { Controller, Post, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query } from '@nestjs/common';
+import { Controller, Post, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query, Body } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GcodeParserService } from './gcode-parser.service';
 import { StlEstimatorService } from './stl-estimator.service';
+import { UrlScraperService } from './url-scraper.service';
 import { CostingService } from '../costing/costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -11,6 +12,7 @@ export class FileParserController {
   constructor(
     private gcodeParser: GcodeParserService,
     private stlEstimator: StlEstimatorService,
+    private urlScraper: UrlScraperService,
     private costingService: CostingService,
   ) {}
 
@@ -98,5 +100,11 @@ export class FileParserController {
       density ? parseFloat(density) : 1.24,
       infill ? parseInt(infill) : 20,
     );
+  }
+
+  @Post('scrape-url')
+  async scrapeUrl(@Body() body: { url: string }) {
+    if (!body.url) throw new BadRequestException('URL is required');
+    return this.urlScraper.scrapeModelUrl(body.url);
   }
 }

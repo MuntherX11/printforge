@@ -1,12 +1,17 @@
-import { Controller, Post, Body, Res, HttpCode, HttpStatus, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpCode, HttpStatus, Get, UseGuards, Param } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { StaffGuard } from './guards/staff.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
+
+  // ============ STAFF AUTH ============
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -20,7 +25,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: 'lax',
       secure: process.env.COOKIE_SECURE === 'true',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return result;
@@ -37,5 +42,61 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: any) {
     return user;
+  }
+
+  // ============ CUSTOMER AUTH ============
+
+  @Post('customer/signup')
+  async customerSignup(
+    @Body() body: { name: string; email: string; phone?: string; password: string },
+  ) {
+    return this.authService.customerSignup(body);
+  }
+
+  @Post('customer/login')
+  @HttpCode(HttpStatus.OK)
+  async customerLogin(
+    @Body() body: { email: string; password: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.customerLogin(body.email, body.password);
+
+    res.cookie('token', result.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.COOKIE_SECURE === 'true',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return result;
+  }
+
+  @Get('customer/me')
+  @UseGuards(JwtAuthGuard)
+  customerMe(@CurrentUser() user: any) {
+    return user;
+  }
+
+  // ============ ADMIN: CUSTOMER MANAGEMENT ============
+
+  @Get('customers/pending')
+  @UseGuards(JwtAuthGuard, StaffGuard, RolesGuard)
+  @Roles('ADMIN')
+  getPendingCustomers() {
+    return this.authService.getPendingCustomers();
+  }
+
+  @Post('customers/:id/approve')
+  @UseGuards(JwtAuthGuard, StaffGuard, RolesGuard)
+  @Roles('ADMIN')
+  approveCustomer(@Param('id') id: string) {
+    return this.authService.approveCustomer(id);
+  }
+
+  @Post('customers/:id/reject')
+  @UseGuards(JwtAuthGuard, StaffGuard, RolesGuard)
+  @Roles('ADMIN')
+  rejectCustomer(@Param('id') id: string) {
+    return this.authService.rejectCustomer(id);
   }
 }

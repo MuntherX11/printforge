@@ -7,17 +7,50 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import { Plus, Users } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
+import { Plus, Users, UserCheck, UserX } from 'lucide-react';
 
 export default function CustomersPage() {
   const [data, setData] = useState<any>(null);
+  const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  useEffect(() => {
-    api.get('/customers').then(setData).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  function loadData() {
+    Promise.all([
+      api.get('/customers'),
+      api.get('/auth/customers/pending').catch(() => []),
+    ]).then(([customers, pendingList]) => {
+      setData(customers);
+      setPending(Array.isArray(pendingList) ? pendingList : []);
+    }).catch(console.error).finally(() => setLoading(false));
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  async function handleApprove(id: string) {
+    try {
+      await api.post(`/auth/customers/${id}/approve`);
+      toast('success', 'Customer approved');
+      loadData();
+    } catch (err: any) {
+      toast('error', err.message || 'Failed to approve');
+    }
+  }
+
+  async function handleReject(id: string) {
+    if (!confirm('Reject this customer signup?')) return;
+    try {
+      await api.post(`/auth/customers/${id}/reject`);
+      toast('success', 'Customer rejected');
+      loadData();
+    } catch (err: any) {
+      toast('error', err.message || 'Failed to reject');
+    }
+  }
 
   if (loading) return <Loading />;
 
@@ -31,6 +64,52 @@ export default function CustomersPage() {
           <Button><Plus className="h-4 w-4 mr-2" /> Add Customer</Button>
         </Link>
       </div>
+
+      {pending.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Badge variant="warning">{pending.length}</Badge>
+              Pending Approvals
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Signed Up</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pending.map((c: any) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell>{c.email}</TableCell>
+                    <TableCell>{c.phone || '-'}</TableCell>
+                    <TableCell>{formatDate(c.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button size="sm" onClick={() => handleApprove(c.id)}>
+                          <UserCheck className="h-4 w-4 mr-1" />
+                          Approve
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => handleReject(c.id)}>
+                          <UserX className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-0">

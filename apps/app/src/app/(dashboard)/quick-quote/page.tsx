@@ -7,7 +7,8 @@ import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { Upload, Calculator, FileText, Box } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
+import { Upload, Calculator, FileText, Box, Save, Link2 } from 'lucide-react';
 
 export default function QuickQuotePage() {
   const [materials, setMaterials] = useState<any[]>([]);
@@ -23,6 +24,18 @@ export default function QuickQuotePage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [saveCustomerId, setSaveCustomerId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  // Mode: 'file' | 'multi' | 'link'
+  const [mode, setMode] = useState<'file' | 'multi' | 'link'>('file');
+
+  // Link quote state
+  const [linkUrl, setLinkUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  const [scrapedData, setScrapedData] = useState<any>(null);
 
   // Multi-color state
   const [multiMode, setMultiMode] = useState(false);
@@ -38,9 +51,11 @@ export default function QuickQuotePage() {
     Promise.all([
       api.get<any>('/materials').then(r => r.data || r),
       api.get<any[]>('/printers'),
-    ]).then(([mats, prts]) => {
+      api.get<any>('/customers').then(r => r.data || r).catch(() => []),
+    ]).then(([mats, prts, custs]) => {
       setMaterials(Array.isArray(mats) ? mats : []);
       setPrinters(prts);
+      setCustomers(Array.isArray(custs) ? custs : []);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -59,10 +74,51 @@ export default function QuickQuotePage() {
 
       const data = await api.upload('/file-parser/analyze', file, params);
       setResult(data);
+      // Auto-populate color changes from gcode analysis
+      if (data?.analysis?.totalFilamentChanges != null) {
+        setColorChanges(String(data.analysis.totalFilamentChanges));
+      }
     } catch (err: any) {
       setError(err.message || 'Analysis failed');
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleSaveQuote() {
+    if (!result?.costEstimate || !saveCustomerId) {
+      toast('error', 'Select a customer and ensure cost estimate is available');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post('/quotes/from-analysis', {
+        customerId: saveCustomerId,
+        description: result.filename || 'Quick Quote',
+        analysis: result.analysis,
+        costEstimate: result.costEstimate,
+        source: 'QUICK_QUOTE',
+      });
+      toast('success', 'Quote saved successfully');
+    } catch (err: any) {
+      toast('error', err.message || 'Failed to save quote');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleScrapeUrl() {
+    if (!linkUrl.trim()) return;
+    setScraping(true);
+    setScrapedData(null);
+    setError('');
+    try {
+      const data = await api.post('/file-parser/scrape-url', { url: linkUrl });
+      setScrapedData(data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to scrape URL');
+    } finally {
+      setScraping(false);
     }
   }
 
@@ -125,18 +181,21 @@ export default function QuickQuotePage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Quick Quote</h1>
         <div className="flex gap-2">
-          <Button variant={!multiMode ? 'primary' : 'outline'} onClick={() => setMultiMode(false)}>
+          <Button variant={mode === 'file' ? 'primary' : 'outline'} onClick={() => { setMode('file'); setMultiMode(false); }}>
             <Upload className="h-4 w-4 mr-2" /> File Upload
           </Button>
-          <Button variant={multiMode ? 'primary' : 'outline'} onClick={() => setMultiMode(true)}>
+          <Button variant={mode === 'multi' ? 'primary' : 'outline'} onClick={() => { setMode('multi'); setMultiMode(true); }}>
             <Calculator className="h-4 w-4 mr-2" /> Multi-Color
+          </Button>
+          <Button variant={mode === 'link' ? 'primary' : 'outline'} onClick={() => setMode('link')}>
+            <Link2 className="h-4 w-4 mr-2" /> Link Quote
           </Button>
         </div>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{error}</div>}
 
-      {!multiMode ? (
+      {mode === 'file' ? (
         <>
           {/* File upload mode */}
           <Card>
@@ -231,7 +290,32 @@ export default function QuickQuotePage() {
                     {result.analysis?.estimatedMinutes && <div className="flex justify-between"><dt className="text-gray-500">Est. Time</dt><dd>{result.analysis.estimatedMinutes} min</dd></div>}
                     {result.analysis?.triangleCount && <div className="flex justify-between"><dt className="text-gray-500">Triangles</dt><dd>{result.analysis.triangleCount.toLocaleString()}</dd></div>}
                     {result.analysis?.boundingBox && <div className="flex justify-between"><dt className="text-gray-500">Bounding Box</dt><dd>{result.analysis.boundingBox.x.toFixed(1)} × {result.analysis.boundingBox.y.toFixed(1)} × {result.analysis.boundingBox.z.toFixed(1)} mm</dd></div>}
+                    {result.analysis?.totalFilamentChanges != null && (
+                      <div className="flex justify-between"><dt className="text-gray-500">Tool Changes</dt><dd>{result.analysis.totalFilamentChanges}</dd></div>
+                    )}
+                    {result.analysis?.toolCount != null && result.analysis.toolCount > 1 && (
+                      <div className="flex justify-between"><dt className="text-gray-500">Tools Used</dt><dd>{result.analysis.toolCount}</dd></div>
+                    )}
                   </dl>
+                  {result.analysis?.tools?.length > 1 && (
+                    <div className="mt-4 pt-3 border-t">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Per-Tool Breakdown</h4>
+                      <div className="space-y-1">
+                        {result.analysis.tools.map((t: any) => (
+                          <div key={t.index} className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                              {t.colorHex && (
+                                <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: t.colorHex }} />
+                              )}
+                              <span className="text-gray-600">T{t.index}</span>
+                              {t.materialType && <span className="text-gray-400 text-xs">({t.materialType})</span>}
+                            </div>
+                            <span className="text-gray-700">{t.filamentGrams?.toFixed(1) || '?'}g</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -249,13 +333,27 @@ export default function QuickQuotePage() {
                       <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{result.costEstimate.suggestedPrice.toFixed(3)} OMR</dd></div>
                       <div className="flex justify-between"><dt className="text-gray-500">Markup</dt><dd>{result.costEstimate.markupMultiplier}x</dd></div>
                     </dl>
+
+                    <div className="mt-4 pt-4 border-t space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Save as Quote</h4>
+                      <Select
+                        label="Customer"
+                        value={saveCustomerId}
+                        onChange={e => setSaveCustomerId(e.target.value)}
+                        options={[{ value: '', label: 'Select customer...' }, ...customers.map(c => ({ value: c.id, label: c.name }))]}
+                      />
+                      <Button onClick={handleSaveQuote} disabled={saving || !saveCustomerId} className="w-full" variant="secondary">
+                        <Save className="h-4 w-4 mr-2" />
+                        {saving ? 'Saving...' : 'Save Quote'}
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
             </div>
           )}
         </>
-      ) : (
+      ) : mode === 'multi' ? (
         <>
           {/* Multi-color mode */}
           <Card>
@@ -388,6 +486,77 @@ export default function QuickQuotePage() {
                 </CardContent>
               </Card>
             </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Link quote mode */}
+          <Card>
+            <CardContent className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model URL</label>
+                <p className="text-xs text-gray-400 mb-2">
+                  Paste a link from MakerWorld, Thangs, Thingiverse, Printables, MyMiniFactory, or Cults3D
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    value={linkUrl}
+                    onChange={e => setLinkUrl(e.target.value)}
+                    placeholder="https://makerworld.com/en/models/..."
+                    className="flex-1"
+                  />
+                  <Button onClick={handleScrapeUrl} disabled={scraping || !linkUrl.trim()}>
+                    {scraping ? 'Scraping...' : 'Fetch'}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {scrapedData && (
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex gap-4">
+                  {scrapedData.thumbnailUrl && (
+                    <img
+                      src={scrapedData.thumbnailUrl}
+                      alt={scrapedData.title || 'Model preview'}
+                      className="w-32 h-32 object-cover rounded-lg border"
+                    />
+                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      {scrapedData.siteName && (
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{scrapedData.siteName}</span>
+                      )}
+                    </div>
+                    <h3 className="font-semibold text-lg">{scrapedData.title || 'Unknown Model'}</h3>
+                    {scrapedData.description && (
+                      <p className="text-sm text-gray-500 mt-1 line-clamp-3">{scrapedData.description}</p>
+                    )}
+                    <a href={scrapedData.url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline mt-2 inline-block">
+                      View on {scrapedData.siteName || 'site'}
+                    </a>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t space-y-3">
+                  <p className="text-sm text-gray-600">
+                    To generate an accurate quote, the STL file is needed. You can:
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="primary" size="sm" onClick={() => { setMode('file'); }}>
+                      <Upload className="h-4 w-4 mr-1" /> Upload STL Yourself
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      toast('success', 'Request noted — admin will handle the STL file');
+                    }}>
+                      Let Us Handle It
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           )}
         </>
       )}
