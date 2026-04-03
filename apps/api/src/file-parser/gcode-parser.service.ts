@@ -158,10 +158,12 @@ export class GcodeParserService {
   parseHeader(buffer: Buffer): GcodeAnalysis {
     // OrcaSlicer puts metadata in last ~20KB — read 64KB from each end to be safe
     const chunkSize = 65536;
-    const headerSize = Math.min(buffer.length, chunkSize);
-    const headerText = buffer.subarray(0, headerSize).toString('utf-8');
-    const footerStart = Math.max(0, buffer.length - chunkSize);
-    const footerText = buffer.subarray(footerStart).toString('utf-8');
+    if (buffer.length <= chunkSize * 2) {
+      // Small file — just parse the whole thing, no overlap risk
+      return this.parse(buffer.toString('utf-8'));
+    }
+    const headerText = buffer.subarray(0, chunkSize).toString('utf-8');
+    const footerText = buffer.subarray(buffer.length - chunkSize).toString('utf-8');
     return this.parse(headerText + '\n' + footerText);
   }
 

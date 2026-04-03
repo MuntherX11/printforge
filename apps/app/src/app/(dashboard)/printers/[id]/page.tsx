@@ -12,11 +12,13 @@ import { Loading } from '@/components/ui/loading';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
+import { useToast } from '@/components/ui/toast';
 import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2 } from 'lucide-react';
 
 export default function PrinterDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { toast } = useToast();
   const [printer, setPrinter] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState<any>(null);
@@ -24,6 +26,7 @@ export default function PrinterDetailPage() {
   const [savingCosting, setSavingCosting] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [formKey, setFormKey] = useState(0); // forces form re-render on save
 
   const load = useCallback(() => {
     api.get(`/printers/${id}`).then(setPrinter).catch(console.error).finally(() => setLoading(false));
@@ -48,7 +51,7 @@ export default function PrinterDetailPage() {
       const r: any = await api.get(`/moonraker/status/${id}`);
       setLiveStatus(r.snapshot);
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setControlling(false);
     }
@@ -87,8 +90,8 @@ export default function PrinterDetailPage() {
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Last Seen</p><p className="text-sm">{printer.lastSeen ? formatDate(printer.lastSeen) : 'Never'}</p></CardContent></Card>
       </div>
 
-      {/* Printer Details — Edit */}
-      <Card>
+      {/* Printer Details — Edit (key forces re-render with fresh defaultValues) */}
+      <Card key={`details-${formKey}`}>
         <CardHeader><CardTitle className="flex items-center gap-2"><Settings className="h-5 w-5" /> Printer Details</CardTitle></CardHeader>
         <CardContent>
           <form onSubmit={async (e) => {
@@ -103,9 +106,10 @@ export default function PrinterDetailPage() {
                 moonrakerUrl: form.get('moonrakerUrl') || undefined,
               });
               load();
-              alert('Printer details saved');
+              setFormKey(k => k + 1);
+              toast('success', 'Printer details saved');
             } catch (err: any) {
-              alert(err.message);
+              toast('error', err.message);
             } finally {
               setSavingDetails(false);
             }
@@ -131,7 +135,7 @@ export default function PrinterDetailPage() {
                   await api.delete(`/printers/${id}`);
                   router.push('/printers');
                 } catch (err: any) {
-                  alert(err.message);
+                  toast('error', err.message);
                   setDeleting(false);
                 }
               }}>
@@ -206,7 +210,7 @@ export default function PrinterDetailPage() {
       )}
 
       {/* Costing & Pricing */}
-      <Card>
+      <Card key={`costing-${formKey}`}>
         <CardHeader><CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5" /> Costing & Pricing</CardTitle></CardHeader>
         <CardContent>
           <form onSubmit={async (e) => {
@@ -220,9 +224,10 @@ export default function PrinterDetailPage() {
                 markupMultiplier: parseFloat(form.get('markupMultiplier') as string) || 2.5,
               });
               load();
-              alert('Costing settings saved');
+              setFormKey(k => k + 1);
+              toast('success', 'Costing settings saved');
             } catch (err: any) {
-              alert(err.message);
+              toast('error', err.message);
             } finally {
               setSavingCosting(false);
             }

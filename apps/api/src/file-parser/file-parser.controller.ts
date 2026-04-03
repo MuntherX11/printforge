@@ -19,7 +19,7 @@ export class FileParserController {
    * Query params: ?materialId=xxx&printerId=xxx&colorChanges=1&infill=20
    */
   @Post('analyze')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
   async analyzeFile(
     @UploadedFile() file: any,
     @Query('materialId') materialId?: string,
@@ -79,14 +79,14 @@ export class FileParserController {
   }
 
   @Post('parse-gcode')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
   async parseGcode(@UploadedFile() file: any) {
     if (!file) throw new BadRequestException('No file uploaded');
     return this.gcodeParser.parseHeader(file.buffer);
   }
 
   @Post('analyze-stl')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
   async analyzeStl(
     @UploadedFile() file: any,
     @Query('density') density?: string,

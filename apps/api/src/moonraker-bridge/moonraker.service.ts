@@ -39,9 +39,39 @@ export class MoonrakerService {
   ) {}
 
   /**
+   * Validate that a Moonraker URL points to a local/private network address.
+   * Prevents SSRF attacks via user-controlled URLs.
+   */
+  private validateMoonrakerUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const hostname = parsed.hostname;
+      // Only allow private/local IPs and hostnames
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+      // 192.168.x.x
+      if (hostname.startsWith('192.168.')) return true;
+      // 10.x.x.x
+      if (hostname.startsWith('10.')) return true;
+      // 172.16-31.x.x
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
+      // .local mDNS hostnames
+      if (hostname.endsWith('.local')) return true;
+      // Only allow http (not https to external services)
+      if (parsed.protocol !== 'http:') return false;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Fetch printer status from a Moonraker instance.
    */
   async fetchStatus(moonrakerUrl: string): Promise<MoonrakerSnapshot | null> {
+    if (!this.validateMoonrakerUrl(moonrakerUrl)) {
+      this.logger.warn(`Blocked SSRF attempt to non-local URL: ${moonrakerUrl}`);
+      return null;
+    }
     const base = moonrakerUrl.replace(/\/+$/, '');
     const query = 'printer.info&print_stats&display_status&heater_bed&extruder';
     const url = `${base}/printer/objects/query?${query}`;
@@ -220,6 +250,7 @@ export class MoonrakerService {
    * Send a G-code command to a Moonraker instance.
    */
   async sendGcode(moonrakerUrl: string, gcode: string): Promise<boolean> {
+    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/gcode/script?script=${encodeURIComponent(gcode)}`, {
@@ -236,6 +267,7 @@ export class MoonrakerService {
    * Start a print job on a Moonraker printer.
    */
   async startPrint(moonrakerUrl: string, filename: string): Promise<boolean> {
+    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/print/start?filename=${encodeURIComponent(filename)}`, {
@@ -252,6 +284,7 @@ export class MoonrakerService {
    * Pause/resume/cancel current print.
    */
   async controlPrint(moonrakerUrl: string, action: 'pause' | 'resume' | 'cancel'): Promise<boolean> {
+    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/print/${action}`, {
