@@ -108,8 +108,17 @@ export class ProductsService {
   }
 
   async updateComponent(componentId: string, dto: UpdateProductComponentDto) {
-    const component = await this.prisma.productComponent.findUnique({ where: { id: componentId } });
+    const component = await this.prisma.productComponent.findUnique({
+      where: { id: componentId },
+      include: { material: true },
+    });
     if (!component) throw new NotFoundException('Component not found');
+
+    // If materialId is changing, validate the new material
+    if (dto.materialId && dto.materialId !== component.materialId) {
+      const newMaterial = await this.prisma.material.findUnique({ where: { id: dto.materialId } });
+      if (!newMaterial) throw new NotFoundException('Material not found');
+    }
 
     const updated = await this.prisma.productComponent.update({
       where: { id: componentId },
@@ -209,19 +218,36 @@ export class ProductsService {
       // If multi-tool, create one component per tool
       if (analysis.tools && analysis.tools.length > 1) {
         let created = 0;
+
+        // Split print time proportionally across tools by grams
+        const totalGrams = analysis.tools.reduce((sum, t) => sum + (t.filamentGrams || 0), 0);
+        const totalTimeMinutes = analysis.estimatedTimeSeconds
+          ? Math.round(analysis.estimatedTimeSeconds / 60)
+          : 0;
+
         for (const tool of analysis.tools) {
+          const toolGrams = tool.filamentGrams || 0;
+
+          // Skip tools with 0 grams used
+          if (toolGrams === 0) continue;
+
           const materialType = tool.materialType || analysis.filamentType || 'PLA';
           const matchedMaterial = allMaterials.find(m =>
             m.type.toUpperCase() === materialType.toUpperCase()
           );
+
+          // Proportional time split based on grams
+          const toolMinutes = totalGrams > 0
+            ? Math.round(totalTimeMinutes * (toolGrams / totalGrams))
+            : 0;
 
           await this.prisma.productComponent.create({
             data: {
               productId,
               materialId: matchedMaterial?.id || allMaterials[0]?.id,
               description: `${fileName} - Tool ${tool.index}`,
-              gramsUsed: tool.filamentGrams || 0,
-              printMinutes: 0, // can't split per-tool
+              gramsUsed: toolGrams,
+              printMinutes: toolMinutes,
               quantity: 1,
               sortOrder: created,
             },
@@ -230,7 +256,13 @@ export class ProductsService {
         }
         results.push({ fileName, componentsCreated: created });
       } else {
-        // Single tool — one component
+        // Single tool — one component (skip if 0 grams)
+        const gramsUsed = analysis.filamentUsedGrams || 0;
+        if (gramsUsed === 0) {
+          results.push({ fileName, componentsCreated: 0 });
+          continue;
+        }
+
         const materialType = analysis.filamentType || 'PLA';
         const matchedMaterial = allMaterials.find(m =>
           m.type.toUpperCase() === materialType.toUpperCase()
@@ -241,7 +273,7 @@ export class ProductsService {
             productId,
             materialId: matchedMaterial?.id || allMaterials[0]?.id,
             description: fileName.replace(/\.gcode$/i, ''),
-            gramsUsed: analysis.filamentUsedGrams || 0,
+            gramsUsed,
             printMinutes: analysis.estimatedTimeSeconds ? Math.round(analysis.estimatedTimeSeconds / 60) : 0,
             quantity: 1,
             sortOrder: 0,

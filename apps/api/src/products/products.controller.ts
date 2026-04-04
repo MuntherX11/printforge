@@ -62,6 +62,17 @@ export class ProductsController {
     return this.productsService.updateComponent(componentId, dto);
   }
 
+  @Patch(':id/components/:componentId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  updateComponentNested(
+    @Param('id') _id: string,
+    @Param('componentId') componentId: string,
+    @Body() dto: UpdateProductComponentDto,
+  ) {
+    return this.productsService.updateComponent(componentId, dto);
+  }
+
   @Delete('components/:componentId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')

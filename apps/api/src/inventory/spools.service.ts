@@ -149,7 +149,7 @@ export class SpoolsService {
         const y = row * cellH;
 
         // Generate QR code as PNG buffer
-        const qrUrl = `/inventory/spool/${spool.printforgeId}`;
+        const qrUrl = `https://printforge.mctx.tech/inventory/spool/${spool.printforgeId}`;
         const qrBuffer = await QRCode.toBuffer(qrUrl, {
           type: 'png',
           width: qrSize * 2,
@@ -158,21 +158,29 @@ export class SpoolsService {
 
         // Draw QR centered horizontally in cell
         const qrX = x + (cellW - qrSize) / 2;
-        const qrY = y + 10;
+        const qrY = y + 8;
         doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
 
-        // PF-ID text bold, centered below QR
+        // Line 1: Spool ID (bold, centered below QR)
         const pfidText = spool.printforgeId || 'N/A';
         doc.font('Helvetica-Bold').fontSize(10);
         const pfidWidth = doc.widthOfString(pfidText);
-        doc.text(pfidText, x + (cellW - pfidWidth) / 2, qrY + qrSize + 6);
+        doc.text(pfidText, x + (cellW - pfidWidth) / 2, qrY + qrSize + 4);
 
-        // Material name + color in small text
-        const materialColor = spool.material.color ? ` ${spool.material.color}` : '';
-        const detailText = `${spool.material.name}${materialColor}`;
-        doc.font('Helvetica').fontSize(7);
-        const detailWidth = doc.widthOfString(detailText);
-        doc.text(detailText, x + (cellW - detailWidth) / 2, qrY + qrSize + 20);
+        // Line 2: Material type + color
+        const colorPart = spool.material.color ? ` - ${spool.material.color}` : '';
+        const typeColorText = `${spool.material.type}${colorPart}`;
+        doc.font('Helvetica').fontSize(8);
+        const typeColorWidth = doc.widthOfString(typeColorText);
+        doc.text(typeColorText, x + (cellW - typeColorWidth) / 2, qrY + qrSize + 17);
+
+        // Line 3: Vendor / brand
+        const brandText = spool.material.brand || '';
+        if (brandText) {
+          doc.font('Helvetica').fontSize(7);
+          const brandWidth = doc.widthOfString(brandText);
+          doc.text(brandText, x + (cellW - brandWidth) / 2, qrY + qrSize + 28);
+        }
       }
 
       doc.end();

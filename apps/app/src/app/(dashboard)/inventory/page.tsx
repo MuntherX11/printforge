@@ -7,15 +7,20 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
+import { Dialog } from '@/components/ui/dialog';
+import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Package, AlertTriangle, Upload, MapPin, Download } from 'lucide-react';
+import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
 
 export default function InventoryPage() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannedFields, setScannedFields] = useState<any>(null);
+  const [creating, setCreating] = useState(false);
 
   const loadMaterials = () => api.get<any[]>('/materials').then(setMaterials).catch(console.error).finally(() => setLoading(false));
 
@@ -35,6 +40,56 @@ export default function InventoryPage() {
     } finally {
       setUploading(false);
       e.target.value = '';
+    }
+  }
+
+  function handleScanResult(fields: any) {
+    setScannedFields(fields);
+  }
+
+  async function handleConfirmCreate() {
+    if (!scannedFields) return;
+    setCreating(true);
+    try {
+      const matName = scannedFields.brand
+        ? `${scannedFields.brand} ${scannedFields.materialType || 'PLA'}`
+        : scannedFields.materialType || 'PLA';
+      const matType = scannedFields.materialType || 'PLA';
+      const matColor = scannedFields.color || '';
+
+      // Check if a matching material already exists
+      let material = materials.find(
+        (m) =>
+          m.type?.toUpperCase() === matType.toUpperCase() &&
+          m.color?.toLowerCase() === matColor.toLowerCase() &&
+          (!scannedFields.brand || m.brand?.toLowerCase() === scannedFields.brand.toLowerCase()),
+      );
+
+      if (!material) {
+        material = await api.post('/materials', {
+          name: matName,
+          type: matType,
+          color: matColor,
+          brand: scannedFields.brand || '',
+          costPerGram: 0,
+          density: 1.24,
+        });
+      }
+
+      const initialWeight = scannedFields.weight ? parseFloat(scannedFields.weight) : 1000;
+
+      await api.post('/spools', {
+        materialId: material.id,
+        initialWeight,
+        currentWeight: initialWeight,
+      });
+
+      setScannedFields(null);
+      loadMaterials();
+    } catch (err: any) {
+      alert('Failed to create spool: ' + (err.message || 'Unknown error'));
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -62,6 +117,9 @@ export default function InventoryPage() {
               <Upload className="h-4 w-4" /> {uploading ? 'Uploading...' : 'Excel Import'}
             </span>
           </label>
+          <Button variant="outline" onClick={() => setShowScanner(true)}>
+            <ScanLine className="h-4 w-4 mr-2" /> Scan Label
+          </Button>
           <Link href="/inventory/new">
             <Button><Plus className="h-4 w-4 mr-2" /> Add Material</Button>
           </Link>
@@ -135,6 +193,63 @@ export default function InventoryPage() {
           )}
         </CardContent>
       </Card>
+
+      <SpoolLabelScanner
+        open={showScanner}
+        onClose={() => setShowScanner(false)}
+        onResult={handleScanResult}
+      />
+
+      <Dialog open={!!scannedFields} onClose={() => setScannedFields(null)} title="Confirm Scanned Label">
+        {scannedFields && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {scannedFields.brand && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Brand</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.brand}</span>
+                </>
+              )}
+              {scannedFields.materialType && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Type</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.materialType}</span>
+                </>
+              )}
+              {scannedFields.color && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Color</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.color}</span>
+                </>
+              )}
+              {scannedFields.diameter && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Diameter</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.diameter}mm</span>
+                </>
+              )}
+              {scannedFields.weight && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Weight</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.weight}g</span>
+                </>
+              )}
+              {scannedFields.printTemp && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Print Temp</span>
+                  <span className="font-medium dark:text-gray-200">{scannedFields.printTemp}°C</span>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setScannedFields(null)}>Cancel</Button>
+              <Button onClick={handleConfirmCreate} disabled={creating}>
+                {creating ? 'Creating...' : 'Confirm & Create'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

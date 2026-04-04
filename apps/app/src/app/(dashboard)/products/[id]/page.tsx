@@ -28,6 +28,10 @@ export default function ProductDetailPage() {
   const [calculating, setCalculating] = useState(false);
   const [uploadingGcode, setUploadingGcode] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [editingComponentId, setEditingComponentId] = useState<string | null>(null);
+  const [editComponentName, setEditComponentName] = useState('');
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+  const [savingComponent, setSavingComponent] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -153,6 +157,33 @@ export default function ProductDetailPage() {
     }
   }
 
+  async function handleUpdateComponentName(componentId: string) {
+    if (!editComponentName.trim()) return;
+    setSavingComponent(true);
+    try {
+      await api.patch(`/products/${id}/components/${componentId}`, { description: editComponentName.trim() });
+      setEditingComponentId(null);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingComponent(false);
+    }
+  }
+
+  async function handleUpdateComponentMaterial(componentId: string, materialId: string) {
+    setSavingComponent(true);
+    try {
+      await api.patch(`/products/${id}/components/${componentId}`, { materialId });
+      setEditingMaterialId(null);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingComponent(false);
+    }
+  }
+
   async function handleDeleteImage(attachmentId: string) {
     if (!confirm('Remove this image?')) return;
     try {
@@ -254,11 +285,65 @@ export default function ProductDetailPage() {
                   .map((c: any, i: number) => (
                   <TableRow key={c.id}>
                     <TableCell>{i + 1}</TableCell>
-                    <TableCell className="font-medium">{c.description}</TableCell>
+                    <TableCell className="font-medium">
+                      {editingComponentId === c.id ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editComponentName}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditComponentName(e.target.value)}
+                            className="h-7 text-sm"
+                            onKeyDown={(e: React.KeyboardEvent) => {
+                              if (e.key === 'Enter') handleUpdateComponentName(c.id);
+                              if (e.key === 'Escape') setEditingComponentId(null);
+                            }}
+                            autoFocus
+                          />
+                          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => handleUpdateComponentName(c.id)} disabled={savingComponent}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditingComponentId(null)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span>{c.description}</span>
+                          <button
+                            onClick={() => { setEditingComponentId(c.id); setEditComponentName(c.description); }}
+                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-1"
+                            title="Rename component"
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>
-                      <Badge className="bg-gray-100 text-gray-700">
-                        {c.material?.name || 'Unknown'}
-                      </Badge>
+                      {editingMaterialId === c.id ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            className="h-7 text-sm border rounded px-1 bg-white dark:bg-gray-800 dark:border-gray-600"
+                            defaultValue={c.materialId}
+                            onChange={(e) => handleUpdateComponentMaterial(c.id, e.target.value)}
+                            autoFocus
+                            onBlur={() => setEditingMaterialId(null)}
+                          >
+                            {materials.map((m: any) => (
+                              <option key={m.id} value={m.id}>{m.name} ({m.type}{m.color ? ' - ' + m.color : ''})</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <span
+                          onClick={() => setEditingMaterialId(c.id)}
+                          title="Click to change material"
+                          className="cursor-pointer"
+                        >
+                          <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">
+                            {c.material?.name || 'Unknown'}
+                          </Badge>
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="font-mono">{c.gramsUsed}g</TableCell>
                     <TableCell className="font-mono">{c.printMinutes}min</TableCell>

@@ -17,7 +17,6 @@ import {
   DollarSign,
   Hammer,
   Zap,
-  FolderOpen,
   Palette,
 } from 'lucide-react';
 
@@ -31,7 +30,6 @@ interface NavItem {
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Quick Quote', href: '/quick-quote', icon: Zap, roles: ['ADMIN', 'OPERATOR'] },
-  { name: 'Watch Folder', href: '/watch-folder', icon: FolderOpen, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Orders', href: '/orders', icon: ShoppingCart },
   { name: 'Quotes', href: '/quotes', icon: FileText, roles: ['ADMIN', 'VIEWER'] },
   { name: 'Production', href: '/production', icon: Hammer, roles: ['ADMIN', 'OPERATOR'] },
