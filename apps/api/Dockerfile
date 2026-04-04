@@ -36,6 +36,9 @@ RUN cd apps/api && npx prisma generate
 # Build API
 RUN cd apps/api && npx nest build
 
+# Remove devDependencies to slim down the runner image
+RUN npm prune --omit=dev --workspaces
+
 # ---------- runner ----------
 FROM node:20-slim AS runner
 
