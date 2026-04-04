@@ -1,12 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-
-export interface ScrapedModelData {
-  url: string;
-  title: string | null;
-  description: string | null;
-  thumbnailUrl: string | null;
-  siteName: string | null;
-}
+import { ScrapedModelData } from '@printforge/types';
 
 const ALLOWED_HOSTS = [
   'makerworld.com', 'www.makerworld.com',
@@ -44,8 +37,9 @@ export class UrlScraperService {
     try {
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; PrintForge/1.0)',
-          'Accept': 'text/html',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
         },
         signal: AbortSignal.timeout(10000),
       });
@@ -86,18 +80,34 @@ export class UrlScraperService {
       return null;
     };
 
-    // Get title from og:title, then <title> tag as fallback
+    const hostname = new URL(url).hostname;
+
+    // Get title from og:title, then <title> tag, then <h1> as fallback
     let title = getMeta('og:title');
     if (!title) {
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleMatch) title = this.decodeHtmlEntities(titleMatch[1].trim());
+      if (titleMatch) {
+        const raw = this.decodeHtmlEntities(titleMatch[1].trim());
+        // Skip generic site-only titles (e.g. just "Printables" or "Thangs")
+        const generic = ['printables', 'thangs', 'thingiverse', 'makerworld', 'cults3d', 'myminifactory'];
+        if (!generic.includes(raw.toLowerCase())) {
+          title = raw;
+        }
+      }
+    }
+    if (!title) {
+      const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match) title = this.decodeHtmlEntities(h1Match[1].trim());
     }
 
     const description = getMeta('og:description') || getMeta('description');
     const thumbnailUrl = getMeta('og:image') || getMeta('twitter:image');
-    const siteName = getMeta('og:site_name') || this.detectSiteName(new URL(url).hostname);
+    const siteName = getMeta('og:site_name') || this.detectSiteName(hostname);
 
-    return { url, title, description, thumbnailUrl, siteName };
+    // Paywall / paid model detection
+    const isPaid = this.detectPaywall(html, hostname);
+
+    return { url, title, description, thumbnailUrl, siteName, isPaid: isPaid || undefined };
   }
 
   private detectSiteName(hostname: string): string | null {
@@ -117,6 +127,42 @@ export class UrlScraperService {
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
-      .replace(/&#x27;/g, "'");
+      .replace(/&#x27;/g, "'")
+      // Numeric decimal entities: &#NNN;
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+      // Hex entities: &#xHHHH;
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)));
+  }
+
+  private detectPaywall(html: string, hostname: string): boolean {
+    // Cults3D: JSON-LD price or class="price" patterns
+    if (hostname.includes('cults3d')) {
+      if (/"price"\s*:\s*"?[1-9]/.test(html)) return true;
+      if (/class=["'][^"']*price[^"']*["'][^>]*>[^<]*[1-9]/.test(html)) return true;
+    }
+
+    // MyMiniFactory: purchase / premium markers
+    if (hostname.includes('myminifactory')) {
+      if (/class=["'][^"']*premium[^"']*["']/i.test(html)) return true;
+      if (/"purchase"|"buy\s+now"|"add\s+to\s+cart"/i.test(html)) return true;
+    }
+
+    // Generic: JSON-LD with non-zero price
+    const jsonLdPriceMatch = html.match(/"price"\s*:\s*"?(\d+\.?\d*)"/);
+    if (jsonLdPriceMatch && parseFloat(jsonLdPriceMatch[1]) > 0) return true;
+
+    // Generic: currency patterns near download areas ($/EUR/GBP amounts > 0)
+    const currencyPattern = /(?:\$|€|£|USD|EUR|GBP)\s*(\d+(?:\.\d{1,2})?)/g;
+    let match: RegExpExecArray | null;
+    while ((match = currencyPattern.exec(html)) !== null) {
+      if (parseFloat(match[1]) > 0) {
+        // Check if it's near download-related content (within 500 chars)
+        const start = Math.max(0, match.index - 500);
+        const context = html.substring(start, match.index + 500).toLowerCase();
+        if (/download|buy|purchase|cart|checkout/i.test(context)) return true;
+      }
+    }
+
+    return false;
   }
 }

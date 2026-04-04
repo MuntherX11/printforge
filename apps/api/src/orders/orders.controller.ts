@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateOrderDto, UpdateOrderDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
@@ -21,6 +22,12 @@ export class OrdersController {
   @Get()
   findAll(@Query() query: PaginationDto, @Query('status') status?: string) {
     return this.ordersService.findAll(query, status);
+  }
+
+  @Get('customer/my-orders')
+  @UseGuards(CustomerGuard)
+  findForCustomer(@Req() req: any) {
+    return this.ordersService.findForCustomer(req.user.id);
   }
 
   @Get(':id')

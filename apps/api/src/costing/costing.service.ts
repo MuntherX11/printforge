@@ -57,6 +57,7 @@ export class CostingService {
     printDuration?: number | null;
     colorChanges: number;
     purgeWasteGrams: number;
+    purgeVolumeGrams?: number;
     printer?: { hourlyRate: number; wattage?: number } | null;
     materials: Array<{ gramsUsed: number; costPerGram: number }>;
   }): Promise<CostBreakdown> {
@@ -83,7 +84,10 @@ export class CostingService {
     const electricityCost = (wattage / 1000) * hours * electricityRate;
 
     // Waste cost (multi-color purge)
-    const purgeGrams = job.colorChanges * purgeWastePerChange;
+    // Use actual purge volume from gcode if provided, otherwise fall back to settings-based estimate
+    const purgeGrams = (job.purgeVolumeGrams != null && job.purgeVolumeGrams > 0)
+      ? job.purgeVolumeGrams
+      : job.colorChanges * purgeWastePerChange;
     const avgCostPerGram = job.materials.length > 0
       ? job.materials.reduce((sum, m) => sum + m.costPerGram, 0) / job.materials.length
       : 0;
@@ -111,6 +115,7 @@ export class CostingService {
     materialId: string;
     printerId?: string;
     colorChanges?: number;
+    purgeVolumeGrams?: number;
   }): Promise<CostBreakdown & { suggestedPrice: number; markupMultiplier: number }> {
     const material = await this.prisma.material.findUnique({ where: { id: params.materialId } });
     const printer = params.printerId
@@ -128,6 +133,7 @@ export class CostingService {
       printDuration: params.printMinutes * 60,
       colorChanges: params.colorChanges || 0,
       purgeWasteGrams: 0,
+      purgeVolumeGrams: params.purgeVolumeGrams,
       printer: printer ? { hourlyRate: printer.hourlyRate, wattage: printer.wattage } : null,
       materials: material
         ? [{ gramsUsed: params.gramsUsed, costPerGram: material.costPerGram }]

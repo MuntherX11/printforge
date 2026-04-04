@@ -66,6 +66,8 @@ export class FileParserController {
           materialId,
           printerId,
           colorChanges: colorChanges ? parseInt(colorChanges) : 0,
+          // Pass actual purge volume from gcode parser if available
+          purgeVolumeGrams: fileAnalysis?.purgeVolumeGrams ?? undefined,
         });
       } catch {
         // Material not found or other error — return analysis without cost

@@ -12,27 +12,32 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Calculator, Trash2, Edit2 } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X } from 'lucide-react';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
   const [materials, setMaterials] = useState<any[]>([]);
+  const [images, setImages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddComponent, setShowAddComponent] = useState(false);
   const [showEditProduct, setShowEditProduct] = useState(false);
   const [adding, setAdding] = useState(false);
   const [costResult, setCostResult] = useState<any>(null);
   const [calculating, setCalculating] = useState(false);
+  const [uploadingGcode, setUploadingGcode] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const load = () => {
     Promise.all([
       api.get(`/products/${id}`),
       api.get<any[]>('/materials'),
-    ]).then(([p, m]) => {
+      api.get<any[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => []),
+    ]).then(([p, m, imgs]) => {
       setProduct(p);
       setMaterials(m);
+      setImages(imgs);
     }).catch(console.error).finally(() => setLoading(false));
   };
 
@@ -100,8 +105,66 @@ export default function ProductDetailPage() {
     }
   }
 
+  async function handleGcodeUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files?.length) return;
+    setUploadingGcode(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+      const res = await fetch(`/api/products/${id}/onboard-gcode`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setUploadingGcode(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files?.length) return;
+    setUploadingImages(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+      const res = await fetch(`/api/products/${id}/images`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setUploadingImages(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleDeleteImage(attachmentId: string) {
+    if (!confirm('Remove this image?')) return;
+    try {
+      await api.delete(`/products/${id}/images/${attachmentId}`);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
   if (loading) return <Loading />;
-  if (!product) return <div className="text-center py-12 text-gray-500">Product not found</div>;
+  if (!product) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Product not found</div>;
 
   const materialOptions = materials.map(m => ({ value: m.id, label: `${m.name} (${m.type}${m.color ? ' - ' + m.color : ''})` }));
 
@@ -109,8 +172,8 @@ export default function ProductDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{product.name}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             {product.sku && <span className="font-mono">{product.sku} | </span>}
             {product.description || 'No description'}
           </p>
@@ -209,6 +272,61 @@ export default function ProductDetailPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Gcode Onboarding */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Quick Onboard from Gcode</CardTitle>
+          <label className="cursor-pointer">
+            <input type="file" accept=".gcode,.gco,.g" multiple className="hidden" onChange={handleGcodeUpload} disabled={uploadingGcode} />
+            <span className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 cursor-pointer">
+              <Upload className="h-4 w-4" /> {uploadingGcode ? 'Processing...' : 'Upload Gcode Files'}
+            </span>
+          </label>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Upload one or more .gcode files to auto-create components with material, weight, and print time.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Product Images */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Product Images</CardTitle>
+          <label className="cursor-pointer">
+            <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={uploadingImages} />
+            <span className="inline-flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <ImageIcon className="h-4 w-4" /> {uploadingImages ? 'Uploading...' : 'Add Images'}
+            </span>
+          </label>
+        </CardHeader>
+        <CardContent>
+          {images.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No images yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {images.map((img: any) => (
+                <div key={img.id} className="relative group">
+                  <img
+                    src={`/api/attachments/${img.id}/file`}
+                    alt={img.fileName}
+                    className="w-full h-32 object-cover rounded-md border dark:border-gray-700"
+                  />
+                  <button
+                    onClick={() => handleDeleteImage(img.id)}
+                    className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">{img.fileName}</p>
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>

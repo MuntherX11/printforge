@@ -24,7 +24,7 @@ export default function ProductsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Products</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Products</h1>
         <Link href="/products/new">
           <Button><Plus className="h-4 w-4 mr-2" /> Add Product</Button>
         </Link>
@@ -41,6 +41,7 @@ export default function ProductsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-16"></TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Components</TableHead>
@@ -53,6 +54,15 @@ export default function ProductsPage() {
               <TableBody>
                 {products.map((p) => (
                   <TableRow key={p.id}>
+                    <TableCell className="w-16">
+                      {p.imageUrl ? (
+                        <img src={`/api/uploads/${p.imageUrl}`} alt={p.name} className="h-10 w-10 rounded object-cover" />
+                      ) : (
+                        <div className="h-10 w-10 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                          <Box className="h-5 w-5 text-gray-400" />
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Link href={`/products/${p.id}`} className="font-medium text-brand-600 hover:underline">
                         {p.name}

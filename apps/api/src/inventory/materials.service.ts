@@ -76,6 +76,19 @@ export class MaterialsService {
     return results;
   }
 
+  async remove(id: string) {
+    const material = await this.prisma.material.findUnique({
+      where: { id },
+      include: { _count: { select: { spools: true } } },
+    });
+    if (!material) throw new NotFoundException('Material not found');
+    if (material._count.spools > 0) {
+      throw new BadRequestException('Cannot delete material with existing spools. Remove all spools first.');
+    }
+    await this.prisma.material.delete({ where: { id } });
+    return { deleted: true };
+  }
+
   async getLowStock() {
     const materials = await this.prisma.material.findMany({
       include: { spools: { where: { isActive: true } } },

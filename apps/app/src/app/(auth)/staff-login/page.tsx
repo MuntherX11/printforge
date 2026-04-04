@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { api } from '@/lib/api';
 
-export default function CustomerLoginPage() {
+export default function StaffLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,8 +21,8 @@ export default function CustomerLoginPage() {
     setLoading(true);
 
     try {
-      await api.post('/auth/customer/login', { email, password });
-      router.push('/dashboard');
+      await api.post('/auth/login', { email, password });
+      router.push('/');
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
@@ -34,7 +34,7 @@ export default function CustomerLoginPage() {
     <Card className="w-full max-w-md">
       <CardHeader className="text-center">
         <div className="mx-auto mb-4 text-3xl font-bold text-brand-600 dark:text-brand-400">PrintForge</div>
-        <CardTitle>Customer Portal</CardTitle>
+        <CardTitle>Staff Login</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -46,7 +46,7 @@ export default function CustomerLoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="john@example.com"
+            placeholder="admin@printforge.local"
             required
           />
           <Input
@@ -59,15 +59,9 @@ export default function CustomerLoginPage() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign in'}
           </Button>
-          <p className="text-center text-sm text-gray-500 dark:text-gray-400">
-            Don&apos;t have an account?{' '}
-            <Link href="/signup" className="text-brand-600 dark:text-brand-400 hover:underline">
-              Sign up
-            </Link>
-          </p>
           <p className="text-center text-sm text-gray-400 dark:text-gray-500">
-            <Link href="/staff-login" className="hover:underline">
-              Staff login
+            <Link href="/login" className="hover:underline">
+              Customer portal
             </Link>
           </p>
         </form>

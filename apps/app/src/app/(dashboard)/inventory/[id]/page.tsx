@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,15 +11,22 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Plus } from 'lucide-react';
+import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
+import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 
 export default function MaterialDetailPage() {
   const { id } = useParams();
+  const router = useRouter();
   const [material, setMaterial] = useState<any>(null);
   const [locations, setLocations] = useState<any[]>([]);
+  const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAddSpool, setShowAddSpool] = useState(false);
-  const [addingDpool, setAddingSpool] = useState(false);
+  const [showEditMaterial, setShowEditMaterial] = useState(false);
+  const [editingSpool, setEditingSpool] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [selectedSpoolIds, setSelectedSpoolIds] = useState<Set<string>>(new Set());
+  const [printingLabels, setPrintingLabels] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -34,12 +41,13 @@ export default function MaterialDetailPage() {
 
   async function handleAddSpool(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setAddingSpool(true);
+    setSaving(true);
     const form = new FormData(e.currentTarget);
     try {
       await api.post('/spools', {
         materialId: id,
         initialWeight: parseFloat(form.get('initialWeight') as string),
+        currentWeight: form.get('currentWeight') ? parseFloat(form.get('currentWeight') as string) : undefined,
         spoolWeight: parseFloat(form.get('spoolWeight') as string) || 200,
         purchasePrice: parseFloat(form.get('purchasePrice') as string) || undefined,
         lotNumber: form.get('lotNumber') as string || undefined,
@@ -50,12 +58,113 @@ export default function MaterialDetailPage() {
     } catch (err: any) {
       alert(err.message);
     } finally {
-      setAddingSpool(false);
+      setSaving(false);
+    }
+  }
+
+  async function handleEditMaterial(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.patch(`/materials/${id}`, {
+        name: form.get('name') as string,
+        type: form.get('type') as string,
+        color: form.get('color') as string || null,
+        brand: form.get('brand') as string || null,
+        costPerGram: parseFloat(form.get('costPerGram') as string),
+        density: parseFloat(form.get('density') as string) || 1.24,
+        reorderPoint: parseFloat(form.get('reorderPoint') as string) || 500,
+      });
+      setShowEditMaterial(false);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleEditSpool(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.patch(`/spools/${editingSpool.id}`, {
+        currentWeight: parseFloat(form.get('currentWeight') as string),
+        locationId: form.get('locationId') as string || null,
+        isActive: form.get('isActive') === 'true',
+      });
+      setEditingSpool(null);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeactivateSpool(spoolId: string) {
+    if (!confirm('Deactivate this spool?')) return;
+    try {
+      await api.patch(`/spools/${spoolId}`, { isActive: false });
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
+  async function handleDeleteMaterial() {
+    if (!confirm('Delete this material? This cannot be undone. All spools must be removed first.')) return;
+    try {
+      await api.delete(`/materials/${id}`);
+      router.push('/inventory');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
+  function toggleSpoolSelection(spoolId: string) {
+    setSelectedSpoolIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(spoolId)) next.delete(spoolId);
+      else next.add(spoolId);
+      return next;
+    });
+  }
+
+  function toggleAllSpools() {
+    const allIds = (material?.spools || []).map((s: any) => s.id);
+    if (selectedSpoolIds.size === allIds.length) {
+      setSelectedSpoolIds(new Set());
+    } else {
+      setSelectedSpoolIds(new Set(allIds));
+    }
+  }
+
+  async function handlePrintQrLabels() {
+    if (selectedSpoolIds.size === 0) return;
+    setPrintingLabels(true);
+    try {
+      const res = await fetch('/api/spools/qr-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ spoolIds: Array.from(selectedSpoolIds) }),
+      });
+      if (!res.ok) throw new Error('Failed to generate QR labels');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setPrintingLabels(false);
     }
   }
 
   if (loading) return <Loading />;
-  if (!material) return <div className="text-center py-12 text-gray-500">Material not found</div>;
+  if (!material) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Material not found</div>;
 
   const totalStock = (material.spools || []).reduce((sum: number, s: any) => sum + s.currentWeight, 0);
 
@@ -63,19 +172,38 @@ export default function MaterialDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{material.name}</h1>
-          <p className="text-sm text-gray-500">{material.brand} | {material.type} | {material.color}</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{material.name}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{material.brand} | {material.type} | {material.color}</p>
         </div>
-        <Button onClick={() => setShowAddSpool(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Add Spool
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowEditMaterial(true)}>
+            <Pencil className="h-4 w-4 mr-2" /> Edit
+          </Button>
+          <Button variant="destructive" onClick={handleDeleteMaterial}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete
+          </Button>
+          <Button variant="outline" onClick={() => setShowScanner(true)}>
+            <ScanLine className="h-4 w-4 mr-2" /> Scan Label
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handlePrintQrLabels}
+            disabled={selectedSpoolIds.size === 0 || printingLabels}
+          >
+            <QrCode className="h-4 w-4 mr-2" />
+            {printingLabels ? 'Generating...' : `Print QR Labels (${selectedSpoolIds.size})`}
+          </Button>
+          <Button onClick={() => setShowAddSpool(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Add Spool
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Cost/gram</p><p className="text-lg font-bold">{formatCurrency(material.costPerGram)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Stock</p><p className="text-lg font-bold">{Math.round(totalStock)}g</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Active Spools</p><p className="text-lg font-bold">{material._count?.spools || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Reorder Point</p><p className="text-lg font-bold">{material.reorderPoint}g</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Cost/gram</p><p className="text-lg font-bold dark:text-gray-100">{formatCurrency(material.costPerGram)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Total Stock</p><p className="text-lg font-bold dark:text-gray-100">{Math.round(totalStock)}g</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Active Spools</p><p className="text-lg font-bold dark:text-gray-100">{material._count?.spools || 0}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Reorder Point</p><p className="text-lg font-bold dark:text-gray-100">{material.reorderPoint}g</p></CardContent></Card>
       </div>
 
       <Card>
@@ -84,6 +212,15 @@ export default function MaterialDetailPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={(material.spools || []).length > 0 && selectedSpoolIds.size === (material.spools || []).length}
+                    onChange={toggleAllSpools}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                </TableHead>
+                <TableHead>PF-ID</TableHead>
                 <TableHead>Lot #</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Initial</TableHead>
@@ -92,11 +229,27 @@ export default function MaterialDetailPage() {
                 <TableHead>Purchase Price</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Added</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(material.spools || []).map((s: any) => (
                 <TableRow key={s.id}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selectedSpoolIds.has(s.id)}
+                      onChange={() => toggleSpoolSelection(s.id)}
+                      className="rounded border-gray-300 dark:border-gray-600"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {s.printforgeId ? (
+                      <span className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-800 dark:text-gray-200">
+                        {s.printforgeId}
+                      </span>
+                    ) : '-'}
+                  </TableCell>
                   <TableCell>{s.lotNumber || '-'}</TableCell>
                   <TableCell>{s.location?.name || '-'}</TableCell>
                   <TableCell>{s.initialWeight}g</TableCell>
@@ -104,11 +257,31 @@ export default function MaterialDetailPage() {
                   <TableCell>{Math.round(s.initialWeight - s.currentWeight)}g</TableCell>
                   <TableCell>{s.purchasePrice ? formatCurrency(s.purchasePrice) : '-'}</TableCell>
                   <TableCell>
-                    <Badge className={s.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}>
+                    <Badge variant={s.isActive ? 'success' : 'default'}>
                       {s.isActive ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>{formatDate(s.createdAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setEditingSpool(s)}
+                        className="p-1 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
+                        title="Edit spool"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      {s.isActive && (
+                        <button
+                          onClick={() => handleDeactivateSpool(s.id)}
+                          className="p-1 text-gray-400 hover:text-red-600"
+                          title="Deactivate spool"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -116,16 +289,18 @@ export default function MaterialDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Add Spool Dialog */}
       <Dialog open={showAddSpool} onClose={() => setShowAddSpool(false)} title="Add Spool">
         <form onSubmit={handleAddSpool} className="space-y-4">
           <Input name="initialWeight" label="Net Filament Weight (g)" type="number" step="0.1" required />
+          <Input name="currentWeight" label="Current Weight (g) — leave blank if new spool" type="number" step="0.1" />
           <Input name="spoolWeight" label="Empty Spool Weight (g)" type="number" defaultValue="200" />
           <Input name="purchasePrice" label="Purchase Price" type="number" step="0.001" />
           <Input name="lotNumber" label="Lot Number" />
           {locations.length > 0 && (
             <div className="space-y-1">
-              <label className="text-sm font-medium text-gray-700">Storage Location</label>
-              <select name="locationId" className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage Location</label>
+              <select name="locationId" className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
                 <option value="">No location</option>
                 {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
@@ -133,10 +308,81 @@ export default function MaterialDetailPage() {
           )}
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowAddSpool(false)}>Cancel</Button>
-            <Button type="submit" disabled={addingDpool}>{addingDpool ? 'Adding...' : 'Add Spool'}</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Adding...' : 'Add Spool'}</Button>
           </div>
         </form>
       </Dialog>
+
+      {/* Edit Material Dialog */}
+      <Dialog open={showEditMaterial} onClose={() => setShowEditMaterial(false)} title="Edit Material">
+        <form onSubmit={handleEditMaterial} className="space-y-4">
+          <Input name="name" label="Name" defaultValue={material.name} required />
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
+            <select name="type" defaultValue={material.type} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+              {['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'].map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <Input name="color" label="Color" defaultValue={material.color || ''} />
+          <Input name="brand" label="Brand" defaultValue={material.brand || ''} />
+          <Input name="costPerGram" label="Cost per Gram" type="number" step="0.001" defaultValue={material.costPerGram} required />
+          <Input name="density" label="Density (g/cm3)" type="number" step="0.01" defaultValue={material.density} />
+          <Input name="reorderPoint" label="Reorder Point (g)" type="number" defaultValue={material.reorderPoint} />
+          <div className="flex gap-3 justify-end">
+            <Button type="button" variant="outline" onClick={() => setShowEditMaterial(false)}>Cancel</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Edit Spool Dialog */}
+      <Dialog open={!!editingSpool} onClose={() => setEditingSpool(null)} title="Edit Spool">
+        {editingSpool && (
+          <form onSubmit={handleEditSpool} className="space-y-4">
+            <Input name="currentWeight" label="Current Weight (g)" type="number" step="0.1" defaultValue={editingSpool.currentWeight} required />
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage Location</label>
+              <select name="locationId" defaultValue={editingSpool.locationId || ''} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+                <option value="">No location</option>
+                {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+              <select name="isActive" defaultValue={editingSpool.isActive ? 'true' : 'false'} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button type="button" variant="outline" onClick={() => setEditingSpool(null)}>Cancel</Button>
+              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Spool Label Scanner */}
+      <SpoolLabelScanner
+        open={showScanner}
+        onClose={() => setShowScanner(false)}
+        onResult={(fields) => {
+          // Pre-fill the add spool dialog with scanned data
+          setShowAddSpool(true);
+          // The scanned fields are displayed as a toast/alert for now
+          const parts = [];
+          if (fields.brand) parts.push(`Brand: ${fields.brand}`);
+          if (fields.materialType) parts.push(`Type: ${fields.materialType}`);
+          if (fields.color) parts.push(`Color: ${fields.color}`);
+          if (fields.weight) parts.push(`Weight: ${fields.weight}g`);
+          if (fields.printTemp) parts.push(`Temp: ${fields.printTemp}°C`);
+          if (parts.length > 0) {
+            alert(`Detected: ${parts.join(', ')}\n\nPlease fill in the spool details.`);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -110,7 +110,7 @@ export default function SettingsPage() {
               <Input name="overhead_percent" label="Overhead (%)" type="number" step="0.1" defaultValue={settings.overhead_percent || '15'} />
             </div>
             <div className="grid grid-cols-3 gap-4">
-              <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.1" defaultValue={settings.markup_multiplier || '2.5'} />
+              <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.01" defaultValue={settings.markup_multiplier || '2.5'} />
               <Input name="machine_hourly_rate" label="Default Machine Rate (OMR/hr)" type="number" step="0.001" defaultValue={settings.machine_hourly_rate || '0.400'} />
               <Input name="electricity_rate_kwh" label="Electricity Rate (OMR/kWh)" type="number" step="0.001" defaultValue={settings.electricity_rate_kwh || '0.025'} />
             </div>

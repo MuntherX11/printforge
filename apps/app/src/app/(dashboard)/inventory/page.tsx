@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Package, AlertTriangle, Upload, MapPin } from 'lucide-react';
+import { Plus, Package, AlertTriangle, Upload, MapPin, Download } from 'lucide-react';
 
 export default function InventoryPage() {
   const [materials, setMaterials] = useState<any[]>([]);
@@ -43,14 +43,22 @@ export default function InventoryPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Filaments</h1>
         <div className="flex gap-2">
           <Link href="/inventory/locations">
             <Button variant="outline"><MapPin className="h-4 w-4 mr-2" /> Locations</Button>
           </Link>
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.open('/api/materials/template', '_blank');
+            }}
+          >
+            <Download className="h-4 w-4 mr-2" /> Template
+          </Button>
           <label className="cursor-pointer inline-flex">
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} disabled={uploading} />
-            <span className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 gap-2">
+            <span className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 gap-2">
               <Upload className="h-4 w-4" /> {uploading ? 'Uploading...' : 'Excel Import'}
             </span>
           </label>

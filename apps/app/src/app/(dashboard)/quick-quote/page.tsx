@@ -174,20 +174,20 @@ export default function QuickQuotePage() {
   if (loading) return <Loading />;
 
   const matOptions = materials.map(m => ({ value: m.id, label: `${m.name}${m.color ? ` (${m.color})` : ''}` }));
-  const printerOptions = [{ value: '', label: 'None' }, ...printers.map(p => ({ value: p.id, label: p.name }))];
+  const printerOptions = [{ value: '', label: 'Select printer...' }, ...printers.map(p => ({ value: p.id, label: p.name }))];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Quick Quote</h1>
         <div className="flex gap-2">
-          <Button variant={mode === 'file' ? 'primary' : 'outline'} onClick={() => { setMode('file'); setMultiMode(false); }}>
+          <Button variant={mode === 'file' ? 'primary' : 'outline'} onClick={() => { setMode('file'); setMultiMode(false); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
             <Upload className="h-4 w-4 mr-2" /> File Upload
           </Button>
-          <Button variant={mode === 'multi' ? 'primary' : 'outline'} onClick={() => { setMode('multi'); setMultiMode(true); }}>
+          <Button variant={mode === 'multi' ? 'primary' : 'outline'} onClick={() => { setMode('multi'); setMultiMode(true); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
             <Calculator className="h-4 w-4 mr-2" /> Multi-Color
           </Button>
-          <Button variant={mode === 'link' ? 'primary' : 'outline'} onClick={() => setMode('link')}>
+          <Button variant={mode === 'link' ? 'primary' : 'outline'} onClick={() => { setMode('link'); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
             <Link2 className="h-4 w-4 mr-2" /> Link Quote
           </Button>
         </div>
@@ -207,7 +207,14 @@ export default function QuickQuotePage() {
                     type="file"
                     accept=".gcode,.gco,.g,.stl"
                     className="hidden"
-                    onChange={e => setFile(e.target.files?.[0] || null)}
+                    onChange={e => {
+                      const f = e.target.files?.[0] || null;
+                      setFile(f);
+                      setResult(null);
+                      setError('');
+                      setMultiResult(null);
+                      setScrapedData(null);
+                    }}
                   />
                   <div className="text-center">
                     {file ? (
@@ -251,17 +258,19 @@ export default function QuickQuotePage() {
                   onChange={e => setColorChanges(e.target.value)}
                   min="0"
                 />
-                <Input
-                  label="Infill % (STL only)"
-                  type="number"
-                  value={infill}
-                  onChange={e => setInfill(e.target.value)}
-                  min="0"
-                  max="100"
-                />
+                {file?.name?.toLowerCase().endsWith('.stl') && (
+                  <Input
+                    label="Infill % (STL only)"
+                    type="number"
+                    value={infill}
+                    onChange={e => setInfill(e.target.value)}
+                    min="0"
+                    max="100"
+                  />
+                )}
               </div>
 
-              <Button onClick={handleAnalyze} disabled={!file || analyzing} className="w-full">
+              <Button onClick={handleAnalyze} disabled={!file || analyzing || !materialId || !printerId} className="w-full">
                 {analyzing ? 'Analyzing...' : 'Analyze & Quote'}
               </Button>
             </CardContent>
@@ -541,19 +550,27 @@ export default function QuickQuotePage() {
                 </div>
 
                 <div className="mt-4 pt-4 border-t space-y-3">
-                  <p className="text-sm text-gray-600">
-                    To generate an accurate quote, the STL file is needed. You can:
-                  </p>
-                  <div className="flex gap-2">
-                    <Button variant="primary" size="sm" onClick={() => { setMode('file'); }}>
-                      <Upload className="h-4 w-4 mr-1" /> Upload STL Yourself
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => {
-                      toast('success', 'Request noted — admin will handle the STL file');
-                    }}>
-                      Let Us Handle It
-                    </Button>
-                  </div>
+                  {scrapedData.isPaid ? (
+                    <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded">
+                      This model requires purchase on {scrapedData.siteName || 'the source site'}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-600">
+                        To generate an accurate quote, the STL file is needed. You can:
+                      </p>
+                      <div className="flex gap-2">
+                        <Button variant="primary" size="sm" onClick={() => { setMode('file'); }}>
+                          <Upload className="h-4 w-4 mr-1" /> Upload STL Yourself
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => {
+                          toast('success', 'Request noted — admin will handle the STL file');
+                        }}>
+                          Let Us Handle It
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>

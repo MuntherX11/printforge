@@ -64,7 +64,24 @@ export class QuotesService {
         where,
         ...paginate(query),
         orderBy: { createdAt: 'desc' },
-        include: {
+        select: {
+          id: true,
+          quoteNumber: true,
+          status: true,
+          total: true,
+          validUntil: true,
+          createdAt: true,
+          gcodeMetadata: true, // keep for customer review
+          notes: true,
+          items: {
+            select: {
+              id: true,
+              description: true,
+              quantity: true,
+              unitPrice: true,
+              totalPrice: true,
+            },
+          },
           _count: { select: { items: true } },
         },
       }),

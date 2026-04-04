@@ -75,6 +75,21 @@ export class OrdersService {
     return order;
   }
 
+  async findForCustomer(customerId: string) {
+    return this.prisma.order.findMany({
+      where: { customerId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        total: true,
+        createdAt: true,
+        items: { select: { description: true, quantity: true, unitPrice: true } },
+      },
+    });
+  }
+
   async update(id: string, dto: UpdateOrderDto) {
     await this.findOne(id);
     return this.prisma.order.update({

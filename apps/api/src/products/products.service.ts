@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CostingService } from '../costing/costing.service';
+import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -8,12 +9,15 @@ import {
   UpdateProductComponentDto,
   ProductCostResult,
 } from '@printforge/types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class ProductsService {
   constructor(
     private prisma: PrismaService,
     private costingService: CostingService,
+    private gcodeParser: GcodeParserService,
   ) {}
 
   async create(dto: CreateProductDto) {
@@ -189,6 +193,137 @@ export class ProductsService {
       markupMultiplier,
       components: componentResults,
     };
+  }
+
+  async onboardFromGcode(productId: string, files: any[]) {
+    await this.findOne(productId);
+    const results: Array<{ fileName: string; componentsCreated: number }> = [];
+
+    // Get all materials for type matching
+    const allMaterials = await this.prisma.material.findMany();
+
+    for (const file of files) {
+      const analysis = this.gcodeParser.parseHeader(file.buffer);
+      const fileName = file.originalname || 'unknown.gcode';
+
+      // If multi-tool, create one component per tool
+      if (analysis.tools && analysis.tools.length > 1) {
+        let created = 0;
+        for (const tool of analysis.tools) {
+          const materialType = tool.materialType || analysis.filamentType || 'PLA';
+          const matchedMaterial = allMaterials.find(m =>
+            m.type.toUpperCase() === materialType.toUpperCase()
+          );
+
+          await this.prisma.productComponent.create({
+            data: {
+              productId,
+              materialId: matchedMaterial?.id || allMaterials[0]?.id,
+              description: `${fileName} - Tool ${tool.index}`,
+              gramsUsed: tool.filamentGrams || 0,
+              printMinutes: 0, // can't split per-tool
+              quantity: 1,
+              sortOrder: created,
+            },
+          });
+          created++;
+        }
+        results.push({ fileName, componentsCreated: created });
+      } else {
+        // Single tool — one component
+        const materialType = analysis.filamentType || 'PLA';
+        const matchedMaterial = allMaterials.find(m =>
+          m.type.toUpperCase() === materialType.toUpperCase()
+        );
+
+        await this.prisma.productComponent.create({
+          data: {
+            productId,
+            materialId: matchedMaterial?.id || allMaterials[0]?.id,
+            description: fileName.replace(/\.gcode$/i, ''),
+            gramsUsed: analysis.filamentUsedGrams || 0,
+            printMinutes: analysis.estimatedTimeSeconds ? Math.round(analysis.estimatedTimeSeconds / 60) : 0,
+            quantity: 1,
+            sortOrder: 0,
+          },
+        });
+        results.push({ fileName, componentsCreated: 1 });
+      }
+    }
+
+    await this.recalculateAggregates(productId);
+    return { results, product: await this.findOne(productId) };
+  }
+
+  async uploadImages(productId: string, files: any[]) {
+    await this.findOne(productId);
+    const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+    const now = new Date();
+    const dateDir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+    const fullDir = path.join(uploadDir, dateDir);
+
+    if (!fs.existsSync(fullDir)) {
+      fs.mkdirSync(fullDir, { recursive: true });
+    }
+
+    const attachments = [];
+    for (const file of files) {
+      const fileName = `${Date.now()}-${file.originalname}`;
+      const filePath = path.join(fullDir, fileName);
+      fs.writeFileSync(filePath, file.buffer);
+
+      const storagePath = path.join(dateDir, fileName);
+      const attachment = await this.prisma.attachment.create({
+        data: {
+          entityType: 'product',
+          entityId: productId,
+          filename: fileName,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          storagePath,
+        },
+      });
+      attachments.push(attachment);
+    }
+
+    // Set first image as product imageUrl if none set
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (product && !product.imageUrl && attachments.length > 0) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { imageUrl: attachments[0].storagePath },
+      });
+    }
+
+    return attachments;
+  }
+
+  async removeImage(productId: string, attachmentId: string) {
+    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
+    if (!attachment || attachment.entityId !== productId) throw new NotFoundException('Image not found');
+
+    const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+    const fullPath = path.join(uploadDir, attachment.storagePath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
+
+    await this.prisma.attachment.delete({ where: { id: attachmentId } });
+
+    // Clear imageUrl if it was the product's primary image
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (product?.imageUrl === attachment.storagePath) {
+      const nextImage = await this.prisma.attachment.findFirst({
+        where: { entityType: 'product', entityId: productId },
+      });
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { imageUrl: nextImage?.storagePath || null },
+      });
+    }
+
+    return { deleted: true };
   }
 
   private async recalculateAggregates(productId: string) {

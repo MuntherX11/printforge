@@ -8,7 +8,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
   const token = cookieStore.get('token');
 
   if (!token) {
-    redirect('/customer-login');
+    redirect('/login');
   }
 
   return (
@@ -16,7 +16,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       <CustomerSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <CustomerTopbar />
-        <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
+        <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-6">
           {children}
         </main>
       </div>

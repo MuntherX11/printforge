@@ -232,6 +232,7 @@ export interface UpdateStorageLocationDto {
 export interface CreateSpoolDto {
   materialId: string;
   initialWeight: number;
+  currentWeight?: number;
   spoolWeight?: number;
   lotNumber?: string;
   purchasePrice?: number;
@@ -568,4 +569,15 @@ export interface DashboardOrder {
   customerName: string;
   status: OrderStatus;
   total: number;
+}
+
+// ============ SCRAPER ============
+
+export interface ScrapedModelData {
+  url: string;
+  title: string | null;
+  description: string | null;
+  thumbnailUrl: string | null;
+  siteName: string | null;
+  isPaid?: boolean;
 }

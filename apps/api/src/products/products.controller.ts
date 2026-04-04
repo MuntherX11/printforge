@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -73,5 +74,30 @@ export class ProductsController {
   @Roles('ADMIN', 'OPERATOR')
   calculateCost(@Param('id') id: string) {
     return this.productsService.calculateCost(id);
+  }
+
+  @Post(':id/onboard-gcode')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  @UseInterceptors(FilesInterceptor('files', 20, { limits: { fileSize: 200 * 1024 * 1024 } }))
+  async onboardGcode(@Param('id') id: string, @UploadedFiles() files: any[]) {
+    if (!files?.length) throw new BadRequestException('No files uploaded');
+    return this.productsService.onboardFromGcode(id, files);
+  }
+
+  @Post(':id/images')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async uploadImages(@Param('id') id: string, @UploadedFiles() files: any[]) {
+    if (!files?.length) throw new BadRequestException('No files uploaded');
+    return this.productsService.uploadImages(id, files);
+  }
+
+  @Delete(':id/images/:attachmentId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  removeImage(@Param('id') id: string, @Param('attachmentId') attachmentId: string) {
+    return this.productsService.removeImage(id, attachmentId);
   }
 }
