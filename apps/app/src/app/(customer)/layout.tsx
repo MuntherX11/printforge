@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import { CustomerSidebar } from '@/components/customer-sidebar';
 import { CustomerTopbar } from '@/components/customer-topbar';
 
+// NOTE: This layout checks for a token to gate UI routing only.
+// Actual access control is enforced by the API-level CustomerGuard on every endpoint.
+// The token here may belong to any role; the API guards reject non-customer tokens.
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies();
   const token = cookieStore.get('token');

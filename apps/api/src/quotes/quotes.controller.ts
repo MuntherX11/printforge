@@ -35,6 +35,7 @@ export class QuotesController {
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.quotesService.findOne(id);
   }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
@@ -11,6 +11,18 @@ export class DesignService {
     private prisma: PrismaService,
     private emailNotification: EmailNotificationService,
   ) {}
+
+  // ============ ACCESS CONTROL ============
+
+  async verifyAccess(projectId: string, userId: string, userType: string) {
+    if (userType === 'staff') return; // staff can access any project
+    const project = await this.prisma.designProject.findUnique({
+      where: { id: projectId },
+      select: { customerId: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.customerId !== userId) throw new ForbiddenException('Access denied');
+  }
 
   // ============ PROJECTS ============
 
@@ -77,7 +89,10 @@ export class DesignService {
     return paginatedResponse(data, total, query);
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, caller?: { userId: string; userType: string }) {
+    if (caller) {
+      await this.verifyAccess(id, caller.userId, caller.userType);
+    }
     const project = await this.prisma.designProject.findUnique({
       where: { id },
       include: {
@@ -145,6 +160,9 @@ export class DesignService {
   // ============ COMMENTS (Chat) ============
 
   async addComment(projectId: string, dto: AddDesignCommentDto, author: { id: string; name: string; isCustomer: boolean }) {
+    if (author.isCustomer) {
+      await this.verifyAccess(projectId, author.id, 'customer');
+    }
     await this.findOne(projectId);
 
     return this.prisma.designComment.create({
@@ -159,7 +177,10 @@ export class DesignService {
     });
   }
 
-  async getComments(projectId: string) {
+  async getComments(projectId: string, caller?: { userId: string; userType: string }) {
+    if (caller) {
+      await this.verifyAccess(projectId, caller.userId, caller.userType);
+    }
     return this.prisma.designComment.findMany({
       where: { projectId },
       orderBy: { createdAt: 'asc' },

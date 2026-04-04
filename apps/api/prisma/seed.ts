@@ -4,13 +4,20 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  // Create admin user
-  const adminPassword = await bcrypt.hash('admin123', 10);
+  // Create admin user (credentials from environment variables)
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@printforge.local';
+  const adminPass = process.env.ADMIN_PASSWORD;
+  if (!adminPass) {
+    console.error('ERROR: ADMIN_PASSWORD environment variable is required for seeding.');
+    console.error('Usage: ADMIN_PASSWORD=your_secure_password npx prisma db seed');
+    process.exit(1);
+  }
+  const adminPassword = await bcrypt.hash(adminPass, 10);
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@printforge.local' },
+    where: { email: adminEmail },
     update: {},
     create: {
-      email: 'admin@printforge.local',
+      email: adminEmail,
       passwordHash: adminPassword,
       name: 'Admin',
       role: Role.ADMIN,
@@ -28,9 +35,14 @@ async function main() {
   ];
 
   for (const mat of materials) {
-    await prisma.material.create({ data: mat });
+    const existing = await prisma.material.findFirst({
+      where: { name: mat.name, type: mat.type, color: mat.color },
+    });
+    if (!existing) {
+      await prisma.material.create({ data: mat });
+    }
   }
-  console.log('Created', materials.length, 'default materials');
+  console.log('Seeded default materials (skipped existing)');
 
   // Create default system settings
   const settings = [

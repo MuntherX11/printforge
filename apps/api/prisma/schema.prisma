@@ -123,6 +123,9 @@ model Spool {
   updatedAt       DateTime         @updatedAt
 
   jobMaterials    JobMaterial[]
+
+  @@index([materialId])
+  @@index([isActive])
 }
 
 // ============ PRODUCTS (BOM) ============
@@ -230,6 +233,9 @@ model ProductionJob {
 
   materials       JobMaterial[]
   attachments     Attachment[]
+
+  @@index([status])
+  @@index([orderId])
 }
 
 enum JobStatus {
@@ -280,6 +286,9 @@ model Quote {
   order           Order?
   attachments     Attachment[]
   designProject   DesignProject?
+
+  @@index([status])
+  @@index([customerId])
 }
 
 enum QuoteSource {
@@ -313,6 +322,8 @@ model QuoteItem {
   estimatedCost      Float?
   marginPercent      Float?
   createdAt          DateTime @default(now())
+
+  @@index([quoteId])
 }
 
 model Order {
@@ -336,6 +347,9 @@ model Order {
   productionJobs  ProductionJob[]
   invoices        Invoice[]
   attachments     Attachment[]
+
+  @@index([status])
+  @@index([customerId])
 }
 
 enum OrderStatus {
@@ -361,6 +375,8 @@ model OrderItem {
   createdAt       DateTime        @default(now())
 
   productionJobs  ProductionJob[]
+
+  @@index([orderId])
 }
 
 model Invoice {
@@ -412,6 +428,9 @@ model Expense {
   notes        String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+
+  @@index([categoryId])
+  @@index([date])
 }
 
 // ============ FILE MANAGEMENT ============
@@ -474,6 +493,10 @@ model DesignProject {
   revisions         DesignRevision[]
   comments          DesignComment[]
   attachments       Attachment[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([assignedToId])
 }
 
 enum DesignFeeType {

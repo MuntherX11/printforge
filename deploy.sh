@@ -15,11 +15,13 @@ if [ ! -f ".env" ]; then
   echo "[1/6] Generating .env..."
   DB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
   SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=' | head -c 64)
+  ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
 
   cat > .env <<ENVEOF
 DATABASE_URL=postgresql://printforge:${DB_PASSWORD}@db:5432/printforge
 DB_PASSWORD=${DB_PASSWORD}
 SECRET_KEY=${SECRET_KEY}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
 JWT_EXPIRY=7d
 COOKIE_SECURE=false
 REDIS_URL=redis://redis:6379
@@ -35,6 +37,13 @@ ENVEOF
   echo "  .env created."
 else
   echo "[1/6] .env exists, skipping."
+  # Source existing .env to get ADMIN_PASSWORD
+  export $(grep -E '^ADMIN_PASSWORD=' .env | xargs) 2>/dev/null || true
+  if [ -z "$ADMIN_PASSWORD" ]; then
+    ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
+    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env
+    echo "  Added ADMIN_PASSWORD to .env"
+  fi
 fi
 
 # ---- Step 2: Fix permissions ----
@@ -91,12 +100,17 @@ const prisma = new PrismaClient();
 
 async function main() {
   // Admin user
+  const adminPass = process.env.ADMIN_PASSWORD;
+  if (!adminPass) {
+    console.error('  ERROR: ADMIN_PASSWORD not set');
+    process.exit(1);
+  }
   const exists = await prisma.user.findUnique({ where: { email: 'admin@printforge.local' } });
   if (!exists) {
     await prisma.user.create({
       data: {
         email: 'admin@printforge.local',
-        passwordHash: await bcrypt.hash('admin123', 10),
+        passwordHash: await bcrypt.hash(adminPass, 10),
         name: 'Admin',
         role: 'ADMIN'
       }
@@ -165,7 +179,7 @@ SEEDEOF
 
 # Copy seed script into the container and run it
 docker compose cp /tmp/printforge_seed.js api:/app/seed.js
-docker compose exec -T api node /app/seed.js
+docker compose exec -T -e ADMIN_PASSWORD="${ADMIN_PASSWORD}" api node /app/seed.js
 rm -f /tmp/printforge_seed.js
 
 echo ""
@@ -175,9 +189,9 @@ echo "========================================="
 echo ""
 echo "  URL:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')"
 echo "  Login:    admin@printforge.local"
-echo "  Password: admin123"
+echo "  Password: ${ADMIN_PASSWORD}"
 echo ""
-echo "  IMPORTANT: Change the admin password after first login!"
+echo "  IMPORTANT: Save this password! Change it after first login."
 echo ""
 echo "  Commands:"
 echo "    docker compose logs -f        # View logs"

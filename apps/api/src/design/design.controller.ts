@@ -37,8 +37,8 @@ export class DesignController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.designService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.designService.findOne(id, { userId: user.id, userType: user.userType });
   }
 
   @Patch(':id')
@@ -69,8 +69,8 @@ export class DesignController {
   }
 
   @Get(':id/comments')
-  getComments(@Param('id') id: string) {
-    return this.designService.getComments(id);
+  getComments(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.designService.getComments(id, { userId: user.id, userType: user.userType });
   }
 
   @Post(':id/revisions')
@@ -84,7 +84,7 @@ export class DesignController {
   }
 
   @Post(':id/upload')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(StaffGuard)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_FILE_SIZE } }))
   async uploadFile(
     @Param('id') id: string,

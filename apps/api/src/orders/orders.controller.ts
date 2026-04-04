@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -20,6 +21,7 @@ export class OrdersController {
   }
 
   @Get()
+  @UseGuards(StaffGuard)
   findAll(@Query() query: PaginationDto, @Query('status') status?: string) {
     return this.ordersService.findAll(query, status);
   }
@@ -31,6 +33,7 @@ export class OrdersController {
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.ordersService.findOne(id);
   }
