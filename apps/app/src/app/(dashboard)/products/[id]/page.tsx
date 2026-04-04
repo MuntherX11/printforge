@@ -210,6 +210,17 @@ export default function ProductDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/20" onClick={async () => {
+            if (!confirm('Delete this product and all its components? This cannot be undone.')) return;
+            try {
+              await api.delete(`/products/${id}`);
+              router.push('/products');
+            } catch (err: any) {
+              alert(err.message || 'Delete failed');
+            }
+          }}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete
+          </Button>
           <Button variant="outline" onClick={() => setShowEditProduct(true)}>
             <Edit2 className="h-4 w-4 mr-2" /> Edit
           </Button>

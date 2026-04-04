@@ -71,6 +71,16 @@ export class ProductsService {
     return product;
   }
 
+  async remove(id: string) {
+    await this.findOne(id);
+    // Delete components first, then the product
+    await this.prisma.productComponent.deleteMany({ where: { productId: id } });
+    // Delete associated attachments
+    await this.prisma.attachment.deleteMany({ where: { entityType: 'product', entityId: id } });
+    await this.prisma.product.delete({ where: { id } });
+    return { deleted: true };
+  }
+
   async update(id: string, dto: UpdateProductDto) {
     await this.findOne(id);
     return this.prisma.product.update({

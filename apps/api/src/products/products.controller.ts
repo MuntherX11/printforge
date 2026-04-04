@@ -45,6 +45,13 @@ export class ProductsController {
     return this.productsService.update(id, dto);
   }
 
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  remove(@Param('id') id: string) {
+    return this.productsService.remove(id);
+  }
+
   @Post(':id/components')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
