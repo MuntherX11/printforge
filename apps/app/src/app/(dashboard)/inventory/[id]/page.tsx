@@ -114,8 +114,18 @@ export default function MaterialDetailPage() {
     }
   }
 
+  async function handleDeleteSpool(spoolId: string) {
+    if (!confirm('Permanently delete this spool? This cannot be undone.')) return;
+    try {
+      await api.delete(`/spools/${spoolId}`);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
   async function handleDeleteMaterial() {
-    if (!confirm('Delete this material? This cannot be undone. All spools must be removed first.')) return;
+    if (!confirm('Delete this material and all its spools? This cannot be undone.')) return;
     try {
       await api.delete(`/materials/${id}`);
       router.push('/inventory');
@@ -274,12 +284,19 @@ export default function MaterialDetailPage() {
                       {s.isActive && (
                         <button
                           onClick={() => handleDeactivateSpool(s.id)}
-                          className="p-1 text-gray-400 hover:text-red-600"
+                          className="p-1 text-gray-400 hover:text-yellow-600"
                           title="Deactivate spool"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}
+                      <button
+                        onClick={() => handleDeleteSpool(s.id)}
+                        className="p-1 text-gray-400 hover:text-red-600"
+                        title="Delete spool permanently"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-300" />
+                      </button>
                     </div>
                   </TableCell>
                 </TableRow>

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Res, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Res, StreamableFile } from '@nestjs/common';
 import { Response } from 'express';
 import { SpoolsService } from './spools.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -58,5 +58,12 @@ export class SpoolsController {
   @Roles('ADMIN', 'OPERATOR')
   adjustWeight(@Param('id') id: string, @Body() dto: AdjustSpoolWeightDto) {
     return this.spoolsService.adjustWeight(id, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  remove(@Param('id') id: string) {
+    return this.spoolsService.remove(id);
   }
 }

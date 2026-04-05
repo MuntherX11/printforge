@@ -77,14 +77,10 @@ export class MaterialsService {
   }
 
   async remove(id: string) {
-    const material = await this.prisma.material.findUnique({
-      where: { id },
-      include: { _count: { select: { spools: true } } },
-    });
+    const material = await this.prisma.material.findUnique({ where: { id } });
     if (!material) throw new NotFoundException('Material not found');
-    if (material._count.spools > 0) {
-      throw new BadRequestException('Cannot delete material with existing spools. Remove all spools first.');
-    }
+    // Cascade: delete all spools under this material first
+    await this.prisma.spool.deleteMany({ where: { materialId: id } });
     await this.prisma.material.delete({ where: { id } });
     return { deleted: true };
   }

@@ -92,6 +92,12 @@ export class SpoolsService {
     });
   }
 
+  async remove(id: string) {
+    const spool = await this.findOne(id);
+    await this.prisma.spool.delete({ where: { id } });
+    return { deleted: true };
+  }
+
   async deductWeight(id: string, grams: number) {
     const spool = await this.prisma.spool.findUnique({ where: { id } });
     if (!spool) throw new NotFoundException('Spool not found');
