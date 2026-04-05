@@ -79,7 +79,9 @@ export class MaterialsService {
   async remove(id: string) {
     const material = await this.prisma.material.findUnique({ where: { id } });
     if (!material) throw new NotFoundException('Material not found');
-    // Cascade: delete all spools under this material first
+    // Cascade: clear references then delete
+    await this.prisma.jobMaterial.deleteMany({ where: { materialId: id } });
+    await this.prisma.productComponent.deleteMany({ where: { materialId: id } });
     await this.prisma.spool.deleteMany({ where: { materialId: id } });
     await this.prisma.material.delete({ where: { id } });
     return { deleted: true };

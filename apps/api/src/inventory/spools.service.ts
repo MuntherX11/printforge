@@ -93,7 +93,9 @@ export class SpoolsService {
   }
 
   async remove(id: string) {
-    const spool = await this.findOne(id);
+    await this.findOne(id);
+    // Clear foreign key references first
+    await this.prisma.jobMaterial.deleteMany({ where: { spoolId: id } });
     await this.prisma.spool.delete({ where: { id } });
     return { deleted: true };
   }
