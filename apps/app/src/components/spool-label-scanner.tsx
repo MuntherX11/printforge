@@ -36,15 +36,25 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
 
     try {
       const { createWorker } = await import('tesseract.js');
-      const worker = await createWorker('eng');
+      const worker = await createWorker('eng', 1, {
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        logger: () => {},
+      });
       const { data: { text } } = await worker.recognize(file);
       await worker.terminate();
 
       const fields = parseLabel(text);
+      if (!fields.materialType && !fields.brand && !fields.color) {
+        setError('Could not extract any fields from the label. Try a clearer photo with good lighting.');
+        return;
+      }
       onResult(fields);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'OCR failed');
+      console.error('OCR error:', err);
+      setError(`OCR failed: ${err.message || 'Unknown error'}. Check network connection and try again.`);
     } finally {
       setScanning(false);
     }
