@@ -41,15 +41,17 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
   }, [preview]);
 
   /**
-   * Preprocess image: upscale, grayscale, contrast boost.
-   * Massively improves OCR accuracy on phone photos of labels.
+   * Load image into a canvas, upscaled for processing. Returns both the
+   * full-color ImageData (for QR decoding) and an OCR-ready binarized Blob.
    */
-  async function preprocessImage(file: File): Promise<Blob> {
+  async function prepareImage(file: File): Promise<{ colorImageData: ImageData; ocrBlob: Blob }> {
     return new Promise((resolve, reject) => {
       const img = new Image();
+      const url = URL.createObjectURL(file);
       img.onload = () => {
+        URL.revokeObjectURL(url);
         try {
-          // Target ~1500px on the longer side (sweet spot for tesseract)
+          // Target ~1500px on the longer side (sweet spot for tesseract + QR)
           const targetMax = 1500;
           const scale = Math.min(targetMax / Math.max(img.width, img.height), 3);
           const w = Math.round(img.width * scale);
@@ -58,19 +60,21 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
           const canvas = document.createElement('canvas');
           canvas.width = w;
           canvas.height = h;
-          const ctx = canvas.getContext('2d');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
           if (!ctx) return reject(new Error('Canvas context unavailable'));
 
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, w, h);
 
-          // Grayscale + Otsu binarization
-          const imgData = ctx.getImageData(0, 0, w, h);
-          const data = imgData.data;
+          // Snapshot full-color data for QR decoding BEFORE binarization
+          const colorImageData = ctx.getImageData(0, 0, w, h);
+
+          // Now process for OCR: grayscale + Otsu binarization
+          const ocrData = ctx.getImageData(0, 0, w, h);
+          const data = ocrData.data;
           const totalPixels = w * h;
 
-          // First pass: grayscale + collect histogram
           const hist = new Uint32Array(256);
           for (let i = 0; i < data.length; i += 4) {
             const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
@@ -78,7 +82,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
             hist[gray]++;
           }
 
-          // Otsu's method: find threshold that maximizes between-class variance
+          // Otsu's method
           let sum = 0;
           for (let i = 0; i < 256; i++) sum += i * hist[i];
           let sumB = 0;
@@ -100,25 +104,57 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
             }
           }
 
-          // Apply threshold (with slight bias toward white for thin label text)
           const finalThreshold = Math.min(255, threshold + 10);
           for (let i = 0; i < data.length; i += 4) {
             const v = data[i] >= finalThreshold ? 255 : 0;
             data[i] = data[i + 1] = data[i + 2] = v;
           }
 
-          ctx.putImageData(imgData, 0, 0);
+          ctx.putImageData(ocrData, 0, 0);
           canvas.toBlob((blob) => {
-            if (blob) resolve(blob);
+            if (blob) resolve({ colorImageData, ocrBlob: blob });
             else reject(new Error('Canvas toBlob failed'));
           }, 'image/png');
         } catch (err) {
           reject(err);
         }
       };
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load image'));
+      };
+      img.src = url;
     });
+  }
+
+  /**
+   * Map a decoded QR URL or text payload to a known brand via domain match.
+   */
+  function brandFromQrPayload(payload: string): string | null {
+    const domainMap: Record<string, string> = {
+      'esun3d': 'eSUN',
+      'esun': 'eSUN',
+      'bambulab': 'Bambu',
+      'bambu-lab': 'Bambu',
+      'polymaker': 'Polymaker',
+      'hatchbox3d': 'Hatchbox',
+      'hatchbox': 'Hatchbox',
+      'overture3d': 'Overture',
+      'overture': 'Overture',
+      'sunlu': 'Sunlu',
+      'creality': 'Creality',
+      'prusa3d': 'Prusament',
+      'prusament': 'Prusament',
+      'polyterra': 'PolyTerra',
+      'polylite': 'PolyLite',
+      'anycubic': 'Anycubic',
+      'elegoo': 'Elegoo',
+    };
+    const lower = payload.toLowerCase();
+    for (const [frag, brand] of Object.entries(domainMap)) {
+      if (lower.includes(frag)) return brand;
+    }
+    return null;
   }
 
   async function processImage(file: File) {
@@ -131,7 +167,26 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     setPreview(URL.createObjectURL(file));
 
     try {
-      const processed = await preprocessImage(file);
+      const { colorImageData, ocrBlob } = await prepareImage(file);
+
+      // QR decode — label QRs typically encode a product URL we can map to a brand
+      let qrBrand: string | null = null;
+      let qrPayload = '';
+      try {
+        setProgress('Scanning QR code...');
+        const jsQR = (await import('jsqr')).default;
+        const qr = jsQR(colorImageData.data, colorImageData.width, colorImageData.height, {
+          inversionAttempts: 'attemptBoth',
+        });
+        if (qr?.data) {
+          qrPayload = qr.data;
+          console.log('QR decoded:', qrPayload);
+          qrBrand = brandFromQrPayload(qrPayload);
+          if (qrBrand) console.log('QR brand match:', qrBrand);
+        }
+      } catch (qrErr) {
+        console.warn('QR decode failed (non-fatal):', qrErr);
+      }
 
       setProgress('Initializing OCR...');
       const { createWorker } = await import('tesseract.js');
@@ -151,19 +206,29 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       });
 
       setProgress('Recognizing text...');
-      const { data: { text } } = await worker.recognize(processed);
+      const { data: { text } } = await worker.recognize(ocrBlob);
       await worker.terminate();
 
       console.log('OCR raw text:', text);
       setRawOcrText(text);
       const fields = parseLabel(text);
+
+      // Brand resolution priority: parser > QR > OCR text domain fragments
+      if (!fields.brand && qrBrand) {
+        fields.brand = qrBrand;
+      }
+      if (!fields.brand) {
+        const textBrand = brandFromQrPayload(text);
+        if (textBrand) fields.brand = textBrand;
+      }
+
       console.log('Parsed fields:', fields);
 
       if (!fields.materialType && !fields.brand && !fields.color && !fields.weight) {
         setError('Could not extract any fields from the label. Try a clearer, well-lit photo straight-on.');
         return;
       }
-      onResult({ ...fields, rawText: text });
+      onResult({ ...fields, rawText: qrPayload ? `${text}\n\n[QR: ${qrPayload}]` : text });
       onClose();
     } catch (err: any) {
       console.error('OCR error:', err);
@@ -230,7 +295,12 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
         let labelPart: string;
         let valuePart: string;
         const colonIdx = line.search(/[:.]/);
-        if (colonIdx > 0 && colonIdx < 30) {
+        // Only treat as labeled if colon is early AND leading part has ≤2 words
+        const colonIsLabel =
+          colonIdx > 0 &&
+          colonIdx <= 15 &&
+          line.slice(0, colonIdx).trim().split(/\s+/).length <= 2;
+        if (colonIsLabel) {
           labelPart = line.slice(0, colonIdx);
           valuePart = line.slice(colonIdx + 1).trim();
         } else {
@@ -355,9 +425,19 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       if (digits === '300') return '3.00';
       return m[1].replace(',', '.');
     };
+    // Contextual parser: safe only inside a diameter-labeled line.
+    // Handles OCR dropping the leading "1" from "1.75mm" → "75mm".
+    const normalizeDiaContextual = (raw: string): string | null => {
+      const m = raw.match(/(75|85|00)\s*mm\b/i);
+      if (!m) return null;
+      if (m[1] === '75') return '1.75';
+      if (m[1] === '85') return '2.85';
+      if (m[1] === '00') return '3.00';
+      return null;
+    };
     const diaValue = findFuzzyLabelValue('Diameter');
     if (diaValue) {
-      const d = normalizeDia(diaValue);
+      const d = normalizeDia(diaValue) || normalizeDiaContextual(diaValue);
       if (d) fields.diameter = d;
     }
     if (!fields.diameter) {
