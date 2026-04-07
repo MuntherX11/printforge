@@ -73,19 +73,32 @@ export class MoonrakerService {
       return null;
     }
     const base = moonrakerUrl.replace(/\/+$/, '');
-    const query = 'printer.info&print_stats&display_status&heater_bed&extruder';
-    const url = `${base}/printer/objects/query?${query}`;
 
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) return null;
+      // Fetch printer.info and objects query in parallel
+      // printer.info is a separate endpoint, NOT a valid objects/query object
+      const [infoRes, objectsRes] = await Promise.all([
+        fetch(`${base}/printer/info`, { signal: AbortSignal.timeout(5000) }),
+        fetch(`${base}/printer/objects/query?print_stats&display_status&heater_bed&extruder`, {
+          signal: AbortSignal.timeout(5000),
+        }),
+      ]);
 
-      const data: any = await res.json();
-      const status = data?.result?.status || {};
+      if (!objectsRes.ok) return null;
+
+      const objectsData: any = await objectsRes.json();
+      const status = objectsData?.result?.status || {};
+
+      // Extract printer state from /printer/info (separate endpoint)
+      let klippyState = 'unknown';
+      if (infoRes.ok) {
+        const infoData: any = await infoRes.json();
+        klippyState = infoData?.result?.state || 'unknown';
+      }
 
       return {
         hostname: base,
-        printerState: status['printer.info']?.state || status.print_stats?.state || 'unknown',
+        printerState: klippyState !== 'unknown' ? klippyState : (status.print_stats?.state || 'unknown'),
         printStats: status.print_stats || null,
         progress: status.display_status?.progress || 0,
         heaterBed: status.heater_bed || null,

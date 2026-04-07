@@ -12,7 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle } from 'lucide-react';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -237,6 +237,31 @@ export default function ProductDetailPage() {
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Base Price</p><p className="text-lg font-bold">{formatCurrency(product.basePrice)}</p></CardContent></Card>
       </div>
 
+      {product.components?.length > 0 && (() => {
+        const allReady = product.components.every((c: any) => c.hasEnoughStock);
+        const shortages = product.components.filter((c: any) => !c.hasEnoughStock);
+        return (
+          <Card className={allReady ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20' : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'}>
+            <CardContent className="p-4 flex items-center gap-3">
+              {allReady ? (
+                <>
+                  <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <span className="text-sm font-medium text-green-700 dark:text-green-300">All materials in stock — ready to produce</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                    {shortages.length} component{shortages.length > 1 ? 's' : ''} low on stock:{' '}
+                    {shortages.map((c: any) => `${c.material?.name || 'Unknown'} (${c.totalStock}g / ${Math.round(c.gramsNeeded)}g)`).join(', ')}
+                  </span>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {costResult && (
         <Card className="border-brand-200 bg-brand-50">
           <CardHeader><CardTitle>Cost Breakdown</CardTitle></CardHeader>
@@ -287,6 +312,7 @@ export default function ProductDetailPage() {
                   <TableHead>Grams</TableHead>
                   <TableHead>Print Time</TableHead>
                   <TableHead>Qty</TableHead>
+                  <TableHead>Stock</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -359,6 +385,20 @@ export default function ProductDetailPage() {
                     <TableCell className="font-mono">{c.gramsUsed}g</TableCell>
                     <TableCell className="font-mono">{c.printMinutes}min</TableCell>
                     <TableCell>{c.quantity}</TableCell>
+                    <TableCell>
+                      {c.totalStock != null ? (
+                        <div className="flex items-center gap-1">
+                          {c.hasEnoughStock ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          )}
+                          <span className={`text-xs font-mono ${c.hasEnoughStock ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                            {c.totalStock}g / {Math.round(c.gramsNeeded)}g
+                          </span>
+                        </div>
+                      ) : '-'}
+                    </TableCell>
                     <TableCell>
                       <button onClick={() => handleDeleteComponent(c.id)} className="text-red-400 hover:text-red-600">
                         <Trash2 className="h-4 w-4" />

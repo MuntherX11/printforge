@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Camera, Upload, Loader2 } from 'lucide-react';
 
-interface ScannedFields {
+export interface ScannedFields {
   materialType?: string;
   color?: string;
   brand?: string;
@@ -24,24 +24,38 @@ interface SpoolLabelScannerProps {
 
 export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScannerProps) {
   const [scanning, setScanning] = useState(false);
+  const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
+  // Cleanup preview URL on unmount
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
   async function processImage(file: File) {
     setScanning(true);
     setError('');
+    setProgress('Initializing OCR...');
+    if (preview) URL.revokeObjectURL(preview);
     setPreview(URL.createObjectURL(file));
 
     try {
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng', 1, {
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-simd-lstm.wasm.js',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        logger: () => {},
+        workerBlobURL: false,
+        logger: (m: any) => {
+          if (m.status) setProgress(m.status);
+        },
       });
+      setProgress('Recognizing text...');
       const { data: { text } } = await worker.recognize(file);
       await worker.terminate();
 
@@ -57,6 +71,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       setError(`OCR failed: ${err.message || 'Unknown error'}. Check network connection and try again.`);
     } finally {
       setScanning(false);
+      setProgress('');
     }
   }
 
@@ -137,7 +152,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
         {scanning && (
           <div className="flex flex-col items-center gap-3 py-6">
             <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">Scanning label...</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{progress || 'Scanning label...'}</p>
           </div>
         )}
 

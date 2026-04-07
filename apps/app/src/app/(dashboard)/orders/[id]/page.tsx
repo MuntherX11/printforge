@@ -7,11 +7,12 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Mail, MessageCircle } from 'lucide-react';
+import { Mail, MessageCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -119,6 +120,64 @@ export default function OrderDetailPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {order.materialAvailability && order.materialAvailability.length > 0 && (() => {
+        const allReady = order.materialAvailability.every((m: any) => m.hasEnoughStock);
+        return (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Filament Requirements
+                {allReady ? (
+                  <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs ml-2">All In Stock</Badge>
+                ) : (
+                  <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 text-xs ml-2">Shortages</Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Material</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Color</TableHead>
+                    <TableHead>Required</TableHead>
+                    <TableHead>In Stock</TableHead>
+                    <TableHead>Reserved</TableHead>
+                    <TableHead>Free</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {order.materialAvailability.map((m: any) => (
+                    <TableRow key={m.materialId}>
+                      <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell>{m.type}</TableCell>
+                      <TableCell>{m.color || '-'}</TableCell>
+                      <TableCell className="font-mono">{m.gramsNeeded}g</TableCell>
+                      <TableCell className="font-mono">{m.totalStock}g</TableCell>
+                      <TableCell className="font-mono text-gray-500">{m.reservedStock || 0}g</TableCell>
+                      <TableCell className="font-mono font-medium">{m.freeStock ?? m.totalStock}g</TableCell>
+                      <TableCell>
+                        {m.hasEnoughStock ? (
+                          <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                            <CheckCircle className="h-4 w-4" /> OK
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="h-4 w-4" /> Need {Math.max(0, m.gramsNeeded - (m.freeStock ?? m.totalStock))}g more
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {order.invoices && order.invoices.length > 0 && (
         <Card>

@@ -137,14 +137,44 @@ export default function SpoolByPfidPage() {
         </CardContent>
       </Card>
 
-      <div className="pt-2">
-        <Link
-          href={`/inventory/${spool.materialId}`}
-          className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-        >
-          &larr; Back to material detail
-        </Link>
-      </div>
+      {spool.jobMaterials && spool.jobMaterials.length > 0 && (
+        <Card className="dark:bg-gray-800">
+          <CardHeader>
+            <CardTitle className="dark:text-gray-100">Recent Job Usage</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {spool.jobMaterials.map((jm: any) => (
+                <div key={jm.id} className="flex items-center justify-between py-1 border-b last:border-b-0 dark:border-gray-700">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{jm.job?.name || 'Unknown Job'}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(jm.createdAt)}</p>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant={jm.job?.status === 'COMPLETED' ? 'success' : 'default'}>
+                      {jm.job?.status || 'N/A'}
+                    </Badge>
+                    {jm.gramsUsed > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{jm.gramsUsed}g used</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {spool.material?.id && (
+        <div className="pt-2">
+          <Link
+            href={`/inventory/${spool.material.id}`}
+            className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            &larr; Back to material detail
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

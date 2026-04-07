@@ -72,7 +72,141 @@ export class OrdersService {
       },
     });
     if (!order) throw new NotFoundException('Order not found');
-    return order;
+
+    // Aggregate material requirements across all order items via their products' BOM
+    const productIds = order.items
+      .map((item: any) => item.productId)
+      .filter((pid: any): pid is string => !!pid);
+
+    const materialNeeds = new Map<string, { materialId: string; name: string; type: string; color: string | null; gramsNeeded: number }>();
+
+    if (productIds.length > 0) {
+      const products = await this.prisma.product.findMany({
+        where: { id: { in: productIds } },
+        include: { components: { include: { material: true } } },
+      });
+      const productMap = new Map(products.map(p => [p.id, p]));
+
+      for (const item of order.items as any[]) {
+        if (!item.productId) continue;
+        const product = productMap.get(item.productId);
+        if (!product?.components) continue;
+        for (const comp of product.components) {
+          const key = comp.materialId;
+          const existing = materialNeeds.get(key);
+          const gramsForItem = comp.gramsUsed * comp.quantity * item.quantity;
+          if (existing) {
+            existing.gramsNeeded += gramsForItem;
+          } else {
+            materialNeeds.set(key, {
+              materialId: comp.materialId,
+              name: comp.material?.name || 'Unknown',
+              type: comp.material?.type || '',
+              color: comp.material?.color || null,
+              gramsNeeded: gramsForItem,
+            });
+          }
+        }
+      }
+    }
+
+    // Fetch active stock for all needed materials in one query
+    const materialIds = Array.from(materialNeeds.keys());
+    let materialAvailability: any[] = [];
+    if (materialIds.length > 0) {
+      // 1. Get total available stock
+      const stockData = await this.prisma.spool.groupBy({
+        by: ['materialId'],
+        where: { materialId: { in: materialIds }, isActive: true },
+        _sum: { currentWeight: true },
+      });
+      const stockMap = new Map(stockData.map(s => [s.materialId, s._sum.currentWeight || 0]));
+
+      // 2. Calculate reserved stock from other open orders (CONFIRMED, IN_PRODUCTION)
+      const reservingOrders = await this.prisma.order.findMany({
+        where: {
+          id: { not: id },
+          status: { in: ['CONFIRMED', 'IN_PRODUCTION'] },
+        },
+        select: {
+          id: true,
+          items: { select: { productId: true, quantity: true } },
+        },
+      });
+
+      // Gather all product IDs from reserving orders
+      const reservingProductIds = new Set<string>();
+      for (const ro of reservingOrders) {
+        for (const item of ro.items) {
+          if (item.productId) reservingProductIds.add(item.productId);
+        }
+      }
+
+      // Fetch BOM for all reserving products in one query
+      const reservingProducts = reservingProductIds.size > 0
+        ? await this.prisma.product.findMany({
+            where: { id: { in: Array.from(reservingProductIds) } },
+            include: { components: { select: { materialId: true, gramsUsed: true, quantity: true } } },
+          })
+        : [];
+      const reservingProductMap = new Map(reservingProducts.map(p => [p.id, p]));
+
+      const reservedByOrders = new Map<string, number>();
+      const reservingOrderIds = new Set<string>();
+      for (const ro of reservingOrders) {
+        reservingOrderIds.add(ro.id);
+        for (const item of ro.items) {
+          if (!item.productId) continue;
+          const product = reservingProductMap.get(item.productId);
+          if (!product?.components) continue;
+          for (const comp of product.components) {
+            if (!materialIds.includes(comp.materialId)) continue;
+            const grams = comp.gramsUsed * comp.quantity * item.quantity;
+            reservedByOrders.set(comp.materialId, (reservedByOrders.get(comp.materialId) || 0) + grams);
+          }
+        }
+      }
+
+      // 3. Add reserved stock from standalone jobs (not tied to reserving orders)
+      const reservingJobs = await this.prisma.productionJob.findMany({
+        where: {
+          status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] },
+          // Exclude jobs tied to the current order
+          NOT: { orderId: id },
+        },
+        select: {
+          orderId: true,
+          materials: {
+            select: { materialId: true, gramsUsed: true },
+          },
+        },
+      });
+
+      for (const job of reservingJobs) {
+        // Skip jobs already counted via reserving orders
+        if (job.orderId && reservingOrderIds.has(job.orderId)) continue;
+        for (const jm of job.materials) {
+          if (!materialIds.includes(jm.materialId)) continue;
+          reservedByOrders.set(jm.materialId, (reservedByOrders.get(jm.materialId) || 0) + jm.gramsUsed);
+        }
+      }
+
+      materialAvailability = Array.from(materialNeeds.values()).map(need => {
+        const available = stockMap.get(need.materialId) || 0;
+        const reserved = reservedByOrders.get(need.materialId) || 0;
+        const freeStock = Math.max(0, available - reserved);
+        return {
+          ...need,
+          gramsNeeded: Math.round(need.gramsNeeded),
+          totalStock: Math.round(available),
+          reservedStock: Math.round(reserved),
+          freeStock: Math.round(freeStock),
+          hasEnoughStock: freeStock >= need.gramsNeeded,
+        };
+      });
+    }
+
+    return { ...order, materialAvailability };
   }
 
   async findForCustomer(customerId: string) {

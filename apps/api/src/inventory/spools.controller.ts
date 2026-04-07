@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateSpoolDto, UpdateSpoolDto, AdjustSpoolWeightDto } from '@printforge/types';
+import { Public } from '../auth/decorators/public.decorator';
 
 @Controller('spools')
 @UseGuards(JwtAuthGuard)
@@ -23,6 +24,7 @@ export class SpoolsController {
     return this.spoolsService.findAll(materialId);
   }
 
+  @Public()
   @Get('by-pfid/:pfid')
   findByPfid(@Param('pfid') pfid: string) {
     return this.spoolsService.findByPfid(pfid);

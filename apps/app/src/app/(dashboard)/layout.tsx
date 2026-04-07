@@ -1,14 +1,37 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies();
-  const token = cookieStore.get('token');
+// Public pages that render inside the dashboard route group but without chrome
+const publicPathPatterns = [
+  /^\/inventory\/spool\/[A-Za-z0-9-]+$/,
+];
 
-  if (!token) {
-    redirect('/staff-login');
+function isPublicPage(pathname: string): boolean {
+  return publicPathPatterns.some(p => p.test(pathname));
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const headerList = headers();
+  const pathname = headerList.get('x-pathname') || '';
+  const isPublic = isPublicPage(pathname);
+
+  if (!isPublic) {
+    const cookieStore = cookies();
+    const token = cookieStore.get('token');
+    if (!token) {
+      redirect('/staff-login');
+    }
+  }
+
+  // Public pages: minimal layout without sidebar/topbar
+  if (isPublic) {
+    return (
+      <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
+        {children}
+      </main>
+    );
   }
 
   return (

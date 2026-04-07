@@ -112,12 +112,31 @@ export class SpoolsService {
   }
 
   async findByPfid(pfid: string) {
+    // Normalize: uppercase, ensure PF- prefix
+    let normalized = pfid.toUpperCase().trim();
+    if (!normalized.startsWith('PF-')) {
+      normalized = `PF-${normalized}`;
+    }
+
     const spool = await this.prisma.spool.findUnique({
-      where: { printforgeId: pfid },
-      include: { material: true, location: true },
+      where: { printforgeId: normalized },
+      include: {
+        material: {
+          select: { id: true, name: true, type: true, color: true, brand: true },
+        },
+        location: { select: { id: true, name: true } },
+        jobMaterials: {
+          include: { job: { select: { id: true, name: true, status: true, createdAt: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
     });
     if (!spool) throw new NotFoundException('Spool not found');
-    return spool;
+
+    // Strip internal fields for public access
+    const { materialId, locationId, ...safe } = spool as any;
+    return safe;
   }
 
   async generateQrLabelsPdf(spoolIds: string[]): Promise<Buffer> {

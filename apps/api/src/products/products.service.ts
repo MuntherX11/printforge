@@ -62,13 +62,38 @@ export class ProductsService {
       where: { id },
       include: {
         components: {
-          include: { material: true },
+          include: {
+            material: {
+              include: {
+                spools: {
+                  where: { isActive: true },
+                  select: { id: true, currentWeight: true },
+                },
+              },
+            },
+          },
           orderBy: { sortOrder: 'asc' },
         },
       },
     });
     if (!product) throw new NotFoundException('Product not found');
-    return product;
+
+    // Enrich components with stock availability
+    const enrichedComponents = product.components.map((c: any) => {
+      const activeSpools = c.material?.spools || [];
+      const totalStock = activeSpools.reduce((sum: number, s: any) => sum + s.currentWeight, 0);
+      const gramsNeeded = c.gramsUsed * c.quantity;
+      const { spools, ...materialWithoutSpools } = c.material || {};
+      return {
+        ...c,
+        material: materialWithoutSpools,
+        totalStock: Math.round(totalStock),
+        gramsNeeded,
+        hasEnoughStock: totalStock >= gramsNeeded,
+      };
+    });
+
+    return { ...product, components: enrichedComponents };
   }
 
   async remove(id: string) {

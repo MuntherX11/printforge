@@ -13,10 +13,12 @@ import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function MaterialDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const [material, setMaterial] = useState<any>(null);
   const [locations, setLocations] = useState<any[]>([]);
   const [showScanner, setShowScanner] = useState(false);
@@ -27,6 +29,7 @@ export default function MaterialDetailPage() {
   const [saving, setSaving] = useState(false);
   const [selectedSpoolIds, setSelectedSpoolIds] = useState<Set<string>>(new Set());
   const [printingLabels, setPrintingLabels] = useState(false);
+  const [scannedFields, setScannedFields] = useState<any>(null);
 
   const load = () => {
     Promise.all([
@@ -186,26 +189,34 @@ export default function MaterialDetailPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">{material.brand} | {material.type} | {material.color}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowEditMaterial(true)}>
-            <Pencil className="h-4 w-4 mr-2" /> Edit
-          </Button>
-          <Button variant="destructive" onClick={handleDeleteMaterial}>
-            <Trash2 className="h-4 w-4 mr-2" /> Delete
-          </Button>
-          <Button variant="outline" onClick={() => setShowScanner(true)}>
-            <ScanLine className="h-4 w-4 mr-2" /> Scan Label
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handlePrintQrLabels}
-            disabled={selectedSpoolIds.size === 0 || printingLabels}
-          >
-            <QrCode className="h-4 w-4 mr-2" />
-            {printingLabels ? 'Generating...' : `Print QR Labels (${selectedSpoolIds.size})`}
-          </Button>
-          <Button onClick={() => setShowAddSpool(true)}>
-            <Plus className="h-4 w-4 mr-2" /> Add Spool
-          </Button>
+          {(user?.role === 'ADMIN' || user?.role === 'OPERATOR') && (
+            <Button variant="outline" onClick={() => setShowEditMaterial(true)}>
+              <Pencil className="h-4 w-4 mr-2" /> Edit
+            </Button>
+          )}
+          {user?.role === 'ADMIN' && (
+            <Button variant="destructive" onClick={handleDeleteMaterial}>
+              <Trash2 className="h-4 w-4 mr-2" /> Delete
+            </Button>
+          )}
+          {(user?.role === 'ADMIN' || user?.role === 'OPERATOR') && (
+            <>
+              <Button variant="outline" onClick={() => setShowScanner(true)}>
+                <ScanLine className="h-4 w-4 mr-2" /> Scan Label
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handlePrintQrLabels}
+                disabled={selectedSpoolIds.size === 0 || printingLabels}
+              >
+                <QrCode className="h-4 w-4 mr-2" />
+                {printingLabels ? 'Generating...' : `Print QR Labels (${selectedSpoolIds.size})`}
+              </Button>
+              <Button onClick={() => setShowAddSpool(true)}>
+                <Plus className="h-4 w-4 mr-2" /> Add Spool
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -273,31 +284,35 @@ export default function MaterialDetailPage() {
                   </TableCell>
                   <TableCell>{formatDate(s.createdAt)}</TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => setEditingSpool(s)}
-                        className="p-1 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
-                        title="Edit spool"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      {s.isActive && (
+                    {(user?.role === 'ADMIN' || user?.role === 'OPERATOR') && (
+                      <div className="flex gap-1">
                         <button
-                          onClick={() => handleDeactivateSpool(s.id)}
-                          className="p-1 text-gray-400 hover:text-yellow-600"
-                          title="Deactivate spool"
+                          onClick={() => setEditingSpool(s)}
+                          className="p-1 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400"
+                          title="Edit spool"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Pencil className="h-4 w-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteSpool(s.id)}
-                        className="p-1 text-gray-400 hover:text-red-600"
-                        title="Delete spool permanently"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-300" />
-                      </button>
-                    </div>
+                        {s.isActive && (
+                          <button
+                            onClick={() => handleDeactivateSpool(s.id)}
+                            className="p-1 text-gray-400 hover:text-yellow-600"
+                            title="Deactivate spool"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                        {user?.role === 'ADMIN' && (
+                          <button
+                            onClick={() => handleDeleteSpool(s.id)}
+                            className="p-1 text-gray-400 hover:text-red-600"
+                            title="Delete spool permanently"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-300" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -307,9 +322,34 @@ export default function MaterialDetailPage() {
       </Card>
 
       {/* Add Spool Dialog */}
-      <Dialog open={showAddSpool} onClose={() => setShowAddSpool(false)} title="Add Spool">
-        <form onSubmit={handleAddSpool} className="space-y-4">
-          <Input name="initialWeight" label="Net Filament Weight (g)" type="number" step="0.1" required />
+      <Dialog open={showAddSpool} onClose={() => { setShowAddSpool(false); setScannedFields(null); }} title="Add Spool">
+        {scannedFields && (
+          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+            <p className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">Scanned Label Data</p>
+            <div className="flex flex-wrap gap-2 text-xs text-blue-600 dark:text-blue-400">
+              {scannedFields.brand && <span>Brand: {scannedFields.brand}</span>}
+              {scannedFields.materialType && <span>Type: {scannedFields.materialType}</span>}
+              {scannedFields.color && <span>Color: {scannedFields.color}</span>}
+              {scannedFields.weight && <span>Weight: {scannedFields.weight}g</span>}
+              {scannedFields.diameter && <span>Dia: {scannedFields.diameter}mm</span>}
+              {scannedFields.printTemp && <span>Temp: {scannedFields.printTemp}°C</span>}
+            </div>
+            {(scannedFields.brand || scannedFields.materialType || scannedFields.color) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditMaterial(true);
+                  setScannedFields(null);
+                }}
+                className="mt-2 text-xs text-blue-700 dark:text-blue-300 underline hover:no-underline"
+              >
+                Review Material Details
+              </button>
+            )}
+          </div>
+        )}
+        <form onSubmit={(e) => { handleAddSpool(e); setScannedFields(null); }} className="space-y-4">
+          <Input name="initialWeight" label="Net Filament Weight (g)" type="number" step="0.1" defaultValue={scannedFields?.weight || ''} required />
           <Input name="currentWeight" label="Current Weight (g) — leave blank if new spool" type="number" step="0.1" />
           <Input name="spoolWeight" label="Empty Spool Weight (g)" type="number" defaultValue="200" />
           <Input name="purchasePrice" label="Purchase Price" type="number" step="0.001" />
@@ -386,18 +426,8 @@ export default function MaterialDetailPage() {
         open={showScanner}
         onClose={() => setShowScanner(false)}
         onResult={(fields) => {
-          // Pre-fill the add spool dialog with scanned data
+          setScannedFields(fields);
           setShowAddSpool(true);
-          // The scanned fields are displayed as a toast/alert for now
-          const parts = [];
-          if (fields.brand) parts.push(`Brand: ${fields.brand}`);
-          if (fields.materialType) parts.push(`Type: ${fields.materialType}`);
-          if (fields.color) parts.push(`Color: ${fields.color}`);
-          if (fields.weight) parts.push(`Weight: ${fields.weight}g`);
-          if (fields.printTemp) parts.push(`Temp: ${fields.printTemp}°C`);
-          if (parts.length > 0) {
-            alert(`Detected: ${parts.join(', ')}\n\nPlease fill in the spool details.`);
-          }
         }}
       />
     </div>
