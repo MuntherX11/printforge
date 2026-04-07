@@ -346,6 +346,16 @@ export default function MaterialDetailPage() {
                 Review Material Details
               </button>
             )}
+            {scannedFields.rawText && (
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer text-blue-700 dark:text-blue-300 hover:underline">
+                  Show raw OCR text
+                </summary>
+                <pre className="mt-2 p-2 bg-white dark:bg-gray-800 rounded max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                  {scannedFields.rawText}
+                </pre>
+              </details>
+            )}
           </div>
         )}
         <form onSubmit={(e) => { handleAddSpool(e); setScannedFields(null); }} className="space-y-4">

@@ -14,6 +14,7 @@ export interface ScannedFields {
   printTemp?: string;
   upc?: string;
   ean?: string;
+  rawText?: string;
 }
 
 interface SpoolLabelScannerProps {
@@ -162,7 +163,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
         setError('Could not extract any fields from the label. Try a clearer, well-lit photo straight-on.');
         return;
       }
-      onResult(fields);
+      onResult({ ...fields, rawText: text });
       onClose();
     } catch (err: any) {
       console.error('OCR error:', err);

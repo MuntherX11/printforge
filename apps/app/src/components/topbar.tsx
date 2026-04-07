@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, LogOut, User, Sun, Moon } from 'lucide-react';
+import { Bell, LogOut, User, Sun, Moon, Menu } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { getTheme, toggleTheme } from '@/lib/theme';
+import { useSidebar } from '@/components/sidebar-provider';
 import type { AuthUser } from '@printforge/types';
 
 export function Topbar() {
@@ -13,6 +14,7 @@ export function Topbar() {
   const [notifCount, setNotifCount] = useState(0);
   const [isDark, setIsDark] = useState(false);
   const router = useRouter();
+  const { toggle } = useSidebar();
 
   useEffect(() => {
     api.get<AuthUser>('/auth/me').then(setUser).catch(() => {});
@@ -26,9 +28,17 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-white dark:bg-gray-900 px-6">
-      <div />
-      <div className="flex items-center gap-4">
+    <header className="flex h-16 items-center justify-between border-b bg-white dark:bg-gray-900 px-4 md:px-6">
+      <button
+        type="button"
+        onClick={toggle}
+        className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        aria-label="Open sidebar"
+      >
+        <Menu className="h-6 w-6" />
+      </button>
+      <div className="hidden md:block" />
+      <div className="flex items-center gap-2 md:gap-4">
         <button
           onClick={() => { const next = toggleTheme(); setIsDark(next === 'dark'); }}
           className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"

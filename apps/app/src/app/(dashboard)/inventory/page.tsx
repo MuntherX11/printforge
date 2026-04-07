@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
@@ -20,6 +21,7 @@ export default function InventoryPage() {
   const [uploading, setUploading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scannedFields, setScannedFields] = useState<any>(null);
+  const [showRawOcr, setShowRawOcr] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const loadMaterials = () => api.get<any[]>('/materials').then(setMaterials).catch(console.error).finally(() => setLoading(false));
@@ -45,6 +47,11 @@ export default function InventoryPage() {
 
   function handleScanResult(fields: any) {
     setScannedFields(fields);
+    setShowRawOcr(false);
+  }
+
+  function updateField(key: string, value: string) {
+    setScannedFields((prev: any) => ({ ...prev, [key]: value }));
   }
 
   async function handleConfirmCreate() {
@@ -200,47 +207,66 @@ export default function InventoryPage() {
         onResult={handleScanResult}
       />
 
-      <Dialog open={!!scannedFields} onClose={() => setScannedFields(null)} title="Confirm Scanned Label">
+      <Dialog open={!!scannedFields} onClose={() => setScannedFields(null)} title="Review Scanned Label">
         {scannedFields && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              {scannedFields.brand && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Brand</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.brand}</span>
-                </>
-              )}
-              {scannedFields.materialType && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Type</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.materialType}</span>
-                </>
-              )}
-              {scannedFields.color && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Color</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.color}</span>
-                </>
-              )}
-              {scannedFields.diameter && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Diameter</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.diameter}mm</span>
-                </>
-              )}
-              {scannedFields.weight && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Weight</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.weight}g</span>
-                </>
-              )}
-              {scannedFields.printTemp && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Print Temp</span>
-                  <span className="font-medium dark:text-gray-200">{scannedFields.printTemp}°C</span>
-                </>
-              )}
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Review and edit any fields before creating the spool. Missing fields can be filled in manually.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Brand"
+                value={scannedFields.brand || ''}
+                onChange={(e) => updateField('brand', e.target.value)}
+                placeholder="e.g. eSUN"
+              />
+              <Input
+                label="Type"
+                value={scannedFields.materialType || ''}
+                onChange={(e) => updateField('materialType', e.target.value)}
+                placeholder="PLA"
+              />
+              <Input
+                label="Color"
+                value={scannedFields.color || ''}
+                onChange={(e) => updateField('color', e.target.value)}
+                placeholder="e.g. Black"
+              />
+              <Input
+                label="Diameter (mm)"
+                value={scannedFields.diameter || ''}
+                onChange={(e) => updateField('diameter', e.target.value)}
+                placeholder="1.75"
+              />
+              <Input
+                label="Weight (g)"
+                value={scannedFields.weight || ''}
+                onChange={(e) => updateField('weight', e.target.value)}
+                placeholder="1000"
+              />
+              <Input
+                label="Print Temp (°C)"
+                value={scannedFields.printTemp || ''}
+                onChange={(e) => updateField('printTemp', e.target.value)}
+                placeholder="210-230"
+              />
             </div>
+            {scannedFields.rawText && (
+              <div className="text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowRawOcr((s) => !s)}
+                  className="text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  {showRawOcr ? 'Hide' : 'Show'} raw OCR text
+                </button>
+                {showRawOcr && (
+                  <pre className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                    {scannedFields.rawText}
+                  </pre>
+                )}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setScannedFields(null)}>Cancel</Button>
               <Button onClick={handleConfirmCreate} disabled={creating}>
