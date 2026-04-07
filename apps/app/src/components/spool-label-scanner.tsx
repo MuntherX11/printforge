@@ -47,9 +47,9 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     try {
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng', 1, {
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-simd-lstm.wasm.js',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        workerPath: '/worker.min.js',
+        corePath: '/tesseract-core-simd-lstm.wasm.js',
+        langPath: '/tessdata',
         workerBlobURL: false,
         logger: (m: any) => {
           if (m.status) setProgress(m.status);
