@@ -27,6 +27,8 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
+  const [rawOcrText, setRawOcrText] = useState<string>('');
+  const [showRaw, setShowRaw] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
@@ -62,9 +64,10 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, w, h);
 
-          // Grayscale + contrast stretch
+          // Grayscale + Otsu binarization
           const imgData = ctx.getImageData(0, 0, w, h);
           const data = imgData.data;
+          const totalPixels = w * h;
 
           // First pass: grayscale + collect histogram
           const hist = new Uint32Array(256);
@@ -74,24 +77,32 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
             hist[gray]++;
           }
 
-          // Find 5th and 95th percentile for contrast stretch
-          const totalPixels = w * h;
-          const lowCut = totalPixels * 0.05;
-          const highCut = totalPixels * 0.95;
-          let cum = 0;
-          let lowVal = 0;
-          let highVal = 255;
-          for (let i = 0; i < 256; i++) {
-            cum += hist[i];
-            if (cum >= lowCut && lowVal === 0) lowVal = i;
-            if (cum >= highCut) { highVal = i; break; }
+          // Otsu's method: find threshold that maximizes between-class variance
+          let sum = 0;
+          for (let i = 0; i < 256; i++) sum += i * hist[i];
+          let sumB = 0;
+          let wB = 0;
+          let maxVar = 0;
+          let threshold = 127;
+          for (let t = 0; t < 256; t++) {
+            wB += hist[t];
+            if (wB === 0) continue;
+            const wF = totalPixels - wB;
+            if (wF === 0) break;
+            sumB += t * hist[t];
+            const mB = sumB / wB;
+            const mF = (sum - sumB) / wF;
+            const between = wB * wF * (mB - mF) * (mB - mF);
+            if (between > maxVar) {
+              maxVar = between;
+              threshold = t;
+            }
           }
-          const range = Math.max(1, highVal - lowVal);
 
-          // Second pass: contrast stretch
+          // Apply threshold (with slight bias toward white for thin label text)
+          const finalThreshold = Math.min(255, threshold + 10);
           for (let i = 0; i < data.length; i += 4) {
-            let v = data[i];
-            v = Math.max(0, Math.min(255, Math.round(((v - lowVal) / range) * 255)));
+            const v = data[i] >= finalThreshold ? 255 : 0;
             data[i] = data[i + 1] = data[i + 2] = v;
           }
 
@@ -112,6 +123,8 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
   async function processImage(file: File) {
     setScanning(true);
     setError('');
+    setRawOcrText('');
+    setShowRaw(false);
     setProgress('Preparing image...');
     if (preview) URL.revokeObjectURL(preview);
     setPreview(URL.createObjectURL(file));
@@ -141,6 +154,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       await worker.terminate();
 
       console.log('OCR raw text:', text);
+      setRawOcrText(text);
       const fields = parseLabel(text);
       console.log('Parsed fields:', fields);
 
@@ -185,23 +199,61 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       return null;
     };
 
-    // Brand detection (with fuzzy fallback for OCR substitutions)
+    // Brand detection: (1) labeled line, (2) substring, (3) Levenshtein word match
     const brands = ['eSUN', 'Bambu', 'Polymaker', 'Hatchbox', 'Overture', 'Sunlu', 'Creality', 'Prusament', 'PolyTerra', 'PolyLite', 'Anycubic', 'Elegoo'];
-    for (const brand of brands) {
-      const lower = brand.toLowerCase();
-      if (lowerText.includes(lower)) {
-        fields.brand = brand;
-        break;
+
+    const brandLineValue = findLineValue(/^(Brand|Manufacturer|Made\s*by)\s*[:.]?\s*/i);
+    if (brandLineValue) {
+      const firstWord = brandLineValue.split(/\s+/)[0];
+      const exact = brands.find(b => b.toLowerCase() === firstWord.toLowerCase());
+      if (exact) fields.brand = exact;
+      else if (firstWord.length >= 3) fields.brand = firstWord;
+    }
+
+    if (!fields.brand) {
+      for (const brand of brands) {
+        if (lowerText.includes(brand.toLowerCase())) {
+          fields.brand = brand;
+          break;
+        }
       }
-      const fuzzy = lower
-        .replace(/e/g, '[e@€]')
-        .replace(/o/g, '[o0]')
-        .replace(/s/g, '[s5]')
-        .replace(/l/g, '[l1iI]');
-      if (new RegExp(fuzzy, 'i').test(fullText)) {
-        fields.brand = brand;
-        break;
+    }
+
+    if (!fields.brand) {
+      // Levenshtein distance — tolerate single-char OCR errors
+      const lev = (a: string, b: string): number => {
+        if (a === b) return 0;
+        if (!a.length) return b.length;
+        if (!b.length) return a.length;
+        const prev = new Array(b.length + 1);
+        for (let i = 0; i <= b.length; i++) prev[i] = i;
+        for (let i = 1; i <= a.length; i++) {
+          let curr = i;
+          for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1;
+            const next = Math.min(curr + 1, prev[j] + 1, prev[j - 1] + cost);
+            prev[j - 1] = curr;
+            curr = next;
+          }
+          prev[b.length] = curr;
+        }
+        return prev[b.length];
+      };
+
+      const words = fullText.split(/[\s,;|/\\()[\]{}]+/).filter(w => w.length >= 3 && w.length <= 15);
+      let bestBrand: string | null = null;
+      let bestDist = Infinity;
+      for (const word of words) {
+        for (const brand of brands) {
+          const maxAllowed = brand.length <= 5 ? 1 : 2;
+          const d = lev(word, brand);
+          if (d <= maxAllowed && d < bestDist) {
+            bestDist = d;
+            bestBrand = brand;
+          }
+        }
       }
+      if (bestBrand) fields.brand = bestBrand;
     }
 
     // Material type — try "Name:" line first, then standalone
@@ -219,7 +271,13 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     const colorValue = findLineValue(/^Colou?r\s*[:.]?\s*/i);
     if (colorValue) {
       // Strip trailing OCR garbage (non-letter chars, numbers, etc.)
-      const cleaned = colorValue.replace(/[^A-Za-z\s]+.*$/, '').trim();
+      let cleaned = colorValue.replace(/[^A-Za-z\s]+.*$/, '').trim();
+      // Drop trailing 1-2 letter words ("Me", "Ie", "Mm" etc — typical OCR garbage)
+      const colorTokens = cleaned.split(/\s+/);
+      while (colorTokens.length > 1 && colorTokens[colorTokens.length - 1].length <= 2) {
+        colorTokens.pop();
+      }
+      cleaned = colorTokens.join(' ');
       if (cleaned.length >= 2) {
         // Title case
         fields.color = cleaned.split(/\s+/)
@@ -330,6 +388,23 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
         )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {rawOcrText && error && (
+          <div className="text-xs">
+            <button
+              type="button"
+              onClick={() => setShowRaw(s => !s)}
+              className="text-brand-600 hover:underline"
+            >
+              {showRaw ? 'Hide' : 'Show'} raw OCR text
+            </button>
+            {showRaw && (
+              <pre className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px]">
+                {rawOcrText || '(empty)'}
+              </pre>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
