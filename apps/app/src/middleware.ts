@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server';
 // Public routes that don't require authentication
 const publicPatterns = [
   /^\/inventory\/spool\/[A-Za-z0-9-]+$/, // QR spool pages (PFID)
+  /^\/login$/,
+  /^\/signup$/,
   /^\/staff-login$/,
   /^\/customer-login$/,
   /^\/api\//,       // API routes handled by NestJS guards
@@ -27,7 +29,7 @@ export function middleware(request: NextRequest) {
   // For dashboard routes, check for auth token
   const token = request.cookies.get('token');
   if (!token && pathname !== '/') {
-    return NextResponse.redirect(new URL('/staff-login', request.url));
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
   const response = NextResponse.next();
