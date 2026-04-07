@@ -315,7 +315,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
             if (target.includes(' ')) {
               const normTwo = twoWord.toLowerCase().replace(/[^a-z ]/g, '');
               const normTarget = target.toLowerCase();
-              const maxDist = Math.max(1, Math.floor(normTarget.length * 0.35));
+              const maxDist = Math.max(1, Math.floor(normTarget.length * 0.5));
               if (lev(normTwo, normTarget) <= maxDist) {
                 const v = parts.slice(2).join(' ');
                 if (v) return v;
@@ -327,8 +327,8 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
         if (normLabel.length < 3) continue;
         for (const target of targets) {
           const normTarget = target.toLowerCase().replace(/[^a-z]/g, '');
-          // Allow ~35% edit distance, min 1
-          const maxDist = Math.max(1, Math.floor(normTarget.length * 0.35));
+          // Allow ~50% edit distance, min 1 (tolerates "Inlor"->"color" at 2 edits)
+          const maxDist = Math.max(1, Math.floor(normTarget.length * 0.5));
           if (lev(normLabel, normTarget) <= maxDist && valuePart) {
             return valuePart;
           }
@@ -446,20 +446,34 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     }
 
     // Weight — fuzzy label + OCR digit-substitution normalization
-    // Handles "TkgiN" where T should be 1, "lkg" where l is 1, etc.
+    // Handles "TkgiN" where T should be 1, "lkg" where l is 1,
+    // "Thg" where k was misread as h, etc.
     const ocrDigitNormalize = (s: string) =>
       s.replace(/[TtIilO]/g, (c) => (c === 'O' ? '0' : '1'));
     const parseWeightStr = (s: string): string | null => {
+      // Standard pattern first
       let m = s.match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+      let unit: 'kg' | 'g' | null = null;
+      if (m) unit = m[2].toLowerCase() as 'kg' | 'g';
       if (!m) {
-        // Retry with digit-like chars normalized
-        const normalized = ocrDigitNormalize(s);
+        // Retry with digit-like chars normalized + fuzzy unit (k misread as h/b)
+        const normalized = ocrDigitNormalize(s).replace(/\b([hb])g\b/gi, 'kg');
         m = normalized.match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+        if (m) unit = m[2].toLowerCase() as 'kg' | 'g';
       }
-      if (!m) return null;
+      if (!m) {
+        // Even looser: digit directly followed by [khb]g (no word boundary, handles "1hg11N")
+        const normalized = ocrDigitNormalize(s);
+        const m2 = normalized.match(/(\d+(?:[.,]\d+)?)\s*([khb]g)/i);
+        if (m2) {
+          m = m2;
+          unit = 'kg';
+        }
+      }
+      if (!m || !unit) return null;
       const val = parseFloat(m[1].replace(',', '.'));
       if (!isFinite(val) || val <= 0) return null;
-      const grams = m[2].toLowerCase() === 'kg' ? val * 1000 : val;
+      const grams = unit === 'kg' ? val * 1000 : val;
       // Sanity cap — labels usually 250g to 5kg
       if (grams < 50 || grams > 10000) return null;
       return String(Math.round(grams));
