@@ -186,6 +186,26 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     const fullText = rawLines.join(' ');
     const lowerText = fullText.toLowerCase();
 
+    // Levenshtein distance (hoisted so all field matchers can use it)
+    const lev = (a: string, b: string): number => {
+      if (a === b) return 0;
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      const prev: number[] = new Array(b.length + 1);
+      for (let i = 0; i <= b.length; i++) prev[i] = i;
+      for (let i = 1; i <= a.length; i++) {
+        let curr = i;
+        for (let j = 1; j <= b.length; j++) {
+          const cost = a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1;
+          const next = Math.min(curr + 1, prev[j] + 1, prev[j - 1] + cost);
+          prev[j - 1] = curr;
+          curr = next;
+        }
+        prev[b.length] = curr;
+      }
+      return prev[b.length];
+    };
+
     // Helper: find the value of a labeled field on its own line.
     // Looks for "Label:" or "Label" anywhere, returns rest of line.
     const findLineValue = (labelPattern: RegExp): string | null => {
@@ -200,10 +220,57 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       return null;
     };
 
+    // Fuzzy label finder: match the leading word(s) of a line against a target
+    // label using Levenshtein. Returns everything after the matched label.
+    // Handles mangled OCR labels like "olor"≈Color, "Doaereter"≈Diameter,
+    // "Punt Temp"≈Print Temp, "Nate"≈Name.
+    const findFuzzyLabelValue = (...targets: string[]): string | null => {
+      for (const line of rawLines) {
+        // Try to split label from value — prefer colon, else split by whitespace
+        let labelPart: string;
+        let valuePart: string;
+        const colonIdx = line.search(/[:.]/);
+        if (colonIdx > 0 && colonIdx < 30) {
+          labelPart = line.slice(0, colonIdx);
+          valuePart = line.slice(colonIdx + 1).trim();
+        } else {
+          // Try 1-word and 2-word label prefixes
+          const parts = line.split(/\s+/);
+          if (parts.length < 2) continue;
+          labelPart = parts[0];
+          valuePart = parts.slice(1).join(' ');
+          // Also try 2-word label (for "Print Temp")
+          const twoWord = parts.slice(0, 2).join(' ');
+          for (const target of targets) {
+            if (target.includes(' ')) {
+              const normTwo = twoWord.toLowerCase().replace(/[^a-z ]/g, '');
+              const normTarget = target.toLowerCase();
+              const maxDist = Math.max(1, Math.floor(normTarget.length * 0.35));
+              if (lev(normTwo, normTarget) <= maxDist) {
+                const v = parts.slice(2).join(' ');
+                if (v) return v;
+              }
+            }
+          }
+        }
+        const normLabel = labelPart.toLowerCase().replace(/[^a-z]/g, '');
+        if (normLabel.length < 3) continue;
+        for (const target of targets) {
+          const normTarget = target.toLowerCase().replace(/[^a-z]/g, '');
+          // Allow ~35% edit distance, min 1
+          const maxDist = Math.max(1, Math.floor(normTarget.length * 0.35));
+          if (lev(normLabel, normTarget) <= maxDist && valuePart) {
+            return valuePart;
+          }
+        }
+      }
+      return null;
+    };
+
     // Brand detection: (1) labeled line, (2) substring, (3) Levenshtein word match
     const brands = ['eSUN', 'Bambu', 'Polymaker', 'Hatchbox', 'Overture', 'Sunlu', 'Creality', 'Prusament', 'PolyTerra', 'PolyLite', 'Anycubic', 'Elegoo'];
 
-    const brandLineValue = findLineValue(/^(Brand|Manufacturer|Made\s*by)\s*[:.]?\s*/i);
+    const brandLineValue = findFuzzyLabelValue('Brand', 'Manufacturer', 'Made by');
     if (brandLineValue) {
       const firstWord = brandLineValue.split(/\s+/)[0];
       const exact = brands.find(b => b.toLowerCase() === firstWord.toLowerCase());
@@ -221,26 +288,7 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     }
 
     if (!fields.brand) {
-      // Levenshtein distance — tolerate single-char OCR errors
-      const lev = (a: string, b: string): number => {
-        if (a === b) return 0;
-        if (!a.length) return b.length;
-        if (!b.length) return a.length;
-        const prev = new Array(b.length + 1);
-        for (let i = 0; i <= b.length; i++) prev[i] = i;
-        for (let i = 1; i <= a.length; i++) {
-          let curr = i;
-          for (let j = 1; j <= b.length; j++) {
-            const cost = a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1;
-            const next = Math.min(curr + 1, prev[j] + 1, prev[j - 1] + cost);
-            prev[j - 1] = curr;
-            curr = next;
-          }
-          prev[b.length] = curr;
-        }
-        return prev[b.length];
-      };
-
+      // Use hoisted lev function for word-level fuzzy match
       const words = fullText.split(/[\s,;|/\\()[\]{}]+/).filter(w => w.length >= 3 && w.length <= 15);
       let bestBrand: string | null = null;
       let bestDist = Infinity;
@@ -257,10 +305,10 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       if (bestBrand) fields.brand = bestBrand;
     }
 
-    // Material type — try "Name:" line first, then standalone
-    const nameValue = findLineValue(/^Name\s*[:.]?\s*/i);
+    // Material type — try fuzzy "Name:" line, then standalone match
+    const nameValue = findFuzzyLabelValue('Name', 'Material', 'Type');
     if (nameValue) {
-      const m = nameValue.match(/^([A-Z][A-Z0-9+]{1,8})/i);
+      const m = nameValue.match(/([A-Z][A-Z0-9+]{1,8})/i);
       if (m) fields.materialType = m[1].replace('+', '').toUpperCase();
     }
     if (!fields.materialType) {
@@ -268,8 +316,8 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       if (typeMatch) fields.materialType = typeMatch[1].replace('+', '').toUpperCase();
     }
 
-    // Color — try "Color:" line first (multi-word), then standalone color words
-    const colorValue = findLineValue(/^Colou?r\s*[:.]?\s*/i);
+    // Color — fuzzy label lookup (handles mangled "olor" etc)
+    const colorValue = findFuzzyLabelValue('Color', 'Colour');
     if (colorValue) {
       // Strip trailing OCR garbage (non-letter chars, numbers, etc.)
       let cleaned = colorValue.replace(/[^A-Za-z\s]+.*$/, '').trim();
@@ -296,26 +344,47 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       }
     }
 
-    // Diameter — try "Diameter:" line first, then anywhere
-    const diaValue = findLineValue(/^Diameter\s*[:.]?\s*/i);
+    // Diameter — fuzzy label + broadened regex (handles "175mm" without decimal)
+    const normalizeDia = (raw: string): string | null => {
+      // Match 1.75/2.85/3.00 with optional separator, or bare 175/285/300
+      const m = raw.match(/(1[.,]?7?5|2[.,]?8?5|3[.,]?0?0)\s*mm?/i);
+      if (!m) return null;
+      const digits = m[1].replace(/[.,]/g, '');
+      if (digits === '175') return '1.75';
+      if (digits === '285') return '2.85';
+      if (digits === '300') return '3.00';
+      return m[1].replace(',', '.');
+    };
+    const diaValue = findFuzzyLabelValue('Diameter');
     if (diaValue) {
-      const m = diaValue.match(/(1[.,]75|2[.,]85|3[.,]00)/);
-      if (m) fields.diameter = m[1].replace(',', '.');
+      const d = normalizeDia(diaValue);
+      if (d) fields.diameter = d;
     }
     if (!fields.diameter) {
-      const diaMatch = fullText.match(/(1[.,]75|2[.,]85|3[.,]00)\s*mm?/i);
-      if (diaMatch) fields.diameter = diaMatch[1].replace(',', '.');
+      const d = normalizeDia(fullText);
+      if (d) fields.diameter = d;
     }
 
-    // Weight — try "Weight:" line first, then full-text patterns
+    // Weight — fuzzy label + OCR digit-substitution normalization
+    // Handles "TkgiN" where T should be 1, "lkg" where l is 1, etc.
+    const ocrDigitNormalize = (s: string) =>
+      s.replace(/[TtIilO]/g, (c) => (c === 'O' ? '0' : '1'));
     const parseWeightStr = (s: string): string | null => {
-      const m = s.match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+      let m = s.match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+      if (!m) {
+        // Retry with digit-like chars normalized
+        const normalized = ocrDigitNormalize(s);
+        m = normalized.match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+      }
       if (!m) return null;
       const val = parseFloat(m[1].replace(',', '.'));
+      if (!isFinite(val) || val <= 0) return null;
       const grams = m[2].toLowerCase() === 'kg' ? val * 1000 : val;
+      // Sanity cap — labels usually 250g to 5kg
+      if (grams < 50 || grams > 10000) return null;
       return String(Math.round(grams));
     };
-    const weightValue = findLineValue(/^(Weight|N\.?\s*W\.?|Net\s*Weight)\s*[:.]?\s*/i);
+    const weightValue = findFuzzyLabelValue('Weight', 'Net Weight', 'NW');
     if (weightValue) {
       const w = parseWeightStr(weightValue);
       if (w) fields.weight = w;
@@ -325,8 +394,8 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
       if (w) fields.weight = w;
     }
 
-    // Print temp — try "Print Temp:" line first, then anywhere
-    const tempValue = findLineValue(/^(Print\s*Temp|Temperature|Temp)\s*[:.]?\s*/i);
+    // Print temp — fuzzy label lookup (handles "Punt Temp" etc)
+    const tempValue = findFuzzyLabelValue('Print Temp', 'Print Temperature', 'Temperature', 'Temp');
     const parseTempStr = (s: string): string | null => {
       const m = s.match(/(\d{2,3})\s*[-–~]\s*(\d{2,3})/);
       return m ? `${m[1]}-${m[2]}` : null;

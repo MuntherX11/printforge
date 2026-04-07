@@ -219,7 +219,13 @@ export default function InventoryPage() {
                 value={scannedFields.brand || ''}
                 onChange={(e) => updateField('brand', e.target.value)}
                 placeholder="e.g. eSUN"
+                list="known-brands"
               />
+              <datalist id="known-brands">
+                {['eSUN', 'Bambu', 'Polymaker', 'Hatchbox', 'Overture', 'Sunlu', 'Creality', 'Prusament', 'PolyTerra', 'PolyLite', 'Anycubic', 'Elegoo'].map(b => (
+                  <option key={b} value={b} />
+                ))}
+              </datalist>
               <Input
                 label="Type"
                 value={scannedFields.materialType || ''}
