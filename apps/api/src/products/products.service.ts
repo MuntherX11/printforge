@@ -239,11 +239,94 @@ export class ProductsService {
     };
   }
 
+  /**
+   * Map a hex color to the nearest named filament color using RGB distance.
+   */
+  private hexToColorName(hex: string): string {
+    const named: Record<string, [number, number, number]> = {
+      Black:   [0, 0, 0],
+      White:   [255, 255, 255],
+      Red:     [255, 0, 0],
+      Blue:    [0, 0, 255],
+      Green:   [0, 128, 0],
+      Yellow:  [255, 255, 0],
+      Orange:  [255, 128, 0],
+      Purple:  [128, 0, 128],
+      Pink:    [255, 192, 203],
+      Brown:   [128, 64, 0],
+      Grey:    [128, 128, 128],
+      Silver:  [192, 192, 192],
+      Gold:    [255, 215, 0],
+      Beige:   [245, 222, 179],
+      Cyan:    [0, 206, 209],
+      Teal:    [0, 128, 128],
+      Navy:    [0, 0, 128],
+      Magenta: [255, 0, 255],
+      Natural: [240, 225, 200],
+    };
+    const h = hex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) || 0;
+    const g = parseInt(h.slice(2, 4), 16) || 0;
+    const b = parseInt(h.slice(4, 6), 16) || 0;
+
+    let bestName = 'Black';
+    let bestDist = Infinity;
+    for (const [name, [nr, ng, nb]] of Object.entries(named)) {
+      const d = (r - nr) ** 2 + (g - ng) ** 2 + (b - nb) ** 2;
+      if (d < bestDist) {
+        bestDist = d;
+        bestName = name;
+      }
+    }
+    return bestName;
+  }
+
+  /**
+   * Find a material by type + color, or auto-create one (no spool, stock = 0).
+   */
+  private async findOrCreateMaterial(
+    allMaterials: any[],
+    materialType: string,
+    colorHex?: string,
+  ): Promise<string> {
+    const typeUpper = materialType.toUpperCase();
+    const colorName = colorHex ? this.hexToColorName(colorHex) : null;
+
+    // Try type + color match first
+    if (colorName) {
+      const match = allMaterials.find(
+        m => m.type.toUpperCase() === typeUpper &&
+          m.color?.toLowerCase() === colorName.toLowerCase(),
+      );
+      if (match) return match.id;
+    }
+
+    // Exact type match (no color filter) as fallback only if no color info
+    if (!colorName) {
+      const typeMatch = allMaterials.find(m => m.type.toUpperCase() === typeUpper);
+      if (typeMatch) return typeMatch.id;
+      if (allMaterials.length > 0) return allMaterials[0].id;
+    }
+
+    // Auto-create material with the parsed type + color (no spool = 0 stock)
+    const created = await this.prisma.material.create({
+      data: {
+        name: `${materialType} ${colorName || 'Unknown'}`,
+        type: typeUpper as any,
+        color: colorName || null,
+        costPerGram: 0,
+        density: 1.24,
+      },
+    });
+    allMaterials.push(created); // cache so subsequent files can match
+    return created.id;
+  }
+
   async onboardFromGcode(productId: string, files: any[]) {
     await this.findOne(productId);
     const results: Array<{ fileName: string; componentsCreated: number }> = [];
 
-    // Get all materials for type matching
+    // Get all materials for type + color matching
     const allMaterials = await this.prisma.material.findMany();
 
     for (const file of files) {
@@ -267,8 +350,8 @@ export class ProductsService {
           if (toolGrams === 0) continue;
 
           const materialType = tool.materialType || analysis.filamentType || 'PLA';
-          const matchedMaterial = allMaterials.find(m =>
-            m.type.toUpperCase() === materialType.toUpperCase()
+          const materialId = await this.findOrCreateMaterial(
+            allMaterials, materialType, tool.colorHex,
           );
 
           // Proportional time split based on grams
@@ -279,7 +362,7 @@ export class ProductsService {
           await this.prisma.productComponent.create({
             data: {
               productId,
-              materialId: matchedMaterial?.id || allMaterials[0]?.id,
+              materialId,
               description: `${fileName} - Tool ${tool.index}`,
               gramsUsed: toolGrams,
               printMinutes: toolMinutes,
@@ -299,14 +382,15 @@ export class ProductsService {
         }
 
         const materialType = analysis.filamentType || 'PLA';
-        const matchedMaterial = allMaterials.find(m =>
-          m.type.toUpperCase() === materialType.toUpperCase()
+        const singleToolHex = analysis.filamentColors?.[0] || analysis.tools?.[0]?.colorHex;
+        const materialId = await this.findOrCreateMaterial(
+          allMaterials, materialType, singleToolHex,
         );
 
         await this.prisma.productComponent.create({
           data: {
             productId,
-            materialId: matchedMaterial?.id || allMaterials[0]?.id,
+            materialId,
             description: fileName.replace(/\.gcode$/i, ''),
             gramsUsed,
             printMinutes: analysis.estimatedTimeSeconds ? Math.round(analysis.estimatedTimeSeconds / 60) : 0,
