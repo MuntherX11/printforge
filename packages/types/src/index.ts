@@ -126,6 +126,7 @@ export enum NotificationType {
   DESIGN_REVISION_UPLOADED = 'DESIGN_REVISION_UPLOADED',
   DESIGN_APPROVED = 'DESIGN_APPROVED',
   DESIGN_CHANGES_REQUESTED = 'DESIGN_CHANGES_REQUESTED',
+  MAINTENANCE_DUE = 'MAINTENANCE_DUE',
   SYSTEM = 'SYSTEM',
 }
 
@@ -402,6 +403,47 @@ export interface ProductionPlanOverride {
   toProduce: number;
   printerId?: string;
   spoolId?: string;
+}
+
+// ============ FAILED PRINT TRACKING ============
+
+export interface FailJobDto {
+  failureReason: string;
+  wasteGrams?: number;
+}
+
+export interface JobFailureStats {
+  totalJobs: number;
+  failedJobs: number;
+  failureRate: number;
+  totalWasteGrams: number;
+  reprintCount: number;
+}
+
+// ============ MAINTENANCE ============
+
+export enum MaintenanceType {
+  SCHEDULED = 'SCHEDULED',
+  UNSCHEDULED = 'UNSCHEDULED',
+  CALIBRATION = 'CALIBRATION',
+}
+
+export interface CreateMaintenanceLogDto {
+  type: MaintenanceType;
+  description: string;
+  scheduledDate?: string;
+  cost?: number;
+  notes?: string;
+}
+
+export interface CompleteMaintenanceDto {
+  downtimeMinutes?: number;
+  cost?: number;
+  notes?: string;
+}
+
+export interface UpdatePrinterMaintenanceDto {
+  maintenanceIntervalHours?: number;
 }
 
 // ============ COSTING ============

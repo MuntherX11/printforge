@@ -2,6 +2,39 @@
 
 All notable changes to PrintForge are documented here.
 
+## [v2.8] — 2026-04-11
+
+### Added
+- **Failed Print Tracking** — Full failure lifecycle for production jobs
+  - `POST /jobs/:id/fail` — Mark job as failed with reason + waste grams, auto-deducts waste proportionally from assigned spools
+  - `POST /jobs/:id/reprint` ��� Clone failed job into new QUEUED job linked via `reprintOfId`
+  - `GET /jobs/stats/failures` — Failure rate, total waste grams, reprint count
+  - Job detail page: "Mark Failed" button with reason + waste input, failure info card (red), "Reprint" button on failed jobs, reprint chain display
+  - Production list page: failure stats summary cards (total jobs, failed, failure rate, wasted filament)
+
+- **Machine Maintenance** — Maintenance scheduling and tracking per printer
+  - `POST /printers/:id/maintenance` — Start maintenance (sets printer to MAINTENANCE status), logs type/description/cost
+  - `PATCH /printers/:id/maintenance/:logId/complete` — Complete maintenance, restore to IDLE, set next due date
+  - `GET /printers/:id/maintenance` — Maintenance history
+  - `GET /printers/maintenance/overdue` — List all printers with overdue maintenance
+  - `PATCH /printers/:id/maintenance-settings` — Set maintenance interval in hours
+  - Printer detail page: maintenance due warning banner, start/complete buttons, interval settings, history table, print hours stat
+  - Printer list page: "Overdue" and "In Maintenance" badges, print hours display
+
+### Changed
+- Job completion now accumulates print hours on the printer (`totalPrintHours`)
+- Job `findOne` now includes `reprintOf` and `reprints` relations
+- Printer `findOne` now includes `maintenanceLogs` and maintenance count
+- Printer `findAll` includes `maintenanceLogs` count for badge rendering
+
+### Schema Changes (requires `prisma db push`)
+- `ProductionJob`: added `failureReason String?`, `failedAt DateTime?`, `wasteGrams Float @default(0)`, `reprintOfId String?` (self-relation via "Reprints")
+- `Printer`: added `totalPrintHours Float @default(0)`, `maintenanceIntervalHours Float?`, `nextMaintenanceDue DateTime?`
+- `MaintenanceLog`: new model — `printerId`, `type` (SCHEDULED/UNSCHEDULED/CALIBRATION), `description`, `scheduledDate`, `completedDate`, `downtimeMinutes`, `cost`, `performedById`, `notes`
+- `NotificationType`: added `MAINTENANCE_DUE`
+
+---
+
 ## [v2.7] — 2026-04-11
 
 ### Added

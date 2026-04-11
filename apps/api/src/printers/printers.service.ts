@@ -25,7 +25,7 @@ export class PrintersService {
   async findAll() {
     return this.prisma.printer.findMany({
       include: {
-        _count: { select: { productionJobs: true } },
+        _count: { select: { productionJobs: true, maintenanceLogs: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -40,7 +40,11 @@ export class PrintersService {
           take: 20,
           select: { id: true, name: true, status: true, startedAt: true, completedAt: true, totalCost: true },
         },
-        _count: { select: { productionJobs: true } },
+        maintenanceLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        _count: { select: { productionJobs: true, maintenanceLogs: true } },
       },
     });
     if (!printer) throw new NotFoundException('Printer not found');

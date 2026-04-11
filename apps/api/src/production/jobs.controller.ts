@@ -4,7 +4,7 @@ import { JobMaterialsService } from './job-materials.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CreateProductionJobDto, UpdateProductionJobDto, AddJobMaterialDto } from '@printforge/types';
+import { CreateProductionJobDto, UpdateProductionJobDto, AddJobMaterialDto, FailJobDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 @Controller('jobs')
@@ -25,6 +25,11 @@ export class JobsController {
   @Get()
   findAll(@Query() query: PaginationDto, @Query('status') status?: string) {
     return this.jobsService.findAll(query, status);
+  }
+
+  @Get('stats/failures')
+  getFailureStats() {
+    return this.jobsService.getFailureStats();
   }
 
   @Get(':id')
@@ -75,5 +80,19 @@ export class JobsController {
   @Roles('ADMIN', 'OPERATOR')
   completeJob(@Param('id') id: string) {
     return this.jobsService.completeJob(id);
+  }
+
+  @Post(':id/fail')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  failJob(@Param('id') id: string, @Body() dto: FailJobDto) {
+    return this.jobsService.failJob(id, dto);
+  }
+
+  @Post(':id/reprint')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  reprintJob(@Param('id') id: string) {
+    return this.jobsService.reprintJob(id);
   }
 }

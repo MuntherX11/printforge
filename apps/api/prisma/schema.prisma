@@ -197,11 +197,42 @@ model Printer {
   isActive        Boolean             @default(true)
   status          PrinterStatus       @default(OFFLINE)
   lastSeen        DateTime?
+
+  // Maintenance tracking
+  totalPrintHours       Float         @default(0)
+  maintenanceIntervalHours Float?
+  nextMaintenanceDue    DateTime?
+
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
   productionJobs  ProductionJob[]
   defaultProducts Product[]
+  maintenanceLogs MaintenanceLog[]
+}
+
+model MaintenanceLog {
+  id              String              @id @default(cuid())
+  printerId       String
+  printer         Printer             @relation(fields: [printerId], references: [id], onDelete: Cascade)
+  type            MaintenanceType
+  description     String
+  scheduledDate   DateTime?
+  completedDate   DateTime?
+  downtimeMinutes Int?
+  cost            Float?
+  performedById   String?
+  notes           String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([printerId])
+}
+
+enum MaintenanceType {
+  SCHEDULED
+  UNSCHEDULED
+  CALIBRATION
 }
 
 enum PrinterConnectionType {
@@ -254,6 +285,14 @@ model ProductionJob {
   moonrakerJobId  String?
   gcodeFilename   String?
 
+  // Failed print tracking
+  failureReason   String?
+  failedAt        DateTime?
+  wasteGrams      Float      @default(0)
+  reprintOfId     String?
+  reprintOf       ProductionJob?  @relation("Reprints", fields: [reprintOfId], references: [id])
+  reprints        ProductionJob[] @relation("Reprints")
+
   startedAt       DateTime?
   completedAt     DateTime?
   createdAt       DateTime   @default(now())
@@ -264,6 +303,7 @@ model ProductionJob {
 
   @@index([status])
   @@index([orderId])
+  @@index([reprintOfId])
 }
 
 enum JobStatus {
@@ -602,5 +642,6 @@ enum NotificationType {
   DESIGN_REVISION_UPLOADED
   DESIGN_APPROVED
   DESIGN_CHANGES_REQUESTED
+  MAINTENANCE_DUE
   SYSTEM
 }

@@ -13,7 +13,8 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
-import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2 } from 'lucide-react';
+import { Dialog } from '@/components/ui/dialog';
+import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2, Wrench, Clock } from 'lucide-react';
 
 export default function PrinterDetailPage() {
   const { id } = useParams();
@@ -26,6 +27,8 @@ export default function PrinterDetailPage() {
   const [savingCosting, setSavingCosting] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
+  const [maintenanceLogs, setMaintenanceLogs] = useState<any[]>([]);
   const [formKey, setFormKey] = useState(0); // forces form re-render on save
 
   const load = useCallback(() => {
@@ -57,11 +60,52 @@ export default function PrinterDetailPage() {
     }
   }
 
+  // Load maintenance logs when printer loads
+  useEffect(() => {
+    if (printer?.id) {
+      api.get<any[]>(`/printers/${printer.id}/maintenance`).then(setMaintenanceLogs).catch(() => {});
+    }
+  }, [printer?.id]);
+
+  async function handleStartMaintenance(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.post(`/printers/${id}/maintenance`, {
+        type: form.get('type'),
+        description: form.get('description'),
+        cost: parseFloat(form.get('cost') as string) || undefined,
+        notes: form.get('notes') || undefined,
+      });
+      setShowMaintenanceDialog(false);
+      load();
+      api.get<any[]>(`/printers/${id}/maintenance`).then(setMaintenanceLogs);
+    } catch (err: any) {
+      toast('error', err.message);
+    }
+  }
+
+  async function handleCompleteMaintenance(logId: string) {
+    const mins = prompt('Downtime in minutes (optional):');
+    try {
+      await api.patch(`/printers/${id}/maintenance/${logId}/complete`, {
+        downtimeMinutes: mins ? parseInt(mins) : undefined,
+      });
+      load();
+      api.get<any[]>(`/printers/${id}/maintenance`).then(setMaintenanceLogs);
+      toast('success', 'Maintenance completed — printer restored to IDLE');
+    } catch (err: any) {
+      toast('error', err.message);
+    }
+  }
+
   if (loading) return <Loading />;
   if (!printer) return <div className="text-center py-12 text-gray-500">Printer not found</div>;
 
   const isMoonraker = printer.connectionType === 'MOONRAKER' && printer.moonrakerUrl;
   const progress = liveStatus?.progress ? Math.round(liveStatus.progress * 100) : 0;
+  const isMaintenanceDue = printer.nextMaintenanceDue && new Date(printer.nextMaintenanceDue) <= new Date();
+  const activeMaintenance = maintenanceLogs.find((l: any) => !l.completedDate);
 
   return (
     <div className="space-y-6">
@@ -78,15 +122,38 @@ export default function PrinterDetailPage() {
               <RefreshCw className="h-4 w-4 mr-1" /> Refresh
             </Button>
           )}
+          {printer.status === 'MAINTENANCE' && activeMaintenance ? (
+            <Button variant="outline" size="sm" className="text-green-600 border-green-300" onClick={() => handleCompleteMaintenance(activeMaintenance.id)}>
+              <Wrench className="h-4 w-4 mr-1" /> Complete Maintenance
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setShowMaintenanceDialog(true)}>
+              <Wrench className="h-4 w-4 mr-1" /> Start Maintenance
+            </Button>
+          )}
           <StatusBadge status={printer.status} />
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      {isMaintenanceDue && printer.status !== 'MAINTENANCE' && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+          <Clock className="h-5 w-5 text-amber-500 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Maintenance Overdue</p>
+            <p className="text-xs text-amber-600 dark:text-amber-300">
+              Due since {formatDate(printer.nextMaintenanceDue)} | {Math.round(printer.totalPrintHours || 0)} hours printed
+              {printer.maintenanceIntervalHours && <> | Interval: every {printer.maintenanceIntervalHours}h</>}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-6">
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={printer.status} /></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Hourly Rate</p><p className="text-lg font-bold">{formatCurrency(printer.hourlyRate)}/hr</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Markup</p><p className="text-lg font-bold">{printer.markupMultiplier ?? 2.5}x</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Jobs</p><p className="text-lg font-bold">{printer._count?.productionJobs || 0}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Print Hours</p><p className="text-lg font-bold">{Math.round(printer.totalPrintHours || 0)}h</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Last Seen</p><p className="text-sm">{printer.lastSeen ? formatDate(printer.lastSeen) : 'Never'}</p></CardContent></Card>
       </div>
 
@@ -247,6 +314,66 @@ export default function PrinterDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Maintenance Settings & History */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" /> Maintenance</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const form = new FormData(e.currentTarget);
+            const hours = parseFloat(form.get('intervalHours') as string);
+            try {
+              await api.patch(`/printers/${id}/maintenance-settings`, {
+                maintenanceIntervalHours: hours > 0 ? hours : null,
+              });
+              load();
+              toast('success', 'Maintenance interval updated');
+            } catch (err: any) {
+              toast('error', err.message);
+            }
+          }} className="flex items-end gap-4">
+            <Input name="intervalHours" label="Maintenance Interval (hours)" type="number" step="1" min="0" defaultValue={printer.maintenanceIntervalHours || ''} placeholder="e.g. 500" className="w-48" />
+            <Button type="submit" size="sm" variant="outline">Save</Button>
+            {printer.nextMaintenanceDue && <span className="text-xs text-gray-500 pb-2">Next due: {formatDate(printer.nextMaintenanceDue)}</span>}
+          </form>
+
+          {maintenanceLogs.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Downtime</TableHead>
+                  <TableHead>Cost</TableHead>
+                  <TableHead>Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {maintenanceLogs.map((l: any) => (
+                  <TableRow key={l.id}>
+                    <TableCell><span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700">{l.type}</span></TableCell>
+                    <TableCell className="max-w-xs truncate">{l.description}</TableCell>
+                    <TableCell>
+                      {l.completedDate
+                        ? <span className="text-xs text-green-600 font-medium">Completed</span>
+                        : <span className="text-xs text-amber-600 font-medium">In Progress</span>}
+                    </TableCell>
+                    <TableCell>{l.downtimeMinutes ? `${l.downtimeMinutes} min` : '-'}</TableCell>
+                    <TableCell>{l.cost ? formatCurrency(l.cost) : '-'}</TableCell>
+                    <TableCell>{formatDate(l.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-gray-500">No maintenance records yet.</p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader><CardTitle>Recent Jobs</CardTitle></CardHeader>
         <CardContent className="p-0">
@@ -274,6 +401,30 @@ export default function PrinterDetailPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={showMaintenanceDialog} onClose={() => setShowMaintenanceDialog(false)} title="Start Maintenance">
+        <form onSubmit={handleStartMaintenance} className="space-y-4">
+          <Select name="type" label="Maintenance Type" options={[
+            { value: 'SCHEDULED', label: 'Scheduled' },
+            { value: 'UNSCHEDULED', label: 'Unscheduled' },
+            { value: 'CALIBRATION', label: 'Calibration' },
+          ]} required />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+            <textarea name="description" required rows={3} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="e.g. Nozzle replacement, belt tensioning..." />
+          </div>
+          <Input name="cost" label="Estimated Cost (optional)" type="number" step="0.01" min="0" />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
+            <textarea name="notes" rows={2} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" />
+          </div>
+          <p className="text-xs text-gray-500">The printer will be set to MAINTENANCE status until you complete it.</p>
+          <div className="flex gap-3 justify-end">
+            <Button type="button" variant="outline" onClick={() => setShowMaintenanceDialog(false)}>Cancel</Button>
+            <Button type="submit">Start Maintenance</Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CostingService } from '../costing/costing.service';
-import { CreateProductionJobDto, UpdateProductionJobDto } from '@printforge/types';
+import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 
 const SPOOL_BUFFER_GRAMS = 50;
@@ -54,6 +54,8 @@ export class JobsService {
         order: { select: { id: true, orderNumber: true, customer: { select: { id: true, name: true } } } },
         orderItem: true,
         materials: { include: { material: true, spool: true } },
+        reprintOf: { select: { id: true, name: true, status: true } },
+        reprints: { select: { id: true, name: true, status: true }, orderBy: { createdAt: 'desc' } },
         attachments: true,
       },
     });
@@ -325,7 +327,121 @@ export class JobsService {
       }
     }
 
+    // Accumulate print hours on printer
+    if (job.printerId && job.printDuration) {
+      await this.prisma.printer.update({
+        where: { id: job.printerId },
+        data: { totalPrintHours: { increment: job.printDuration / 3600 } },
+      });
+    }
+
     // Mark job completed
     return this.update(id, { status: 'COMPLETED' } as any);
+  }
+
+  // ============ FAILED PRINT TRACKING ============
+
+  async failJob(id: string, dto: FailJobDto) {
+    const job = await this.prisma.productionJob.findUnique({
+      where: { id },
+      include: { materials: true },
+    });
+    if (!job) throw new NotFoundException('Production job not found');
+    if (job.status === 'COMPLETED') {
+      throw new BadRequestException('Cannot mark a completed job as failed');
+    }
+
+    // Deduct waste from spools (filament used up to failure point)
+    const wasteGrams = dto.wasteGrams || 0;
+    if (wasteGrams > 0 && job.materials.length > 0) {
+      // Distribute waste proportionally across materials
+      const totalPlanned = job.materials.reduce((s, m) => s + m.gramsUsed, 0);
+      for (const mat of job.materials) {
+        if (mat.spoolId && totalPlanned > 0) {
+          const proportion = mat.gramsUsed / totalPlanned;
+          const matWaste = wasteGrams * proportion;
+          await this.prisma.spool.update({
+            where: { id: mat.spoolId },
+            data: { currentWeight: { decrement: matWaste } },
+          });
+        }
+      }
+    }
+
+    return this.prisma.productionJob.update({
+      where: { id },
+      data: {
+        status: 'FAILED',
+        failureReason: dto.failureReason,
+        failedAt: new Date(),
+        wasteGrams,
+      },
+      include: { printer: true, materials: { include: { material: true } } },
+    });
+  }
+
+  async reprintJob(id: string) {
+    const original = await this.prisma.productionJob.findUnique({
+      where: { id },
+      include: { materials: true },
+    });
+    if (!original) throw new NotFoundException('Production job not found');
+    if (original.status !== 'FAILED') {
+      throw new BadRequestException('Only failed jobs can be reprinted');
+    }
+
+    // Clone the job as a new QUEUED job linked to the original
+    const newJob = await this.prisma.productionJob.create({
+      data: {
+        name: `${original.name} (reprint)`,
+        printerId: original.printerId,
+        assignedToId: original.assignedToId,
+        orderId: original.orderId,
+        orderItemId: original.orderItemId,
+        productId: original.productId,
+        componentId: original.componentId,
+        quantityToProduce: original.quantityToProduce,
+        colorChanges: original.colorChanges,
+        gcodeFilename: original.gcodeFilename,
+        reprintOfId: original.id,
+      },
+      include: { printer: true },
+    });
+
+    // Clone materials
+    for (const mat of original.materials) {
+      await this.prisma.jobMaterial.create({
+        data: {
+          jobId: newJob.id,
+          materialId: mat.materialId,
+          spoolId: mat.spoolId,
+          gramsUsed: mat.gramsUsed,
+          costPerGram: mat.costPerGram,
+          colorIndex: mat.colorIndex,
+        },
+      });
+    }
+
+    return newJob;
+  }
+
+  async getFailureStats() {
+    const [totalJobs, failedJobs, wasteAgg, reprintCount] = await Promise.all([
+      this.prisma.productionJob.count(),
+      this.prisma.productionJob.count({ where: { status: 'FAILED' } }),
+      this.prisma.productionJob.aggregate({
+        where: { status: 'FAILED' },
+        _sum: { wasteGrams: true },
+      }),
+      this.prisma.productionJob.count({ where: { reprintOfId: { not: null } } }),
+    ]);
+
+    return {
+      totalJobs,
+      failedJobs,
+      failureRate: totalJobs > 0 ? Math.round((failedJobs / totalJobs) * 10000) / 100 : 0,
+      totalWasteGrams: wasteAgg._sum.wasteGrams || 0,
+      reprintCount,
+    };
   }
 }

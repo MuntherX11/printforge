@@ -10,7 +10,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
-import { Plus, Printer } from 'lucide-react';
+import { Plus, Printer, Clock, Wrench } from 'lucide-react';
 
 export default function PrintersPage() {
   const [printers, setPrinters] = useState<any[]>([]);
@@ -63,12 +63,27 @@ export default function PrintersPage() {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-semibold">{p.name}</h3>
-                    <StatusBadge status={p.status} />
+                    <div className="flex items-center gap-2">
+                      {p.status === 'MAINTENANCE' && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          <Wrench className="h-3 w-3" /> In Maintenance
+                        </span>
+                      )}
+                      {p.nextMaintenanceDue && new Date(p.nextMaintenanceDue) <= new Date() && p.status !== 'MAINTENANCE' && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                          <Clock className="h-3 w-3" /> Overdue
+                        </span>
+                      )}
+                      <StatusBadge status={p.status} />
+                    </div>
                   </div>
                   {p.model && <p className="text-sm text-gray-500">{p.model}</p>}
                   <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
                     <span>{p.connectionType}</span>
-                    <span>{p._count?.productionJobs || 0} jobs</span>
+                    <div className="flex items-center gap-3">
+                      {p.totalPrintHours > 0 && <span>{Math.round(p.totalPrintHours)}h printed</span>}
+                      <span>{p._count?.productionJobs || 0} jobs</span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

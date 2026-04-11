@@ -12,7 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
-import { Calculator, Plus } from 'lucide-react';
+import { Calculator, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
 
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
@@ -28,6 +28,7 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [showFailDialog, setShowFailDialog] = useState(false);
   const [materials, setMaterials] = useState<any[]>([]);
   const [spools, setSpools] = useState<any[]>([]);
 
@@ -72,6 +73,32 @@ export default function JobDetailPage() {
     setSpools(s);
   }
 
+  async function handleFail(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.post(`/jobs/${id}/fail`, {
+        failureReason: form.get('failureReason'),
+        wasteGrams: parseFloat(form.get('wasteGrams') as string) || 0,
+      });
+      setShowFailDialog(false);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
+  async function handleReprint() {
+    if (!confirm('Create a reprint job? This will clone this job as a new QUEUED job.')) return;
+    try {
+      const newJob = await api.post<any>(`/jobs/${id}/reprint`);
+      alert(`Reprint job created: ${newJob.name}`);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
   if (loading) return <Loading />;
   if (!job) return <div className="text-center py-12 text-gray-500">Job not found</div>;
 
@@ -88,6 +115,16 @@ export default function JobDetailPage() {
         <div className="flex gap-2">
           <Select options={jobStatuses} value={job.status} onChange={e => updateJob({ status: e.target.value })} className="w-36" />
           <Button variant="outline" onClick={calculateCost}><Calculator className="h-4 w-4 mr-2" /> Calculate Cost</Button>
+          {!['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
+            <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowFailDialog(true)}>
+              <AlertTriangle className="h-4 w-4 mr-2" /> Mark Failed
+            </Button>
+          )}
+          {job.status === 'FAILED' && (
+            <Button variant="outline" onClick={handleReprint}>
+              <RefreshCw className="h-4 w-4 mr-2" /> Reprint
+            </Button>
+          )}
         </div>
       </div>
 
@@ -105,6 +142,33 @@ export default function JobDetailPage() {
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Color Changes</p><p className="text-lg font-bold">{job.colorChanges}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={job.status} /></CardContent></Card>
       </div>
+
+      {job.status === 'FAILED' && (
+        <Card className="border-red-200 bg-red-50 dark:bg-red-950/20">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold text-red-700 dark:text-red-400">Print Failed</p>
+                {job.failureReason && <p className="text-sm text-red-600 dark:text-red-300">{job.failureReason}</p>}
+                <div className="flex gap-4 text-xs text-red-500">
+                  {job.failedAt && <span>Failed: {formatDateTime(job.failedAt)}</span>}
+                  {job.wasteGrams > 0 && <span>Wasted: {job.wasteGrams}g filament</span>}
+                  {job.reprintOfId && <span>Reprint of a previous job</span>}
+                </div>
+                {job.reprints && job.reprints.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-medium text-red-600">Reprints:</p>
+                    {job.reprints.map((r: any) => (
+                      <Link key={r.id} href={`/production/${r.id}`} className="text-xs text-brand-600 hover:underline block">{r.name} — <StatusBadge status={r.status} /></Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {job.totalCost && (
         <Card>
@@ -168,6 +232,21 @@ export default function JobDetailPage() {
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowAddMaterial(false)}>Cancel</Button>
             <Button type="submit">Add</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog open={showFailDialog} onClose={() => setShowFailDialog(false)} title="Mark Job as Failed">
+        <form onSubmit={handleFail} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Failure Reason</label>
+            <textarea name="failureReason" required rows={3} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="e.g. Bed adhesion failure, spaghetti at layer 45..." />
+          </div>
+          <Input name="wasteGrams" label="Estimated Filament Wasted (grams)" type="number" step="0.1" defaultValue="0" min="0" />
+          <p className="text-xs text-gray-500">Waste grams will be deducted proportionally from the assigned spools.</p>
+          <div className="flex gap-3 justify-end">
+            <Button type="button" variant="outline" onClick={() => setShowFailDialog(false)}>Cancel</Button>
+            <Button type="submit" className="bg-red-600 hover:bg-red-700 text-white">Mark Failed</Button>
           </div>
         </form>
       </Dialog>
