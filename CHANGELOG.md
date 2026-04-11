@@ -12,6 +12,11 @@ All notable changes to PrintForge are documented here.
   - Job detail page: "Mark Failed" button with reason + waste input, failure info card (red), "Reprint" button on failed jobs, reprint chain display
   - Production list page: failure stats summary cards (total jobs, failed, failure rate, wasted filament)
 
+- **Job Scheduling / Auto-distribution** — Automated printer assignment for queued jobs
+  - `POST /jobs/auto-assign` — Auto-assign all unassigned QUEUED jobs: prefers product's default printer, load-balances by fewest active jobs, excludes MAINTENANCE/ERROR/OFFLINE printers
+  - `GET /jobs/queue` — Queue view grouped by printer with ordered job lists + unassigned bucket
+  - Production page: "Auto-Assign" button, List/Queue view toggle, per-printer queue cards with job order, unassigned jobs highlighted in amber
+
 - **Machine Maintenance** — Maintenance scheduling and tracking per printer
   - `POST /printers/:id/maintenance` — Start maintenance (sets printer to MAINTENANCE status), logs type/description/cost
   - `PATCH /printers/:id/maintenance/:logId/complete` — Complete maintenance, restore to IDLE, set next due date

@@ -32,6 +32,18 @@ export class JobsController {
     return this.jobsService.getFailureStats();
   }
 
+  @Get('queue')
+  getQueue() {
+    return this.jobsService.getQueue();
+  }
+
+  @Post('auto-assign')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  autoAssign() {
+    return this.jobsService.autoAssign();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.jobsService.findOne(id);
