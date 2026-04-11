@@ -92,6 +92,7 @@ export class OrdersService {
         const product = productMap.get(item.productId);
         if (!product?.components) continue;
         for (const comp of product.components) {
+          if (!comp.materialId) continue; // multicolor — handled via ComponentMaterial
           const key = comp.materialId;
           const existing = materialNeeds.get(key);
           const gramsForItem = comp.gramsUsed * comp.quantity * item.quantity;
@@ -160,7 +161,7 @@ export class OrdersService {
           const product = reservingProductMap.get(item.productId);
           if (!product?.components) continue;
           for (const comp of product.components) {
-            if (!materialIds.includes(comp.materialId)) continue;
+            if (!comp.materialId || !materialIds.includes(comp.materialId)) continue;
             const grams = comp.gramsUsed * comp.quantity * item.quantity;
             reservedByOrders.set(comp.materialId, (reservedByOrders.get(comp.materialId) || 0) + grams);
           }

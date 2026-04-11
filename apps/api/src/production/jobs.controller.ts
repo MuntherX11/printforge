@@ -52,4 +52,28 @@ export class JobsController {
   calculateCost(@Param('id') id: string) {
     return this.jobsService.calculateCost(id);
   }
+
+  @Get('plan/:orderId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  previewPlan(@Param('orderId') orderId: string) {
+    return this.jobsService.previewPlan(orderId);
+  }
+
+  @Post('plan/:orderId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  createFromPlan(
+    @Param('orderId') orderId: string,
+    @Body() body: { overrides?: Array<{ componentId: string; toProduce: number; printerId?: string; spoolId?: string }> },
+  ) {
+    return this.jobsService.createFromPlan(orderId, body.overrides);
+  }
+
+  @Post(':id/complete')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  completeJob(@Param('id') id: string) {
+    return this.jobsService.completeJob(id);
+  }
 }

@@ -19,6 +19,7 @@ export default function ProductDetailPage() {
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
   const [materials, setMaterials] = useState<any[]>([]);
+  const [printers, setPrinters] = useState<any[]>([]);
   const [images, setImages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddComponent, setShowAddComponent] = useState(false);
@@ -37,10 +38,12 @@ export default function ProductDetailPage() {
     Promise.all([
       api.get(`/products/${id}`),
       api.get<any[]>('/materials'),
+      api.get<any[]>('/printers'),
       api.get<any[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => []),
-    ]).then(([p, m, imgs]) => {
+    ]).then(([p, m, pr, imgs]) => {
       setProduct(p);
       setMaterials(m);
+      setPrinters(pr);
       setImages(imgs);
     }).catch(console.error).finally(() => setLoading(false));
   };
@@ -100,6 +103,7 @@ export default function ProductDetailPage() {
         description: form.get('description') as string || undefined,
         sku: form.get('sku') as string || undefined,
         colorChanges: parseInt(form.get('colorChanges') as string) || 0,
+        defaultPrinterId: (form.get('defaultPrinterId') as string) || null,
         isActive: form.get('isActive') === 'true',
       });
       setShowEditProduct(false);
@@ -230,11 +234,30 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Components</p><p className="text-lg font-bold">{product.components?.length || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Est. Grams</p><p className="text-lg font-bold">{Math.round(product.estimatedGrams)}g</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Est. Minutes</p><p className="text-lg font-bold">{Math.round(product.estimatedMinutes)}min</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Base Price</p><p className="text-lg font-bold">{formatCurrency(product.basePrice)}</p></CardContent></Card>
+      <div className="grid gap-4 md:grid-cols-5">
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Components</p><p className="text-lg font-bold">{product.components?.length || 0}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Est. Grams</p><p className="text-lg font-bold">{Math.round(product.estimatedGrams)}g</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Est. Minutes</p><p className="text-lg font-bold">{Math.round(product.estimatedMinutes)}min</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Color Changes</p><p className="text-lg font-bold">{product.colorChanges || 0}</p></CardContent></Card>
+        <Card><CardContent className="p-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Default Printer</p>
+          <select
+            className="mt-1 w-full text-sm border rounded px-2 py-1 bg-white dark:bg-gray-800 dark:border-gray-600"
+            value={product.defaultPrinterId || ''}
+            onChange={async (e) => {
+              const val = e.target.value || null;
+              try {
+                await api.patch(`/products/${id}`, { defaultPrinterId: val });
+                load();
+              } catch (err: any) { alert(err.message); }
+            }}
+          >
+            <option value="">None</option>
+            {printers.map((p: any) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </CardContent></Card>
       </div>
 
       {product.components?.length > 0 && (() => {
@@ -312,7 +335,8 @@ export default function ProductDetailPage() {
                   <TableHead>Grams</TableHead>
                   <TableHead>Print Time</TableHead>
                   <TableHead>Qty</TableHead>
-                  <TableHead>Stock</TableHead>
+                  <TableHead>Material Stock</TableHead>
+                  <TableHead>On Hand</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -356,7 +380,15 @@ export default function ProductDetailPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {editingMaterialId === c.id ? (
+                      {c.isMultiColor && c.materials?.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {c.materials.map((cm: any) => (
+                            <Badge key={cm.id} className="bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 text-xs">
+                              {cm.material?.name || 'Unknown'} ({Math.round(cm.gramsUsed)}g)
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : editingMaterialId === c.id ? (
                         <div className="flex items-center gap-1">
                           <select
                             className="h-7 text-sm border rounded px-1 bg-white dark:bg-gray-800 dark:border-gray-600"
@@ -386,7 +418,22 @@ export default function ProductDetailPage() {
                     <TableCell className="font-mono">{c.printMinutes}min</TableCell>
                     <TableCell>{c.quantity}</TableCell>
                     <TableCell>
-                      {c.totalStock != null ? (
+                      {c.isMultiColor && c.materials?.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {c.materials.map((cm: any) => (
+                            <div key={cm.id} className="flex items-center gap-1">
+                              {cm.hasEnoughStock ? (
+                                <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />
+                              ) : (
+                                <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+                              )}
+                              <span className={`text-xs font-mono ${cm.hasEnoughStock ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                {cm.totalStock}g / {Math.round(cm.gramsNeeded)}g
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : c.totalStock != null ? (
                         <div className="flex items-center gap-1">
                           {c.hasEnoughStock ? (
                             <CheckCircle className="h-4 w-4 text-green-500" />
@@ -398,6 +445,25 @@ export default function ProductDetailPage() {
                           </span>
                         </div>
                       ) : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-16 h-7 text-sm text-center border rounded bg-white dark:bg-gray-800 dark:border-gray-600 font-mono"
+                        defaultValue={c.stockOnHand || 0}
+                        onBlur={async (e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          if (val === (c.stockOnHand || 0)) return;
+                          try {
+                            await api.patch(`/products/${id}/components/${c.id}`, { stockOnHand: val });
+                            load();
+                          } catch (err: any) { alert(err.message); }
+                        }}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
+                      />
                     </TableCell>
                     <TableCell>
                       <button onClick={() => handleDeleteComponent(c.id)} className="text-red-400 hover:text-red-600">
@@ -491,6 +557,12 @@ export default function ProductDetailPage() {
             <Input name="sku" label="SKU" defaultValue={product.sku || ''} />
             <Input name="colorChanges" label="Color Changes" type="number" defaultValue={product.colorChanges || 0} />
           </div>
+          <Select
+            name="defaultPrinterId"
+            label="Default Printer"
+            options={[{ value: '', label: 'None' }, ...printers.map((p: any) => ({ value: p.id, label: p.name }))]}
+            defaultValue={product.defaultPrinterId || ''}
+          />
           <Select name="isActive" label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]} defaultValue={product.isActive ? 'true' : 'false'} />
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowEditProduct(false)}>Cancel</Button>

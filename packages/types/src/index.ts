@@ -268,6 +268,7 @@ export interface CreateProductDto {
   description?: string;
   sku?: string;
   colorChanges?: number;
+  defaultPrinterId?: string;
 }
 
 export interface UpdateProductDto {
@@ -276,6 +277,7 @@ export interface UpdateProductDto {
   sku?: string;
   colorChanges?: number;
   isActive?: boolean;
+  defaultPrinterId?: string | null;
 }
 
 export interface AddProductComponentDto {
@@ -294,6 +296,7 @@ export interface UpdateProductComponentDto {
   printMinutes?: number;
   quantity?: number;
   sortOrder?: number;
+  stockOnHand?: number;
 }
 
 export interface ProductCostResult extends CostBreakdown {
@@ -358,6 +361,47 @@ export interface AddJobMaterialDto {
   spoolId?: string;
   gramsUsed: number;
   colorIndex?: number;
+}
+
+export interface PlanSubMaterial {
+  componentMaterialId: string | null;
+  materialId: string;
+  materialName: string;
+  materialColor: string | null;
+  colorIndex: number;
+  gramsPerUnit: number;
+  totalGrams: number;
+  suggestedSpool: {
+    id: string;
+    pfid: string | null;
+    currentWeight: number;
+    hasEnough: boolean;
+  } | null;
+}
+
+export interface ProductionPlanItem {
+  orderItemId: string;
+  productId: string;
+  productName: string;
+  componentId: string;
+  componentDescription: string;
+  isMultiColor: boolean;
+  needed: number;
+  onHand: number;
+  toProduce: number;
+  gramsPerUnit: number;
+  totalGrams: number;
+  printMinutes: number;
+  printerId: string | null;
+  printerName: string | null;
+  subMaterials: PlanSubMaterial[];
+}
+
+export interface ProductionPlanOverride {
+  componentId: string;
+  toProduce: number;
+  printerId?: string;
+  spoolId?: string;
 }
 
 // ============ COSTING ============

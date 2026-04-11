@@ -83,6 +83,7 @@ model Material {
   spools              Spool[]
   jobMaterials        JobMaterial[]
   productComponents   ProductComponent[]
+  componentMaterials  ComponentMaterial[]
 }
 
 enum MaterialType {
@@ -141,24 +142,45 @@ model Product {
   basePrice         Float    @default(0)
   imageUrl          String?
   isActive          Boolean  @default(true)
+  defaultPrinterId  String?
+  defaultPrinter    Printer? @relation(fields: [defaultPrinterId], references: [id])
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   components        ProductComponent[]
+  productionJobs    ProductionJob[]
 }
 
 model ProductComponent {
   id              String   @id @default(cuid())
   productId       String
   product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  materialId      String
-  material        Material @relation(fields: [materialId], references: [id])
+  materialId      String?
+  material        Material? @relation(fields: [materialId], references: [id])
   description     String
   gramsUsed       Float
   printMinutes    Float    @default(0)
   quantity        Int      @default(1)
   sortOrder       Int      @default(0)
+  stockOnHand     Int      @default(0)
+  isMultiColor    Boolean  @default(false)
   createdAt       DateTime @default(now())
+
+  materials       ComponentMaterial[]
+  productionJobs  ProductionJob[]
+}
+
+model ComponentMaterial {
+  id              String           @id @default(cuid())
+  componentId     String
+  component       ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  materialId      String
+  material        Material         @relation(fields: [materialId], references: [id])
+  gramsUsed       Float
+  colorIndex      Int              @default(0)
+  sortOrder       Int              @default(0)
+
+  @@unique([componentId, colorIndex])
 }
 
 // ============ PRINTERS ============
@@ -179,6 +201,7 @@ model Printer {
   updatedAt       DateTime            @updatedAt
 
   productionJobs  ProductionJob[]
+  defaultProducts Product[]
 }
 
 enum PrinterConnectionType {
@@ -210,6 +233,11 @@ model ProductionJob {
   order           Order?     @relation(fields: [orderId], references: [id])
   orderItemId     String?
   orderItem       OrderItem? @relation(fields: [orderItemId], references: [id])
+  productId       String?
+  product         Product?   @relation(fields: [productId], references: [id])
+  componentId     String?
+  component       ProductComponent? @relation(fields: [componentId], references: [id])
+  quantityToProduce Int      @default(1)
 
   printDuration   Float?
   filamentUsedMm  Float?

@@ -6,13 +6,15 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Mail, MessageCircle, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Mail, MessageCircle, AlertTriangle, CheckCircle, Factory } from 'lucide-react';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -28,6 +30,12 @@ export default function OrderDetailPage() {
   const { id } = useParams();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showPlanDialog, setShowPlanDialog] = useState(false);
+  const [plan, setPlan] = useState<any[]>([]);
+  const [planOverrides, setPlanOverrides] = useState<Record<string, any>>({});
+  const [planLoading, setPlanLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [printers, setPrinters] = useState<any[]>([]);
 
   const load = () => api.get(`/orders/${id}`).then(setOrder).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, [id]);
@@ -51,6 +59,57 @@ export default function OrderDetailPage() {
     if (!phone) { alert('Customer has no phone number'); return; }
     const msg = encodeURIComponent(`Hi ${order.customer?.name}, your invoice ${inv.invoiceNumber} for ${formatCurrency(inv.total)} is ready. Thank you!`);
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+  }
+
+  async function loadPlan() {
+    setPlanLoading(true);
+    try {
+      const [res, pr] = await Promise.all([
+        api.get<any>(`/jobs/plan/${id}`),
+        api.get<any[]>('/printers'),
+      ]);
+      setPlan(res.plan);
+      setPrinters(pr);
+      setPlanOverrides({});
+      setShowPlanDialog(true);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function createJobs() {
+    setCreating(true);
+    try {
+      const overrides = Object.entries(planOverrides)
+        .filter(([, v]) => v.toProduce > 0)
+        .map(([componentId, v]) => ({
+          componentId,
+          toProduce: v.toProduce,
+          printerId: v.printerId || undefined,
+          spoolId: v.spoolId || undefined,
+        }));
+      const res = await api.post<any>(`/jobs/plan/${id}`, { overrides: overrides.length > 0 ? overrides : undefined });
+      setShowPlanDialog(false);
+      alert(`Created ${res.jobsCreated} production job(s)`);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function updatePlanOverride(componentId: string, field: string, value: any) {
+    setPlanOverrides(prev => ({
+      ...prev,
+      [componentId]: {
+        ...prev[componentId],
+        toProduce: prev[componentId]?.toProduce ?? plan.find(p => p.componentId === componentId)?.toProduce ?? 0,
+        [field]: value,
+      },
+    }));
   }
 
   async function createInvoice() {
@@ -84,6 +143,11 @@ export default function OrderDetailPage() {
             onChange={e => updateStatus(e.target.value)}
             className="w-40"
           />
+          {['CONFIRMED', 'PENDING'].includes(order.status) && (
+            <Button onClick={loadPlan} disabled={planLoading}>
+              <Factory className="h-4 w-4 mr-2" /> {planLoading ? 'Loading...' : 'Plan Production'}
+            </Button>
+          )}
           <Button variant="outline" onClick={createInvoice}>Create Invoice</Button>
         </div>
       </div>
@@ -228,6 +292,92 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       )}
+      <Dialog open={showPlanDialog} onClose={() => setShowPlanDialog(false)} title="Production Plan Preview">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+          {plan.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No components need production — all items are in stock.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Component</TableHead>
+                  <TableHead>Materials</TableHead>
+                  <TableHead>Need</TableHead>
+                  <TableHead>On Hand</TableHead>
+                  <TableHead>To Produce</TableHead>
+                  <TableHead>Printer</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {plan.map((item: any) => {
+                  const override = planOverrides[item.componentId];
+                  const toProduce = override?.toProduce ?? item.toProduce;
+                  return (
+                    <TableRow key={item.componentId} className={toProduce === 0 ? 'opacity-50' : ''}>
+                      <TableCell>
+                        <div>
+                          <p className="text-sm font-medium">{item.productName}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{item.componentDescription}</p>
+                          {item.isMultiColor && <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 text-xs mt-1">Multicolor</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {(item.subMaterials || []).map((sub: any, si: number) => (
+                            <div key={si} className="flex items-center gap-2 text-xs">
+                              <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 text-xs shrink-0">
+                                {sub.materialName}{sub.materialColor ? ` (${sub.materialColor})` : ''}
+                              </Badge>
+                              <span className="font-mono text-gray-500">{Math.round(sub.gramsPerUnit * toProduce)}g</span>
+                              {sub.suggestedSpool ? (
+                                <span className={`font-mono ${sub.suggestedSpool.hasEnough ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                  → {sub.suggestedSpool.pfid || sub.suggestedSpool.id.slice(0, 6)} ({Math.round(sub.suggestedSpool.currentWeight)}g)
+                                </span>
+                              ) : (
+                                <span className="text-red-500">No spool</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono">{item.needed}</TableCell>
+                      <TableCell className="font-mono">{item.onHand}</TableCell>
+                      <TableCell>
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-16 h-7 text-sm text-center border rounded bg-white dark:bg-gray-800 dark:border-gray-600 font-mono"
+                          value={toProduce}
+                          onChange={(e) => updatePlanOverride(item.componentId, 'toProduce', parseInt(e.target.value) || 0)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          className="h-7 text-xs border rounded px-1 bg-white dark:bg-gray-800 dark:border-gray-600 max-w-[120px]"
+                          value={override?.printerId || item.printerId || ''}
+                          onChange={(e) => updatePlanOverride(item.componentId, 'printerId', e.target.value)}
+                        >
+                          <option value="">None</option>
+                          {printers.map((p: any) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+          <div className="flex gap-3 justify-end pt-2 border-t dark:border-gray-700">
+            <Button variant="outline" onClick={() => setShowPlanDialog(false)}>Cancel</Button>
+            <Button onClick={createJobs} disabled={creating || plan.every((p: any) => (planOverrides[p.componentId]?.toProduce ?? p.toProduce) <= 0)}>
+              <Factory className="h-4 w-4 mr-2" />
+              {creating ? 'Creating...' : `Create ${plan.filter((p: any) => (planOverrides[p.componentId]?.toProduce ?? p.toProduce) > 0).length} Job(s)`}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

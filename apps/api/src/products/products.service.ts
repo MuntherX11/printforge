@@ -27,8 +27,9 @@ export class ProductsService {
         description: dto.description,
         sku: dto.sku,
         colorChanges: dto.colorChanges || 0,
+        defaultPrinterId: (dto as any).defaultPrinterId || null,
       },
-      include: { components: { include: { material: true } } },
+      include: { components: { include: { material: true } }, defaultPrinter: true },
     });
   }
 
@@ -61,6 +62,7 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
+        defaultPrinter: true,
         components: {
           include: {
             material: {
@@ -71,6 +73,19 @@ export class ProductsService {
                 },
               },
             },
+            materials: {
+              include: {
+                material: {
+                  include: {
+                    spools: {
+                      where: { isActive: true },
+                      select: { id: true, currentWeight: true },
+                    },
+                  },
+                },
+              },
+              orderBy: { sortOrder: 'asc' },
+            },
           },
           orderBy: { sortOrder: 'asc' },
         },
@@ -80,17 +95,45 @@ export class ProductsService {
 
     // Enrich components with stock availability
     const enrichedComponents = product.components.map((c: any) => {
-      const activeSpools = c.material?.spools || [];
-      const totalStock = activeSpools.reduce((sum: number, s: any) => sum + s.currentWeight, 0);
-      const gramsNeeded = c.gramsUsed * c.quantity;
-      const { spools, ...materialWithoutSpools } = c.material || {};
-      return {
-        ...c,
-        material: materialWithoutSpools,
-        totalStock: Math.round(totalStock),
-        gramsNeeded,
-        hasEnoughStock: totalStock >= gramsNeeded,
-      };
+      if (c.isMultiColor && c.materials?.length > 0) {
+        // Multicolor: check each sub-material has enough stock
+        const enrichedMaterials = c.materials.map((cm: any) => {
+          const activeSpools = cm.material?.spools || [];
+          const totalStock = activeSpools.reduce((sum: number, s: any) => sum + s.currentWeight, 0);
+          const gramsNeeded = cm.gramsUsed * c.quantity;
+          const { spools, ...matWithout } = cm.material || {};
+          return {
+            ...cm,
+            material: matWithout,
+            totalStock: Math.round(totalStock),
+            gramsNeeded,
+            hasEnoughStock: totalStock >= gramsNeeded,
+          };
+        });
+        const allHaveStock = enrichedMaterials.every((m: any) => m.hasEnoughStock);
+        return {
+          ...c,
+          material: null,
+          materials: enrichedMaterials,
+          totalStock: null,
+          gramsNeeded: c.gramsUsed * c.quantity,
+          hasEnoughStock: allHaveStock,
+        };
+      } else {
+        // Single-color
+        const activeSpools = c.material?.spools || [];
+        const totalStock = activeSpools.reduce((sum: number, s: any) => sum + s.currentWeight, 0);
+        const gramsNeeded = c.gramsUsed * c.quantity;
+        const { spools, ...materialWithoutSpools } = c.material || {};
+        return {
+          ...c,
+          material: materialWithoutSpools,
+          materials: c.materials || [],
+          totalStock: Math.round(totalStock),
+          gramsNeeded,
+          hasEnoughStock: totalStock >= gramsNeeded,
+        };
+      }
     });
 
     return { ...product, components: enrichedComponents };
@@ -211,15 +254,20 @@ export class ProductsService {
       costPerGram: c.material.costPerGram,
     }));
 
+    // Use product's default printer for cost calculation if set
+    const defaultPrinter = product.defaultPrinterId
+      ? await this.prisma.printer.findUnique({ where: { id: product.defaultPrinterId } })
+      : null;
+
     const fullBreakdown = await this.costingService.calculateJobCost({
       printDuration: product.estimatedMinutes * 60,
       colorChanges: product.colorChanges,
       purgeWasteGrams: 0,
-      printer: null,
+      printer: defaultPrinter,
       materials: allMaterials,
     });
 
-    const markupMultiplier = parseFloat(
+    const markupMultiplier = defaultPrinter?.markupMultiplier || parseFloat(
       (await this.prisma.systemSetting.findUnique({ where: { key: 'markup_multiplier' } }))?.value || '2.5',
     );
 
@@ -333,46 +381,52 @@ export class ProductsService {
       const analysis = this.gcodeParser.parseHeader(file.buffer);
       const fileName = file.originalname || 'unknown.gcode';
 
-      // If multi-tool, create one component per tool
+      // If multi-tool, create ONE component with multiple ComponentMaterials
       if (analysis.tools && analysis.tools.length > 1) {
-        let created = 0;
+        const activeTools = analysis.tools.filter(t => (t.filamentGrams || 0) > 0);
+        if (activeTools.length === 0) {
+          results.push({ fileName, componentsCreated: 0 });
+          continue;
+        }
 
-        // Split print time proportionally across tools by grams
-        const totalGrams = analysis.tools.reduce((sum, t) => sum + (t.filamentGrams || 0), 0);
+        const totalGrams = activeTools.reduce((sum, t) => sum + (t.filamentGrams || 0), 0);
         const totalTimeMinutes = analysis.estimatedTimeSeconds
           ? Math.round(analysis.estimatedTimeSeconds / 60)
           : 0;
 
-        for (const tool of analysis.tools) {
-          const toolGrams = tool.filamentGrams || 0;
+        // Create one component for the entire multicolor part
+        const component = await this.prisma.productComponent.create({
+          data: {
+            productId,
+            materialId: null, // multicolor — uses ComponentMaterial entries
+            description: fileName.replace(/\.gcode$/i, ''),
+            gramsUsed: totalGrams,
+            printMinutes: totalTimeMinutes,
+            quantity: 1,
+            sortOrder: 0,
+            isMultiColor: true,
+          },
+        });
 
-          // Skip tools with 0 grams used
-          if (toolGrams === 0) continue;
-
+        // Create a ComponentMaterial for each active tool/color
+        for (const tool of activeTools) {
           const materialType = tool.materialType || analysis.filamentType || 'PLA';
           const materialId = await this.findOrCreateMaterial(
             allMaterials, materialType, tool.colorHex,
           );
 
-          // Proportional time split based on grams
-          const toolMinutes = totalGrams > 0
-            ? Math.round(totalTimeMinutes * (toolGrams / totalGrams))
-            : 0;
-
-          await this.prisma.productComponent.create({
+          await this.prisma.componentMaterial.create({
             data: {
-              productId,
+              componentId: component.id,
               materialId,
-              description: `${fileName} - Tool ${tool.index}`,
-              gramsUsed: toolGrams,
-              printMinutes: toolMinutes,
-              quantity: 1,
-              sortOrder: created,
+              gramsUsed: tool.filamentGrams || 0,
+              colorIndex: tool.index,
+              sortOrder: tool.index,
             },
           });
-          created++;
         }
-        results.push({ fileName, componentsCreated: created });
+
+        results.push({ fileName, componentsCreated: 1 });
       } else {
         // Single tool — one component (skip if 0 grams)
         const gramsUsed = analysis.filamentUsedGrams || 0;
@@ -400,6 +454,37 @@ export class ProductsService {
         });
         results.push({ fileName, componentsCreated: 1 });
       }
+    }
+
+    // Detect multicolor: sum color changes across all files
+    let totalColorChanges = 0;
+    let isMultiColor = false;
+    for (const file of files) {
+      const analysis = this.gcodeParser.parseHeader(file.buffer);
+      if (analysis.totalFilamentChanges && analysis.totalFilamentChanges > 0) {
+        totalColorChanges += analysis.totalFilamentChanges;
+        isMultiColor = true;
+      }
+      const activeTools = (analysis.tools || []).filter(t => (t.filamentGrams || 0) > 0);
+      if (activeTools.length > 1) isMultiColor = true;
+    }
+
+    // Update product color changes and auto-assign default printer
+    const updateData: any = {};
+    if (totalColorChanges > 0) updateData.colorChanges = totalColorChanges;
+
+    // Auto-assign default printer if none set: multicolor → "HI", single → "Ender"
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product?.defaultPrinterId) {
+      const printerNamePattern = isMultiColor ? 'HI' : 'Ender';
+      const matchedPrinter = await this.prisma.printer.findFirst({
+        where: { name: { contains: printerNamePattern, mode: 'insensitive' }, isActive: true },
+      });
+      if (matchedPrinter) updateData.defaultPrinterId = matchedPrinter.id;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await this.prisma.product.update({ where: { id: productId }, data: updateData });
     }
 
     await this.recalculateAggregates(productId);
