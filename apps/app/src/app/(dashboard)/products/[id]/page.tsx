@@ -127,10 +127,17 @@ export default function ProductDetailPage() {
         body: formData,
         credentials: 'include',
       });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || body?.message || `Upload failed (${res.status})`);
+      }
       load();
     } catch (err: any) {
-      alert(err.message);
+      // Reload anyway — the backend may have processed before the response failed
+      load();
+      if (err.message !== 'Failed to fetch') {
+        alert(err.message);
+      }
     } finally {
       setUploadingGcode(false);
       e.target.value = '';
