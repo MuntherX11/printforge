@@ -45,6 +45,23 @@ export class ProductsController {
     return this.productsService.update(id, dto);
   }
 
+  @Patch('components/:componentId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  updateComponent(
+    @Param('componentId') componentId: string,
+    @Body() dto: UpdateProductComponentDto,
+  ) {
+    return this.productsService.updateComponent(componentId, dto);
+  }
+
+  @Delete('components/:componentId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  removeComponent(@Param('componentId') componentId: string) {
+    return this.productsService.removeComponent(componentId);
+  }
+
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
@@ -59,16 +76,6 @@ export class ProductsController {
     return this.productsService.addComponent(id, dto);
   }
 
-  @Patch('components/:componentId')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  updateComponent(
-    @Param('componentId') componentId: string,
-    @Body() dto: UpdateProductComponentDto,
-  ) {
-    return this.productsService.updateComponent(componentId, dto);
-  }
-
   @Patch(':id/components/:componentId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
@@ -78,13 +85,6 @@ export class ProductsController {
     @Body() dto: UpdateProductComponentDto,
   ) {
     return this.productsService.updateComponent(componentId, dto);
-  }
-
-  @Delete('components/:componentId')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  removeComponent(@Param('componentId') componentId: string) {
-    return this.productsService.removeComponent(componentId);
   }
 
   @Post(':id/calculate')
