@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Res, HttpCode, HttpStatus, Get, UseGuards, Param } from '@nestjs/common';
 import { Response } from 'express';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { StaffGuard } from './guards/staff.guard';
@@ -15,6 +16,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 login attempts per minute
   async login(
     @Body() body: { email: string; password: string },
     @Res({ passthrough: true }) res: Response,
@@ -47,6 +49,7 @@ export class AuthController {
   // ============ CUSTOMER AUTH ============
 
   @Post('customer/signup')
+  @Throttle({ short: { ttl: 60000, limit: 3 } }) // 3 signups per minute
   async customerSignup(
     @Body() body: { name: string; email: string; phone?: string; password: string },
   ) {
@@ -55,6 +58,7 @@ export class AuthController {
 
   @Post('customer/login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 login attempts per minute
   async customerLogin(
     @Body() body: { email: string; password: string },
     @Res({ passthrough: true }) res: Response,

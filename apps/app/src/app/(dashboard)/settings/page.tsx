@@ -104,10 +104,38 @@ export default function SettingsPage() {
         <Card>
           <CardHeader><CardTitle>Financial</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <Input name="currency" label="Currency" defaultValue={settings.currency || 'OMR'} />
+            <div className="grid grid-cols-4 gap-4">
+              <Input name="currency" label="Currency Code" defaultValue={settings.currency || 'OMR'} placeholder="OMR" />
+              <Input name="currency_decimals" label="Decimal Places" type="number" min="0" max="4" defaultValue={settings.currency_decimals || '3'} />
               <Input name="tax_rate" label="Tax Rate (%)" type="number" step="0.1" defaultValue={settings.tax_rate || '0'} />
               <Input name="overhead_percent" label="Overhead (%)" type="number" step="0.1" defaultValue={settings.overhead_percent || '15'} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Locale</label>
+                <select name="locale" defaultValue={settings.locale || 'en-GB'} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                  <option value="en-GB">English (UK) — dd/MM/yyyy</option>
+                  <option value="en-US">English (US) — MM/dd/yyyy</option>
+                  <option value="ar-OM">Arabic (Oman)</option>
+                  <option value="ar-SA">Arabic (Saudi Arabia)</option>
+                  <option value="ar-AE">Arabic (UAE)</option>
+                  <option value="de-DE">German</option>
+                  <option value="fr-FR">French</option>
+                  <option value="es-ES">Spanish</option>
+                  <option value="ja-JP">Japanese</option>
+                  <option value="zh-CN">Chinese (Simplified)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date Format</label>
+                <select name="date_format" defaultValue={settings.date_format || 'dd MMM yyyy'} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                  <option value="dd MMM yyyy">11 Apr 2026</option>
+                  <option value="MMM dd, yyyy">Apr 11, 2026</option>
+                  <option value="yyyy-MM-dd">2026-04-11</option>
+                  <option value="dd/MM/yyyy">11/04/2026</option>
+                  <option value="MM/dd/yyyy">04/11/2026</option>
+                </select>
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.01" defaultValue={settings.markup_multiplier || '2.5'} />

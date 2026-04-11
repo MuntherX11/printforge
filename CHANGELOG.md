@@ -2,6 +2,37 @@
 
 All notable changes to PrintForge are documented here.
 
+## [v2.7] — 2026-04-11
+
+### Added
+- **Security Hardening** — Helmet middleware with CSP directives, X-Frame-Options, HSTS; 3-tier rate limiting (short/medium/long) via @nestjs/throttler; stricter auth limits (5 login/min, 3 signup/min); CORS origin from env var
+- **CSV Export** — 6 export endpoints (materials, spools, products, orders, jobs, customers) with formula injection prevention (prefixes `=`, `+`, `-`, `@`, `\t`, `\r` sanitized with `'`), date range filters on orders/jobs, admin-only customer export
+- **Internationalization** — `LocaleProvider` React context for multi-currency/locale, public `/api/settings/locale` endpoint, settings UI for currency code, decimal places, locale, date format; defaults to OMR/en-GB/3 decimals
+- **Test Coverage** — 44 unit tests across 3 suites:
+  - `csv-export.spec.ts` (11 tests) — headers, custom labels, null handling, comma/quote escaping, formula injection (4 prefix types), empty rows, numerics, booleans
+  - `costing.service.spec.ts` (10 tests) — single/multi-material cost, waste from color changes, purgeVolumeGrams override, global hourly rate fallback, zero materials, hexToLuminance, transition purge calculations
+  - `gcode-parser.service.spec.ts` (23 tests) — slicer detection (PrusaSlicer/OrcaSlicer/Cura), time parsing (PrusaSlicer/Cura), filament grams/mm, layer height, filament type, nozzle/bed temp, filament colors, tool changes, multi-tool grams, color-to-tool mapping, single-tool, Buffer input, empty input, parseHeader
+
+### Changed
+- `apps/api/src/main.ts` — Added helmet + CORS configuration
+- `apps/api/src/app.module.ts` — Added ThrottlerModule (3-tier) + global ThrottlerGuard + ExportModule
+- `apps/api/src/auth/auth.controller.ts` — Added @Throttle decorators on login/signup
+- `apps/app/src/app/layout.tsx` — Wrapped in LocaleProvider
+- `apps/app/src/app/(dashboard)/settings/page.tsx` — Added locale/currency settings section
+
+### New Files
+- `apps/api/src/common/utils/csv-export.ts` — CSV generator with injection prevention
+- `apps/api/src/common/utils/csv-export.spec.ts` — CSV export tests
+- `apps/api/src/costing/costing.service.spec.ts` — Costing engine tests
+- `apps/api/src/file-parser/gcode-parser.service.spec.ts` — G-code parser tests
+- `apps/api/src/export/export.module.ts` — Export NestJS module
+- `apps/api/src/export/export.controller.ts` — 6 CSV export endpoints
+- `apps/api/src/export/export.service.ts` — Export queries
+- `apps/api/jest.config.ts` — Jest configuration for API
+- `apps/app/src/lib/locale-context.tsx` — React locale/currency context provider
+
+---
+
 ## [v2.6] — 2026-04-11
 
 ### Added

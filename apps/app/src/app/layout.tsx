@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { ServiceWorkerRegister } from '@/components/sw-register';
 import { ToastProvider } from '@/components/ui/toast';
+import { LocaleProvider } from '@/lib/locale-context';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -38,10 +39,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className={inter.className}>
-        <ToastProvider>
-          <ServiceWorkerRegister />
-          {children}
-        </ToastProvider>
+        <LocaleProvider>
+          <ToastProvider>
+            <ServiceWorkerRegister />
+            {children}
+          </ToastProvider>
+        </LocaleProvider>
       </body>
     </html>
   );

@@ -11,11 +11,23 @@ import * as path from 'path';
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
 @Controller('settings')
-@UseGuards(JwtAuthGuard)
 export class SettingsController {
   constructor(private settingsService: SettingsService) {}
 
+  // Public — frontend needs locale/currency before auth
+  @Get('locale')
+  async getLocale() {
+    const [currency, locale, decimals, dateFormat] = await Promise.all([
+      this.settingsService.get('currency', 'OMR'),
+      this.settingsService.get('locale', 'en-GB'),
+      this.settingsService.get('currency_decimals', '3'),
+      this.settingsService.get('date_format', 'dd MMM yyyy'),
+    ]);
+    return { currency, locale, currencyDecimals: parseInt(decimals), dateFormat };
+  }
+
   @Get()
+  @UseGuards(JwtAuthGuard)
   getAll() {
     return this.settingsService.getAll();
   }
