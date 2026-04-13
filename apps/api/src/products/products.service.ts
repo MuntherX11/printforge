@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CostingService } from '../costing/costing.service';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
@@ -141,6 +141,20 @@ export class ProductsService {
 
   async remove(id: string) {
     await this.findOne(id);
+
+    // Block deletion if there are active (non-terminal) production jobs for this product
+    const activeJobCount = await this.prisma.productionJob.count({
+      where: {
+        productId: id,
+        status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] },
+      },
+    });
+    if (activeJobCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete product: ${activeJobCount} active production job${activeJobCount > 1 ? 's' : ''} reference it. Complete or cancel them first.`,
+      );
+    }
+
     // Delete components first, then the product
     await this.prisma.productComponent.deleteMany({ where: { productId: id } });
     // Delete associated attachments

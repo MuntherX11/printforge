@@ -52,22 +52,23 @@ export class InvoicesService {
   }
 
   async update(id: string, dto: UpdateInvoiceDto) {
-    await this.findOne(id);
+    // findOne throws NotFoundException if missing — reuse the result below
+    const existing = await this.findOne(id);
 
     const data: any = {};
     if (dto.status) data.status = dto.status;
     if (dto.paidAmount !== undefined) data.paidAmount = dto.paidAmount;
     if (dto.paidAt) data.paidAt = new Date(dto.paidAt);
 
-    // If marking as paid, update order paidAmount
+    // If marking as paid, stamp paidAmount + paidAt and credit the order
     if (dto.status === 'PAID') {
-      const invoice = await this.prisma.invoice.findUnique({ where: { id } });
-      if (invoice) {
-        data.paidAmount = invoice.total;
-        data.paidAt = new Date();
+      data.paidAmount = existing.total;
+      data.paidAt = new Date();
+      // Only sync to the order if the invoice is actually linked to one
+      if (existing.orderId) {
         await this.prisma.order.update({
-          where: { id: invoice.orderId },
-          data: { paidAmount: { increment: invoice.total } },
+          where: { id: existing.orderId },
+          data: { paidAmount: { increment: existing.total } },
         });
       }
     }
