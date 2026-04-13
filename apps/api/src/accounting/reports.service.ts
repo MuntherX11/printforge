@@ -59,6 +59,93 @@ export class ReportsService {
     };
   }
 
+  /**
+   * Returns revenue, COGS, and gross profit for each of the last N months.
+   * Used to power the trend chart on the accounting page.
+   */
+  async getMonthlyTrend(months = 6) {
+    const result: Array<{
+      month: string; revenue: number; cogs: number; grossProfit: number;
+    }> = [];
+
+    const now = new Date();
+    for (let i = months - 1; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+
+      const [invoices, jobs] = await Promise.all([
+        this.prisma.invoice.findMany({
+          where: { status: 'PAID', paidAt: { gte: start, lte: end } },
+          select: { paidAmount: true },
+        }),
+        this.prisma.productionJob.findMany({
+          where: { status: 'COMPLETED', completedAt: { gte: start, lte: end } },
+          select: { totalCost: true },
+        }),
+      ]);
+
+      const revenue = invoices.reduce((s, inv) => s + inv.paidAmount, 0);
+      const cogs = jobs.reduce((s, j) => s + (j.totalCost || 0), 0);
+      result.push({
+        month: start.toLocaleString('default', { month: 'short', year: '2-digit' }),
+        revenue,
+        cogs,
+        grossProfit: revenue - cogs,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Returns per-product profitability: revenue contribution vs COGS.
+   * Only includes products that have at least one completed job.
+   */
+  async getProductMargins() {
+    const jobs = await this.prisma.productionJob.findMany({
+      where: { status: 'COMPLETED', totalCost: { not: null } },
+      select: {
+        totalCost: true,
+        product: { select: { id: true, name: true, basePrice: true } },
+        orderItem: { select: { totalPrice: true } },
+        quantityToProduce: true,
+      },
+    });
+
+    const map = new Map<string, {
+      productId: string; productName: string;
+      revenue: number; cogs: number; jobCount: number;
+    }>();
+
+    for (const job of jobs) {
+      if (!job.product) continue;
+      const key = job.product.id;
+      const revenue = job.orderItem?.totalPrice ?? 0;
+      const cogs = job.totalCost ?? 0;
+      const existing = map.get(key);
+      if (existing) {
+        existing.revenue += revenue;
+        existing.cogs += cogs;
+        existing.jobCount += 1;
+      } else {
+        map.set(key, {
+          productId: job.product.id,
+          productName: job.product.name,
+          revenue,
+          cogs,
+          jobCount: 1,
+        });
+      }
+    }
+
+    return Array.from(map.values())
+      .map(p => ({
+        ...p,
+        grossProfit: p.revenue - p.cogs,
+        margin: p.revenue > 0 ? ((p.revenue - p.cogs) / p.revenue) * 100 : 0,
+      }))
+      .sort((a, b) => b.grossProfit - a.grossProfit);
+  }
+
   async getDashboardKPIs() {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);

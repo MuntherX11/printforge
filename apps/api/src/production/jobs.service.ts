@@ -337,6 +337,11 @@ export class JobsService {
       });
     }
 
+    // Auto-calculate COGS before marking complete so P&L reports are accurate
+    await this.calculateCost(id).catch(() => {
+      // Non-fatal: cost fields may already be populated or materials missing
+    });
+
     // Mark job completed
     const completed = await this.update(id, { status: 'COMPLETED' } as any);
     this.gateway?.broadcastNotification({

@@ -19,6 +19,18 @@ export class ReportsController {
     return this.reportsService.getProfitAndLoss(startDate, endDate);
   }
 
+  @Get('monthly-trend')
+  @Roles('ADMIN', 'VIEWER')
+  getMonthlyTrend(@Query('months') months?: string) {
+    return this.reportsService.getMonthlyTrend(months ? parseInt(months) : 6);
+  }
+
+  @Get('product-margins')
+  @Roles('ADMIN', 'VIEWER')
+  getProductMargins() {
+    return this.reportsService.getProductMargins();
+  }
+
   @Get('dashboard')
   @Roles('ADMIN', 'VIEWER')
   getDashboardKPIs() {
