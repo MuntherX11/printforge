@@ -21,7 +21,7 @@ COPY apps/api/tsconfig.json ./apps/api/
 COPY apps/api/nest-cli.json ./apps/api/
 
 # Install all workspace dependencies
-RUN npm install --workspaces --include-workspace-root --ignore-scripts
+RUN npm install --workspaces --include-workspace-root --ignore-scripts --legacy-peer-deps
 
 # Build shared types first
 RUN cd packages/types && npx tsc

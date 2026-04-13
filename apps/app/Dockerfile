@@ -20,7 +20,7 @@ COPY apps/app/postcss.config.js ./apps/app/
 COPY apps/app/tailwind.config.ts ./apps/app/
 
 # Install all workspace dependencies
-RUN npm install --workspaces --include-workspace-root --ignore-scripts
+RUN npm install --workspaces --include-workspace-root --ignore-scripts --legacy-peer-deps
 
 # Build shared types first
 RUN cd packages/types && npx tsc
