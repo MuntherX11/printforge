@@ -238,9 +238,16 @@ export class ProductsService {
       totalMaterialCost += estimate.materialCost;
       totalMachineCost += estimate.machineCost;
 
+      // Multicolor components have materialId=null; derive a display name and cost from sub-materials
+      const isMulticolor = !comp.materialId && comp.componentMaterials?.length > 0;
+      const materialName = comp.material?.name
+        ?? (isMulticolor
+          ? comp.componentMaterials.map((cm: any) => cm.material?.name).filter(Boolean).join(' / ') || 'Multicolor'
+          : 'Unknown');
+
       componentResults.push({
         description: comp.description,
-        materialName: comp.material.name,
+        materialName,
         gramsUsed: comp.gramsUsed,
         printMinutes: comp.printMinutes,
         quantity: comp.quantity,
@@ -248,11 +255,15 @@ export class ProductsService {
       });
     }
 
-    // Calculate full product cost with color changes
-    const allMaterials = product.components.map(c => ({
-      gramsUsed: c.gramsUsed * c.quantity,
-      costPerGram: c.material.costPerGram,
-    }));
+    // Calculate full product cost with color changes.
+    // For multicolor components, average the sub-material cost-per-gram as a proxy.
+    const allMaterials = product.components.map(c => {
+      const costPerGram = c.material?.costPerGram
+        ?? (c.componentMaterials?.length
+          ? c.componentMaterials.reduce((s: number, cm: any) => s + (cm.material?.costPerGram ?? 0), 0) / c.componentMaterials.length
+          : 0);
+      return { gramsUsed: c.gramsUsed * c.quantity, costPerGram };
+    });
 
     // Use product's default printer for cost calculation if set
     const defaultPrinter = product.defaultPrinterId
