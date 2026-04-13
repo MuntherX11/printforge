@@ -13,6 +13,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 import { Calculator, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
@@ -25,6 +26,7 @@ const jobStatuses = [
 
 export default function JobDetailPage() {
   const { id } = useParams();
+  const { toast } = useToast();
   const [job, setJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
@@ -36,13 +38,23 @@ export default function JobDetailPage() {
   useEffect(() => { load(); }, [id]);
 
   async function updateJob(data: any) {
-    await api.patch(`/jobs/${id}`, data);
-    load();
+    try {
+      await api.patch(`/jobs/${id}`, data);
+      toast('success', 'Job updated');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    }
   }
 
   async function calculateCost() {
-    await api.post(`/jobs/${id}/calculate-cost`);
-    load();
+    try {
+      await api.post(`/jobs/${id}/calculate-cost`);
+      toast('success', 'Cost calculated');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    }
   }
 
   async function openAddMaterial() {
@@ -64,7 +76,7 @@ export default function JobDetailPage() {
       setShowAddMaterial(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -84,7 +96,7 @@ export default function JobDetailPage() {
       setShowFailDialog(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -92,10 +104,10 @@ export default function JobDetailPage() {
     if (!confirm('Create a reprint job? This will clone this job as a new QUEUED job.')) return;
     try {
       const newJob = await api.post<any>(`/jobs/${id}/reprint`);
-      alert(`Reprint job created: ${newJob.name}`);
+      toast('success', `Reprint job created: ${newJob.name}`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 

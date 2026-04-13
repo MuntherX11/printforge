@@ -9,8 +9,10 @@ import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { FolderOpen, FileText, Box, Check, X, RefreshCw } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function WatchFolderPage() {
+  const { toast } = useToast();
   const [imports, setImports] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +44,7 @@ export default function WatchFolderPage() {
       await api.post(`/watch-folder/${id}/dismiss`);
       setImports(prev => prev.filter(i => i.id !== id));
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -60,7 +62,7 @@ export default function WatchFolderPage() {
       setShowImport(null);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setImporting(false);
     }

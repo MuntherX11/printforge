@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
+import { useToast } from '@/components/ui/toast';
 
 const quoteStatuses = [
   { value: 'DRAFT', label: 'Draft' },
@@ -22,6 +23,7 @@ const quoteStatuses = [
 export default function QuoteDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { toast } = useToast();
   const [quote, setQuote] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -38,7 +40,7 @@ export default function QuoteDetailPage() {
       await api.post(`/quotes/${id}/convert`, { autoCreateJobs });
       router.push('/orders');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 

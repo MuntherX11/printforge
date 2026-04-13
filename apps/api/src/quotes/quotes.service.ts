@@ -218,6 +218,11 @@ export class QuotesService {
       throw new BadRequestException('Quote must be SENT or ACCEPTED to convert');
     }
 
+    // Reject expired quotes
+    if (quote.validUntil && new Date(quote.validUntil) < new Date()) {
+      throw new BadRequestException('Quote has expired and can no longer be converted to an order');
+    }
+
     // Auto-mark as ACCEPTED if currently SENT
     if (quote.status === 'SENT') {
       await this.prisma.quote.update({

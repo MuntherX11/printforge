@@ -10,8 +10,10 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { Plus, MapPin, Trash2, ArrowLeft } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function LocationsPage() {
+  const { toast } = useToast();
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -32,7 +34,7 @@ export default function LocationsPage() {
       setShowAdd(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setAdding(false);
     }
@@ -44,7 +46,7 @@ export default function LocationsPage() {
       await api.delete(`/locations/${id}`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 

@@ -13,8 +13,10 @@ import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function InventoryPage() {
+  const { toast } = useToast();
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadResult, setUploadResult] = useState<any>(null);
@@ -94,7 +96,7 @@ export default function InventoryPage() {
       setScannedFields(null);
       loadMaterials();
     } catch (err: any) {
-      alert('Failed to create spool: ' + (err.message || 'Unknown error'));
+      toast('error', 'Failed to create spool: ' + (err.message || 'Unknown error'));
     } finally {
       setCreating(false);
     }

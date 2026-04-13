@@ -238,11 +238,12 @@ export class ProductsService {
       totalMaterialCost += estimate.materialCost;
       totalMachineCost += estimate.machineCost;
 
-      // Multicolor components have materialId=null; derive a display name and cost from sub-materials
-      const isMulticolor = !comp.materialId && comp.componentMaterials?.length > 0;
+      // Multicolor components have materialId=null; derive a display name from sub-materials
+      const isMulticolor = !comp.materialId && (comp.materials?.length > 0 || comp.componentMaterials?.length > 0);
+      const subMaterials: any[] = comp.materials ?? comp.componentMaterials ?? [];
       const materialName = comp.material?.name
         ?? (isMulticolor
-          ? comp.componentMaterials.map((cm: any) => cm.material?.name).filter(Boolean).join(' / ') || 'Multicolor'
+          ? subMaterials.map((cm: any) => cm.material?.name).filter(Boolean).join(' / ') || 'Multicolor'
           : 'Unknown');
 
       componentResults.push({
@@ -258,9 +259,10 @@ export class ProductsService {
     // Calculate full product cost with color changes.
     // For multicolor components, average the sub-material cost-per-gram as a proxy.
     const allMaterials = product.components.map(c => {
+      const subs: any[] = c.materials ?? c.componentMaterials ?? [];
       const costPerGram = c.material?.costPerGram
-        ?? (c.componentMaterials?.length
-          ? c.componentMaterials.reduce((s: number, cm: any) => s + (cm.material?.costPerGram ?? 0), 0) / c.componentMaterials.length
+        ?? (subs.length
+          ? subs.reduce((s: number, cm: any) => s + (cm.material?.costPerGram ?? 0), 0) / subs.length
           : 0);
       return { gramsUsed: c.gramsUsed * c.quantity, costPerGram };
     });

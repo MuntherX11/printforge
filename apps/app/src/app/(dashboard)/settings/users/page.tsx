@@ -12,8 +12,10 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { Plus } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function UsersPage() {
+  const { toast } = useToast();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -34,7 +36,7 @@ export default function UsersPage() {
       setShowAdd(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 

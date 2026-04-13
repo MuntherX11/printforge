@@ -15,6 +15,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { Mail, MessageCircle, AlertTriangle, CheckCircle, Factory } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -28,6 +29,7 @@ const orderStatuses = [
 
 export default function OrderDetailPage() {
   const { id } = useParams();
+  const { toast } = useToast();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showPlanDialog, setShowPlanDialog] = useState(false);
@@ -41,22 +43,27 @@ export default function OrderDetailPage() {
   useEffect(() => { load(); }, [id]);
 
   async function updateStatus(status: string) {
-    await api.patch(`/orders/${id}`, { status });
-    load();
+    try {
+      await api.patch(`/orders/${id}`, { status });
+      toast('success', 'Order status updated');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    }
   }
 
   async function sendInvoiceEmail(invoiceId: string) {
     try {
       await api.post(`/invoices/${invoiceId}/send-email`);
-      alert('Invoice sent via email');
+      toast('success', 'Invoice sent via email');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
   function whatsAppInvoice(inv: any) {
     const phone = order.customer?.phone?.replace(/[^0-9+]/g, '').replace(/^\+/, '');
-    if (!phone) { alert('Customer has no phone number'); return; }
+    if (!phone) { toast('error', 'Customer has no phone number'); return; }
     const msg = encodeURIComponent(`Hi ${order.customer?.name}, your invoice ${inv.invoiceNumber} for ${formatCurrency(inv.total)} is ready. Thank you!`);
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
   }
@@ -73,7 +80,7 @@ export default function OrderDetailPage() {
       setPlanOverrides({});
       setShowPlanDialog(true);
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setPlanLoading(false);
     }
@@ -92,10 +99,10 @@ export default function OrderDetailPage() {
         }));
       const res = await api.post<any>(`/jobs/plan/${id}`, { overrides: overrides.length > 0 ? overrides : undefined });
       setShowPlanDialog(false);
-      alert(`Created ${res.jobsCreated} production job(s)`);
+      toast('success', `Created ${res.jobsCreated} production job(s)`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setCreating(false);
     }
@@ -117,7 +124,7 @@ export default function OrderDetailPage() {
       await api.post('/invoices', { orderId: id });
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 

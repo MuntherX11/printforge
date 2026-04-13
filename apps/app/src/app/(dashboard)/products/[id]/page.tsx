@@ -13,10 +13,12 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { toast } = useToast();
   const [product, setProduct] = useState<any>(null);
   const [materials, setMaterials] = useState<any[]>([]);
   const [printers, setPrinters] = useState<any[]>([]);
@@ -65,7 +67,7 @@ export default function ProductDetailPage() {
       setShowAddComponent(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setAdding(false);
     }
@@ -77,7 +79,7 @@ export default function ProductDetailPage() {
       await api.delete(`/products/components/${componentId}`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -88,7 +90,7 @@ export default function ProductDetailPage() {
       const result = await api.post(`/products/${id}/calculate`);
       setCostResult(result);
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setCalculating(false);
     }
@@ -109,7 +111,7 @@ export default function ProductDetailPage() {
       setShowEditProduct(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -136,7 +138,7 @@ export default function ProductDetailPage() {
       // Reload anyway — the backend may have processed before the response failed
       load();
       if (err.message !== 'Failed to fetch') {
-        alert(err.message);
+        toast('error', err.message);
       }
     } finally {
       setUploadingGcode(false);
@@ -161,7 +163,7 @@ export default function ProductDetailPage() {
       if (!res.ok) throw new Error('Upload failed');
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setUploadingImages(false);
       e.target.value = '';
@@ -176,7 +178,7 @@ export default function ProductDetailPage() {
       setEditingComponentId(null);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSavingComponent(false);
     }
@@ -189,7 +191,7 @@ export default function ProductDetailPage() {
       setEditingMaterialId(null);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSavingComponent(false);
     }
@@ -201,7 +203,7 @@ export default function ProductDetailPage() {
       await api.delete(`/products/${id}/images/${attachmentId}`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -227,7 +229,7 @@ export default function ProductDetailPage() {
               await api.delete(`/products/${id}`);
               router.push('/products');
             } catch (err: any) {
-              alert(err.message || 'Delete failed');
+              toast('error', err.message || 'Delete failed');
             }
           }}>
             <Trash2 className="h-4 w-4 mr-2" /> Delete
@@ -256,7 +258,7 @@ export default function ProductDetailPage() {
               try {
                 await api.patch(`/products/${id}`, { defaultPrinterId: val });
                 load();
-              } catch (err: any) { alert(err.message); }
+              } catch (err: any) { toast('error', err.message); }
             }}
           >
             <option value="">None</option>
@@ -465,7 +467,7 @@ export default function ProductDetailPage() {
                           try {
                             await api.patch(`/products/${id}/components/${c.id}`, { stockOnHand: val });
                             load();
-                          } catch (err: any) { alert(err.message); }
+                          } catch (err: any) { toast('error', err.message); }
                         }}
                         onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();

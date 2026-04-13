@@ -102,7 +102,7 @@ export default function ProductionPage() {
           ))}
         </div>
         <div className="flex gap-1 border rounded-lg p-0.5 dark:border-gray-600">
-          <button onClick={() => setView('list')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <button onClick={() => { setView('list'); setFilter('ALL'); }} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             <LayoutList className="h-3.5 w-3.5" /> List
           </button>
           <button onClick={() => setView('queue')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
@@ -189,12 +189,12 @@ export default function ProductionPage() {
                     {p.model && <span className="text-xs text-gray-400 font-normal">{p.model}</span>}
                   </Link>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">{p.productionJobs.length} in queue</span>
+                    <span className="text-xs text-gray-500">{p.productionJobs?.length ?? 0} in queue</span>
                     <StatusBadge status={p.status} />
                   </div>
                 </CardTitle>
               </CardHeader>
-              {p.productionJobs.length > 0 ? (
+              {(p.productionJobs?.length ?? 0) > 0 ? (
                 <CardContent className="p-0">
                   <Table>
                     <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Job</TableHead><TableHead>Status</TableHead><TableHead>Order</TableHead><TableHead>Qty</TableHead></TableRow></TableHeader>

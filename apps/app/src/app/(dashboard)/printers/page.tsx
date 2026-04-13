@@ -11,8 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { Plus, Printer, Clock, Wrench } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function PrintersPage() {
+  const { toast } = useToast();
   const [printers, setPrinters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -38,7 +40,7 @@ export default function PrintersPage() {
       setShowAdd(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setAdding(false);
     }

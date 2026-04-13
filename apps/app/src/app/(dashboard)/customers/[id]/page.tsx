@@ -13,10 +13,12 @@ import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { Mail, MessageCircle } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function CustomerDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { toast } = useToast();
   const [customer, setCustomer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -29,7 +31,7 @@ export default function CustomerDetailPage() {
   }, [id]);
 
   function openWhatsApp() {
-    if (!customer.phone) { alert('Customer has no phone number'); return; }
+    if (!customer.phone) { toast('error', 'Customer has no phone number'); return; }
     const phone = customer.phone.replace(/[^0-9+]/g, '').replace(/^\+/, '');
     window.open(`https://wa.me/${phone}`, '_blank');
   }
@@ -45,9 +47,9 @@ export default function CustomerDetailPage() {
         body: form.get('body') as string,
       });
       setShowEmail(false);
-      alert('Email sent successfully');
+      toast('success', 'Email sent successfully');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSending(false);
     }
@@ -69,7 +71,7 @@ export default function CustomerDetailPage() {
       setCustomer(updated);
       setEditing(false);
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSaving(false);
     }

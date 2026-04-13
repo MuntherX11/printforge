@@ -10,8 +10,10 @@ import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { useEffect } from 'react';
 import { Calculator } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function EstimatePage() {
+  const { toast } = useToast();
   const [materials, setMaterials] = useState<any[]>([]);
   const [printers, setPrinters] = useState<any[]>([]);
   const [result, setResult] = useState<any>(null);
@@ -40,7 +42,7 @@ export default function EstimatePage() {
       });
       setResult(estimate);
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setLoading(false);
     }

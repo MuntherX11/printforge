@@ -9,8 +9,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { Upload } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function SettingsPage() {
+  const { toast } = useToast();
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,9 +36,9 @@ export default function SettingsPage() {
       .map(([key, value]) => ({ key, value: value as string }));
     try {
       await api.put('/settings', { settings: entries });
-      alert('Settings saved');
+      toast('success', 'Settings saved');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSaving(false);
     }
@@ -50,7 +52,7 @@ export default function SettingsPage() {
       await api.upload('/settings/logo', file, {});
       setLogoUrl('/api/settings/logo?t=' + Date.now());
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setUploadingLogo(false);
       e.target.value = '';

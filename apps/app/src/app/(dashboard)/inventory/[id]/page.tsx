@@ -14,11 +14,13 @@ import { formatDate, formatCurrency } from '@/lib/utils';
 import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/components/ui/toast';
 
 export default function MaterialDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [material, setMaterial] = useState<any>(null);
   const [locations, setLocations] = useState<any[]>([]);
   const [showScanner, setShowScanner] = useState(false);
@@ -59,7 +61,7 @@ export default function MaterialDetailPage() {
       setShowAddSpool(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSaving(false);
     }
@@ -82,7 +84,7 @@ export default function MaterialDetailPage() {
       setShowEditMaterial(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSaving(false);
     }
@@ -101,7 +103,7 @@ export default function MaterialDetailPage() {
       setEditingSpool(null);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setSaving(false);
     }
@@ -113,7 +115,7 @@ export default function MaterialDetailPage() {
       await api.patch(`/spools/${spoolId}`, { isActive: false });
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -123,7 +125,7 @@ export default function MaterialDetailPage() {
       await api.delete(`/spools/${spoolId}`);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -133,7 +135,7 @@ export default function MaterialDetailPage() {
       await api.delete(`/materials/${id}`);
       router.push('/inventory');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     }
   }
 
@@ -170,7 +172,7 @@ export default function MaterialDetailPage() {
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err: any) {
-      alert(err.message);
+      toast('error', err.message);
     } finally {
       setPrintingLabels(false);
     }
