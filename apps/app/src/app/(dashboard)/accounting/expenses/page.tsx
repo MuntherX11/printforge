@@ -156,9 +156,9 @@ export default function ExpensesPage() {
                 ))}
                 {/* Total row */}
                 <TableRow className="bg-gray-50 dark:bg-gray-800/50 font-semibold">
-                  <TableCell colSpan={3} className="text-right text-sm text-gray-600 dark:text-gray-400">Total</TableCell>
-                  <TableCell className="text-right">{formatCurrency(total)}</TableCell>
-                  <TableCell />
+                  <td colSpan={3} className="p-4 text-right text-sm text-gray-600 dark:text-gray-400">Total</td>
+                  <td className="p-4 text-right">{formatCurrency(total)}</td>
+                  <td className="p-4" />
                 </TableRow>
               </TableBody>
             </Table>
