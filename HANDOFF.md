@@ -1,6 +1,6 @@
 # PrintForge — Project Handoff Document
 
-> Last updated: 2026-04-11 | Current version: **v2.8**
+> Last updated: 2026-04-13 | Current version: **v2.9**
 
 ---
 
@@ -92,7 +92,11 @@ Stock-aware production planning (plan preview + create from plan), ComponentMate
 ### v2.7 — Competitive Gaps (vs FilaOps)
 Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttles), CSV export (6 endpoints with formula injection prevention), internationalization (LocaleProvider, multi-currency settings), test coverage (44 tests: CSV, costing, G-code parser).
 
-### v2.8 — Operational Resilience (current)
+### v2.9 — Real-time WebSocket + PWA (current)
+1. **WebSocket frontend** — `useWebSocket()` hook (shared `socket.io-client`), WsNotifications component, live printer status on detail page replaces `setInterval` polling, job complete/fail events broadcast toasts. Socket.IO path: `/api/socket.io/` (routes via nginx `/api/` location).
+2. **PWA** — Rewritten service worker (versioned, stale-while-revalidate), `InstallPrompt` component (`beforeinstallprompt`), `OfflineIndicator` (amber top bar), PNG icons (192 + 512), updated manifest.
+
+### v2.8 — Operational Resilience
 1. **Failed Print Tracking** — `POST /jobs/:id/fail` with reason + waste grams (auto-deducts from spools proportionally), `POST /jobs/:id/reprint` (clones as new QUEUED job linked via `reprintOfId`), `GET /jobs/stats/failures` (failure rate, total waste). UI: Mark Failed dialog, failure info card, Reprint button, stats on production page.
 
 2. **Machine Maintenance** — `MaintenanceLog` model (SCHEDULED/UNSCHEDULED/CALIBRATION), `POST /printers/:id/maintenance` (sets status to MAINTENANCE), complete workflow restores to IDLE + sets next due date. Printer tracks `totalPrintHours` (accumulated on job complete), `maintenanceIntervalHours`, `nextMaintenanceDue`. UI: start/complete buttons, interval settings, history table, overdue badges on printer list.
@@ -103,29 +107,7 @@ Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttl
 
 ## What's Left To Do
 
-### Immediate Next Steps (v2.8 continued)
-
-These were planned as steps 4 and 5 of the "joint weaknesses" work:
-
-**4. Real-time WebSocket Frontend Hook**
-- The backend WebSocket gateway ALREADY EXISTS at `apps/api/src/websocket/events.gateway.ts` — it broadcasts `printerStatus`, `jobProgress`, and `notification` events via Socket.IO at `/ws`
-- The Moonraker scheduler already calls the gateway every 10s
-- What's MISSING is the frontend consuming it:
-  - Create `apps/app/src/lib/use-websocket.ts` — React hook using `socket.io-client`, auto-reconnect, exposes `printerStatuses`, `jobProgress`, `notifications`
-  - Replace the `setInterval(fetchLive, 10000)` polling in printer detail page with WebSocket events
-  - Add live status updates to printer list, production page, dashboard
-  - Show toast notifications from WebSocket `notification` events (job completed, failed, maintenance due)
-  - Also broadcast on job status changes from the API (create, complete, fail) — currently only Moonraker polls trigger broadcasts
-
-**5. PWA Enhancements**
-- `manifest.json` and `ServiceWorkerRegister` component ALREADY EXIST
-- What's MISSING:
-  - Proper service worker (`public/sw.js`) with cache-first for static assets, network-first for API
-  - Install prompt component (detects `beforeinstallprompt`)
-  - Offline indicator bar
-  - PNG icons (some browsers don't support SVG for PWA)
-
-### Medium-term (v2.9+) — PrintForge-specific Gaps vs FilaOps
+### Medium-term (v3.0+) — PrintForge-specific Gaps vs FilaOps
 
 These were identified in a detailed comparison. The 4 quick wins (security, CSV, i18n, tests) and 3 joint weaknesses (failed prints, maintenance, scheduling) are done. Remaining PrintForge gaps:
 

@@ -3,6 +3,9 @@ import { Inter } from 'next/font/google';
 import { ServiceWorkerRegister } from '@/components/sw-register';
 import { ToastProvider } from '@/components/ui/toast';
 import { LocaleProvider } from '@/lib/locale-context';
+import { WsNotifications } from '@/components/ws-notifications';
+import { InstallPrompt } from '@/components/install-prompt';
+import { OfflineIndicator } from '@/components/offline-indicator';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -42,6 +45,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <LocaleProvider>
           <ToastProvider>
             <ServiceWorkerRegister />
+            <WsNotifications />
+            <InstallPrompt />
+            <OfflineIndicator />
             {children}
           </ToastProvider>
         </LocaleProvider>

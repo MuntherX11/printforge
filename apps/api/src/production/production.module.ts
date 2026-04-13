@@ -3,9 +3,10 @@ import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { JobMaterialsService } from './job-materials.service';
 import { CostingModule } from '../costing/costing.module';
+import { WebSocketModule } from '../websocket/websocket.module';
 
 @Module({
-  imports: [CostingModule],
+  imports: [CostingModule, WebSocketModule],
   controllers: [JobsController],
   providers: [JobsService, JobMaterialsService],
   exports: [JobsService, JobMaterialsService],

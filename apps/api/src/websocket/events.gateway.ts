@@ -13,6 +13,7 @@ import { MoonrakerService, MoonrakerSnapshot } from '../moonraker-bridge/moonrak
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: '/ws',
+  path: '/api/socket.io/',
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;

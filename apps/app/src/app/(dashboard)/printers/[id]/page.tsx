@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useWebSocket } from '@/lib/use-websocket';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -23,6 +24,7 @@ export default function PrinterDetailPage() {
   const [printer, setPrinter] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState<any>(null);
+  const { printerStatuses } = useWebSocket();
   const [controlling, setControlling] = useState(false);
   const [savingCosting, setSavingCosting] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
@@ -37,14 +39,17 @@ export default function PrinterDetailPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll Moonraker status every 10s for this printer
+  // Initial fetch of Moonraker status, then rely on WebSocket for updates
   useEffect(() => {
     if (!printer?.moonrakerUrl) return;
-    const fetchLive = () => api.get(`/moonraker/status/${id}`).then((r: any) => setLiveStatus(r.snapshot)).catch(() => {});
-    fetchLive();
-    const interval = setInterval(fetchLive, 10000);
-    return () => clearInterval(interval);
+    api.get(`/moonraker/status/${id}`).then((r: any) => setLiveStatus(r.snapshot)).catch(() => {});
   }, [id, printer?.moonrakerUrl]);
+
+  // Apply live WebSocket status updates for this printer
+  useEffect(() => {
+    const ws = printerStatuses[id as string];
+    if (ws) setLiveStatus(ws);
+  }, [id, printerStatuses]);
 
   async function handleControl(action: 'pause' | 'resume' | 'cancel') {
     setControlling(true);

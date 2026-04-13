@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CostingService } from '../costing/costing.service';
+import { EventsGateway } from '../websocket/events.gateway';
 import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 
@@ -11,6 +12,7 @@ export class JobsService {
   constructor(
     private prisma: PrismaService,
     private costingService: CostingService,
+    @Optional() private gateway: EventsGateway,
   ) {}
 
   async create(dto: CreateProductionJobDto) {
@@ -336,7 +338,13 @@ export class JobsService {
     }
 
     // Mark job completed
-    return this.update(id, { status: 'COMPLETED' } as any);
+    const completed = await this.update(id, { status: 'COMPLETED' } as any);
+    this.gateway?.broadcastNotification({
+      type: 'success',
+      title: 'Job Completed',
+      message: `"${job.name}" finished successfully.`,
+    });
+    return completed;
   }
 
   // ============ FAILED PRINT TRACKING ============
@@ -368,7 +376,7 @@ export class JobsService {
       }
     }
 
-    return this.prisma.productionJob.update({
+    const failed = await this.prisma.productionJob.update({
       where: { id },
       data: {
         status: 'FAILED',
@@ -378,6 +386,12 @@ export class JobsService {
       },
       include: { printer: true, materials: { include: { material: true } } },
     });
+    this.gateway?.broadcastNotification({
+      type: 'error',
+      title: 'Job Failed',
+      message: `"${job.name}" failed${dto.failureReason ? `: ${dto.failureReason}` : ''}.`,
+    });
+    return failed;
   }
 
   async reprintJob(id: string) {

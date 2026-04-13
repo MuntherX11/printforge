@@ -2,6 +2,29 @@
 
 All notable changes to PrintForge are documented here.
 
+## [v2.9] — 2026-04-13
+
+### Added
+- **Real-time WebSocket frontend** (Step 4)
+  - `apps/app/src/lib/use-websocket.ts` — `useWebSocket()` hook backed by a shared `socket.io-client` instance; auto-reconnects, exposes `printerStatuses`, `jobProgress`, `lastNotification`, `connected`
+  - Socket.IO server path set to `/api/socket.io/` so it routes through the existing nginx `/api/` proxy (no nginx changes needed)
+  - Printer detail page now receives live Moonraker status via WebSocket events instead of `setInterval` polling every 10 s
+  - `WsNotifications` component (mounted in root layout) surfaces `notification` WebSocket events as toasts
+  - `completeJob` and `failJob` in `JobsService` now broadcast `notification` events to all connected clients (job name + reason in message)
+  - `ProductionModule` imports `WebSocketModule` so `EventsGateway` can be injected into `JobsService`
+
+- **PWA enhancements** (Step 5)
+  - Service worker (`public/sw.js`) rewritten with versioned caches, stale-while-revalidate for static assets, proper offline fallback for API calls, font caching, and explicit Socket.IO bypass
+  - `InstallPrompt` component — captures `beforeinstallprompt`, shows a fixed bottom install bar; dismissal persisted in localStorage
+  - `OfflineIndicator` component — shows amber top bar whenever `navigator.onLine` is false
+  - PNG icons generated (`public/icons/icon-192x192.png`, `public/icons/icon-512x512.png`) — blue circle with white inner block, RGBA with anti-aliased edges
+  - `manifest.json` updated with all four PNG icon entries (192 + 512, `any` + `maskable` purpose)
+  - `InstallPrompt`, `OfflineIndicator`, `WsNotifications` all mounted in root layout
+
+### Changed
+- `EventsGateway` path changed from default `/socket.io` to `/api/socket.io/` (aligns with NestJS global prefix so nginx routes correctly)
+- `JobsService` constructor now accepts `@Optional() EventsGateway` — won't break if WebSocketModule is not in scope
+
 ## [v2.8] — 2026-04-11
 
 ### Added
