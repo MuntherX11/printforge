@@ -33,6 +33,8 @@ export default function JobDetailPage() {
   const [showFailDialog, setShowFailDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showReprintDialog, setShowReprintDialog] = useState(false);
+  const [submittingFail, setSubmittingFail] = useState(false);
+  const [submittingReprint, setSubmittingReprint] = useState(false);
   const [materials, setMaterials] = useState<any[]>([]);
   const [spools, setSpools] = useState<any[]>([]);
 
@@ -90,6 +92,7 @@ export default function JobDetailPage() {
   async function handleFail(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    setSubmittingFail(true);
     try {
       await api.post(`/jobs/${id}/fail`, {
         failureReason: form.get('failureReason'),
@@ -99,6 +102,8 @@ export default function JobDetailPage() {
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setSubmittingFail(false);
     }
   }
 
@@ -114,6 +119,7 @@ export default function JobDetailPage() {
   }
 
   async function handleReprint() {
+    setSubmittingReprint(true);
     try {
       const newJob = await api.post<any>(`/jobs/${id}/reprint`);
       setShowReprintDialog(false);
@@ -121,6 +127,8 @@ export default function JobDetailPage() {
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setSubmittingReprint(false);
     }
   }
 
@@ -265,7 +273,7 @@ export default function JobDetailPage() {
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">This will clone <strong>{job.name}</strong> as a new QUEUED job. Continue?</p>
         <div className="flex gap-3 justify-end">
           <Button variant="outline" onClick={() => setShowReprintDialog(false)}>Back</Button>
-          <Button onClick={handleReprint}><RefreshCw className="h-4 w-4 mr-2" /> Create Reprint</Button>
+          <Button disabled={submittingReprint} onClick={handleReprint}><RefreshCw className="h-4 w-4 mr-2" />{submittingReprint ? 'Creating...' : 'Create Reprint'}</Button>
         </div>
       </Dialog>
 
@@ -292,7 +300,7 @@ export default function JobDetailPage() {
           <p className="text-xs text-gray-500">Waste grams will be deducted proportionally from the assigned spools.</p>
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowFailDialog(false)}>Cancel</Button>
-            <Button type="submit" className="bg-red-600 hover:bg-red-700 text-white">Mark Failed</Button>
+            <Button type="submit" disabled={submittingFail} className="bg-red-600 hover:bg-red-700 text-white">{submittingFail ? 'Saving...' : 'Mark Failed'}</Button>
           </div>
         </form>
       </Dialog>

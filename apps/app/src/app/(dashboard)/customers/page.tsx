@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Badge } from '@/components/ui/badge';
+import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
@@ -17,6 +18,9 @@ export default function CustomersPage() {
   const [data, setData] = useState<any>(null);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null);
+  const [rejecting, setRejecting] = useState(false);
   const { toast } = useToast();
 
   function loadData() {
@@ -32,23 +36,30 @@ export default function CustomersPage() {
   useEffect(() => { loadData(); }, []);
 
   async function handleApprove(id: string) {
+    setApprovingId(id);
     try {
       await api.post(`/auth/customers/${id}/approve`);
       toast('success', 'Customer approved');
       loadData();
     } catch (err: any) {
       toast('error', err.message || 'Failed to approve');
+    } finally {
+      setApprovingId(null);
     }
   }
 
-  async function handleReject(id: string) {
-    if (!confirm('Reject this customer signup?')) return;
+  async function handleReject() {
+    if (!rejectTarget) return;
+    setRejecting(true);
     try {
-      await api.post(`/auth/customers/${id}/reject`);
+      await api.post(`/auth/customers/${rejectTarget.id}/reject`);
+      setRejectTarget(null);
       toast('success', 'Customer rejected');
       loadData();
     } catch (err: any) {
       toast('error', err.message || 'Failed to reject');
+    } finally {
+      setRejecting(false);
     }
   }
 
@@ -93,11 +104,11 @@ export default function CustomersPage() {
                     <TableCell>{formatDate(c.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Button size="sm" onClick={() => handleApprove(c.id)}>
+                        <Button size="sm" disabled={approvingId === c.id} onClick={() => handleApprove(c.id)}>
                           <UserCheck className="h-4 w-4 mr-1" />
-                          Approve
+                          {approvingId === c.id ? 'Approving...' : 'Approve'}
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => handleReject(c.id)}>
+                        <Button size="sm" variant="destructive" disabled={approvingId === c.id} onClick={() => setRejectTarget({ id: c.id, name: c.name })}>
                           <UserX className="h-4 w-4 mr-1" />
                           Reject
                         </Button>
@@ -150,6 +161,17 @@ export default function CustomersPage() {
           )}
         </CardContent>
       </Card>
+      <Dialog open={!!rejectTarget} onClose={() => setRejectTarget(null)} title="Reject Customer">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Reject signup from <strong>{rejectTarget?.name}</strong>? They will not be able to log in.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <Button variant="outline" onClick={() => setRejectTarget(null)}>Back</Button>
+          <Button variant="destructive" disabled={rejecting} onClick={handleReject}>
+            {rejecting ? 'Rejecting...' : 'Reject'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

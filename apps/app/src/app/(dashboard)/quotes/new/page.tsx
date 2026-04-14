@@ -36,8 +36,15 @@ export default function NewQuotePage() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     setError('');
+
+    const validItems = items.filter(i => i.description.trim());
+    if (validItems.length === 0) {
+      setError('Add at least one item with a description before saving.');
+      return;
+    }
+
+    setLoading(true);
     const form = new FormData(e.currentTarget);
 
     try {
@@ -45,7 +52,7 @@ export default function NewQuotePage() {
         customerId: form.get('customerId'),
         notes: form.get('notes') || undefined,
         validUntil: form.get('validUntil') || undefined,
-        items: items.filter(i => i.description).map(i => ({ ...i, productId: i.productId || undefined })),
+        items: validItems.map(i => ({ ...i, productId: i.productId || undefined })),
       });
       router.push('/quotes');
     } catch (err: any) {

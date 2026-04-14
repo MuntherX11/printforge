@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
+import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Plus } from 'lucide-react';
+import { Plus, ShoppingCart } from 'lucide-react';
 
 const statusFilters = ['ALL', 'PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
@@ -49,34 +50,43 @@ export default function OrdersPage() {
 
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Order #</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Paid</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead>Created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {orders.map((o: any) => (
-                <TableRow key={o.id}>
-                  <TableCell>
-                    <Link href={`/orders/${o.id}`} className="font-medium text-brand-600 hover:underline">{o.orderNumber}</Link>
-                  </TableCell>
-                  <TableCell>{o.customer?.name || '-'}</TableCell>
-                  <TableCell><StatusBadge status={o.status} /></TableCell>
-                  <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
-                  <TableCell>{formatCurrency(o.paidAmount)}</TableCell>
-                  <TableCell>{o.dueDate ? formatDate(o.dueDate) : '-'}</TableCell>
-                  <TableCell>{formatDate(o.createdAt)}</TableCell>
+          {orders.length === 0 ? (
+            <EmptyState
+              icon={<ShoppingCart className="h-12 w-12" />}
+              title="No orders yet"
+              description={filter === 'ALL' ? 'Create your first order to get started' : `No orders with status "${filter.replace(/_/g, ' ')}"`}
+              action={filter === 'ALL' ? <Link href="/orders/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Order</Button></Link> : undefined}
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order #</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Paid</TableHead>
+                  <TableHead>Due Date</TableHead>
+                  <TableHead>Created</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {orders.map((o: any) => (
+                  <TableRow key={o.id}>
+                    <TableCell>
+                      <Link href={`/orders/${o.id}`} className="font-medium text-brand-600 hover:underline">{o.orderNumber}</Link>
+                    </TableCell>
+                    <TableCell>{o.customer?.name || '-'}</TableCell>
+                    <TableCell><StatusBadge status={o.status} /></TableCell>
+                    <TableCell className="font-medium">{formatCurrency(o.total)}</TableCell>
+                    <TableCell>{formatCurrency(o.paidAmount)}</TableCell>
+                    <TableCell>{o.dueDate ? formatDate(o.dueDate) : '-'}</TableCell>
+                    <TableCell>{formatDate(o.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
