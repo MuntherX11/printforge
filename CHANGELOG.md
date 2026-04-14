@@ -2,6 +2,31 @@
 
 All notable changes to PrintForge are documented here.
 
+## [v2.9.10] — 2026-04-15 (current)
+
+### Fixed
+- **calculateCost crash for materialless components** — Components with `materialId = null` and no sub-materials (e.g. unassigned gcode imports) no longer crash Prisma. Machine time cost is still calculated; material cost is zero.
+- **purgeWasteGrams ignored in cost calculation** — `calculateJobCost()` now respects recorded `purgeWasteGrams` from job data as a middle-priority fallback (gcode-parsed volume → job-recorded waste → settings × color changes).
+
+### Added
+- **Tailscale support for remote printers** — `validateMoonrakerUrl()` now allows Tailscale CGNAT range `100.64.0.0/10` (`100.64.x.x`–`100.127.x.x`), enabling printers at other locations to connect via a Tailscale overlay network. Printer detail form shows a hint about supported URL formats including Tailscale IPs.
+
+---
+
+## [v2.10.2] — 2026-04-14 (previous)
+
+### Added
+- **Backend Stability & Validation**
+  - Existence checks (404) added to `ExpensesService` and `JobsService` to prevent Prisma internal errors.
+  - Strict enum validation for status filters in `QuotesService`, `OrdersService`, and `JobsService`, removing unsafe `as any` casts.
+  - Linked entity verification (`orderId`, `productId`) in production job creation.
+- **UX Hardening (Frontend)**
+  - Replaced all native `confirm()` and `prompt()` calls with shadcn `Dialog` components across 6 major pages (Expenses, Products, Printers, Inventory, Locations, Customer Quotes).
+  - Added loading/disabled states to all critical action buttons (Convert to Order, Create Invoice, Delete actions) to prevent double-submissions.
+  - Implemented `try/catch` error handling with `toast` notifications for all async operations.
+- **Crash Prevention**
+  - Added null-guards for array mappings (`productionJobs`, `invoices`, `expensesByCategory`) across the dashboard and detail pages.
+
 ## [v2.9] — 2026-04-13
 
 ### Added

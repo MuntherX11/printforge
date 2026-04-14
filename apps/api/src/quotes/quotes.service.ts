@@ -168,7 +168,9 @@ export class QuotesService {
   }
 
   async findAll(query: PaginationDto, status?: string) {
-    const where = status ? { status: status as any } : {};
+    const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
+    const where = status && validStatuses.includes(status) ? { status: status as any } : {};
+    
     const [data, total] = await Promise.all([
       this.prisma.quote.findMany({
         where,
@@ -194,10 +196,12 @@ export class QuotesService {
 
   async update(id: string, dto: UpdateQuoteDto) {
     await this.findOne(id);
+    const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
+    
     return this.prisma.quote.update({
       where: { id },
       data: {
-        status: dto.status as any,
+        status: (dto.status && validStatuses.includes(dto.status)) ? (dto.status as any) : undefined,
         notes: dto.notes,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
       },

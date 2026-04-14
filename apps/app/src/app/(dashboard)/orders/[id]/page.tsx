@@ -37,6 +37,7 @@ export default function OrderDetailPage() {
   const [planOverrides, setPlanOverrides] = useState<Record<string, any>>({});
   const [planLoading, setPlanLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [printers, setPrinters] = useState<any[]>([]);
 
   const load = () => api.get(`/orders/${id}`).then(setOrder).catch(console.error).finally(() => setLoading(false));
@@ -120,11 +121,15 @@ export default function OrderDetailPage() {
   }
 
   async function createInvoice() {
+    setCreatingInvoice(true);
     try {
       await api.post('/invoices', { orderId: id });
       load();
+      toast('success', 'Invoice created');
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setCreatingInvoice(false);
     }
   }
 
@@ -155,7 +160,9 @@ export default function OrderDetailPage() {
               <Factory className="h-4 w-4 mr-2" /> {planLoading ? 'Loading...' : 'Plan Production'}
             </Button>
           )}
-          <Button variant="outline" onClick={createInvoice}>Create Invoice</Button>
+          <Button variant="outline" onClick={createInvoice} disabled={creatingInvoice}>
+            {creatingInvoice ? 'Creating...' : 'Create Invoice'}
+          </Button>
         </div>
       </div>
 
@@ -255,7 +262,7 @@ export default function OrderDetailPage() {
           <CardHeader><CardTitle>Invoices</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {order.invoices.map((inv: any) => (
+              {(order.invoices || []).map((inv: any) => (
                 <div key={inv.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
                   <div>
                     <p className="text-sm font-medium">{inv.invoiceNumber}</p>
@@ -286,7 +293,7 @@ export default function OrderDetailPage() {
           <CardHeader><CardTitle>Production Jobs</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {order.productionJobs.map((job: any) => (
+              {(order.productionJobs || []).map((job: any) => (
                 <Link key={job.id} href={`/production/${job.id}`} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
                   <div>
                     <p className="text-sm font-medium">{job.name}</p>

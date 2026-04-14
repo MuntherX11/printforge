@@ -19,6 +19,17 @@ export class JobsService {
     if (!dto.orderId && !dto.productId) {
       throw new BadRequestException('A production job must be linked to an order or a product');
     }
+
+    // Verify existence of linked entities
+    if (dto.orderId) {
+      const order = await this.prisma.order.findUnique({ where: { id: dto.orderId } });
+      if (!order) throw new NotFoundException('Linked order not found');
+    }
+    if (dto.productId) {
+      const product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
+      if (!product) throw new NotFoundException('Linked product not found');
+    }
+
     return this.prisma.productionJob.create({
       data: {
         name: dto.name,
@@ -35,7 +46,9 @@ export class JobsService {
   }
 
   async findAll(query: PaginationDto, status?: string) {
-    const where = status ? { status: status as any } : {};
+    const validStatuses = ['QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
+    const where = status && validStatuses.includes(status) ? { status: status as any } : {};
+    
     const [data, total] = await Promise.all([
       this.prisma.productionJob.findMany({
         where,
@@ -499,8 +512,8 @@ export class JobsService {
         _count: {
           select: {
             productionJobs: {
-              where: { status: { in: ['QUEUED', 'IN_PROGRESS'] } },
-            } as any,
+              where: { status: { in: ['QUEUED', 'IN_PROGRESS'] as any[] } },
+            },
           },
         },
       },

@@ -29,6 +29,9 @@ export default function PrinterDetailPage() {
   const [savingCosting, setSavingCosting] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showDeletePrinter, setShowDeletePrinter] = useState(false);
+  const [showCompleteMaintenance, setShowCompleteMaintenance] = useState<string | null>(null);
+  const [completingMaintenance, setCompletingMaintenance] = useState(false);
   const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
   const [maintenanceLogs, setMaintenanceLogs] = useState<any[]>([]);
   const [formKey, setFormKey] = useState(0); // forces form re-render on save
@@ -90,17 +93,20 @@ export default function PrinterDetailPage() {
     }
   }
 
-  async function handleCompleteMaintenance(logId: string) {
-    const mins = prompt('Downtime in minutes (optional):');
+  async function handleCompleteMaintenance(logId: string, downtimeMinutes?: number) {
+    setCompletingMaintenance(true);
     try {
       await api.patch(`/printers/${id}/maintenance/${logId}/complete`, {
-        downtimeMinutes: mins ? parseInt(mins) : undefined,
+        downtimeMinutes,
       });
       load();
       api.get<any[]>(`/printers/${id}/maintenance`).then(setMaintenanceLogs);
+      setShowCompleteMaintenance(null);
       toast('success', 'Maintenance completed — printer restored to IDLE');
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setCompletingMaintenance(false);
     }
   }
 
@@ -128,7 +134,7 @@ export default function PrinterDetailPage() {
             </Button>
           )}
           {printer.status === 'MAINTENANCE' && activeMaintenance ? (
-            <Button variant="outline" size="sm" className="text-green-600 border-green-300" onClick={() => handleCompleteMaintenance(activeMaintenance.id)}>
+            <Button variant="outline" size="sm" className="text-green-600 border-green-300" onClick={() => setShowCompleteMaintenance(activeMaintenance.id)}>
               <Wrench className="h-4 w-4 mr-1" /> Complete Maintenance
             </Button>
           ) : (
@@ -196,21 +202,14 @@ export default function PrinterDetailPage() {
                 { value: 'MOONRAKER', label: 'Moonraker (Klipper)' },
                 { value: 'CREALITY_CLOUD', label: 'Creality Cloud' },
               ]} />
-              <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" defaultValue={printer.moonrakerUrl || ''} />
+              <div>
+                <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" defaultValue={printer.moonrakerUrl || ''} />
+                <p className="mt-1 text-xs text-gray-500">Local IPs, .local hostnames, or Tailscale IPs (100.x.x.x) for remote printers.</p>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <Button type="submit" size="sm" disabled={savingDetails}>{savingDetails ? 'Saving...' : 'Save Details'}</Button>
-              <Button type="button" variant="outline" size="sm" className="text-red-500 border-red-300 hover:bg-red-50" disabled={deleting} onClick={async () => {
-                if (!confirm(`Delete printer "${printer.name}"? Completed jobs will be preserved but unlinked from this printer.`)) return;
-                setDeleting(true);
-                try {
-                  await api.delete(`/printers/${id}`);
-                  router.push('/printers');
-                } catch (err: any) {
-                  toast('error', err.message);
-                  setDeleting(false);
-                }
-              }}>
+              <Button type="button" variant="outline" size="sm" className="text-red-500 border-red-300 hover:bg-red-50" disabled={deleting} onClick={() => setShowDeletePrinter(true)}>
                 <Trash2 className="h-4 w-4 mr-1" /> {deleting ? 'Deleting...' : 'Delete Printer'}
               </Button>
             </div>
@@ -427,6 +426,50 @@ export default function PrinterDetailPage() {
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowMaintenanceDialog(false)}>Cancel</Button>
             <Button type="submit">Start Maintenance</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog open={showDeletePrinter} onClose={() => setShowDeletePrinter(false)} title="Delete Printer">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete printer "{printer.name}"? Completed jobs will be preserved but unlinked from this printer.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeletePrinter(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                setDeleting(true);
+                try {
+                  await api.delete(`/printers/${id}`);
+                  router.push('/printers');
+                } catch (err: any) {
+                  toast('error', err.message);
+                  setDeleting(false);
+                  setShowDeletePrinter(false);
+                }
+              }}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Printer'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!showCompleteMaintenance} onClose={() => setShowCompleteMaintenance(null)} title="Complete Maintenance">
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const form = new FormData(e.currentTarget);
+          const mins = parseInt(form.get('downtimeMinutes') as string) || 0;
+          showCompleteMaintenance && handleCompleteMaintenance(showCompleteMaintenance, mins);
+        }} className="space-y-4">
+          <Input name="downtimeMinutes" label="Downtime in minutes (optional)" type="number" min="0" placeholder="e.g. 60" />
+          <p className="text-xs text-gray-500">Completing this will restore the printer status to IDLE.</p>
+          <div className="flex gap-3 justify-end">
+            <Button type="button" variant="outline" onClick={() => setShowCompleteMaintenance(null)}>Cancel</Button>
+            <Button type="submit" disabled={completingMaintenance}>{completingMaintenance ? 'Completing...' : 'Complete Maintenance'}</Button>
           </div>
         </form>
       </Dialog>

@@ -26,21 +26,38 @@ export default function QuoteDetailPage() {
   const { toast } = useToast();
   const [quote, setQuote] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [converting, setConverting] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
-  const load = () => api.get(`/quotes/${id}`).then(setQuote).catch(console.error).finally(() => setLoading(false));
+  const load = () => api.get(`/quotes/${id}`).then(setQuote).catch((err) => {
+    console.error(err);
+    toast('error', 'Failed to load quote details');
+  }).finally(() => setLoading(false));
+
   useEffect(() => { load(); }, [id]);
 
   async function updateStatus(status: string) {
-    await api.patch(`/quotes/${id}`, { status });
-    load();
+    setUpdating(true);
+    try {
+      await api.patch(`/quotes/${id}`, { status });
+      load();
+      toast('success', `Quote status updated to ${status}`);
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setUpdating(false);
+    }
   }
 
   async function convertToOrder(autoCreateJobs = true) {
+    setConverting(true);
     try {
       await api.post(`/quotes/${id}/convert`, { autoCreateJobs });
+      toast('success', 'Quote successfully converted to order');
       router.push('/orders');
     } catch (err: any) {
       toast('error', err.message);
+      setConverting(false);
     }
   }
 
@@ -54,10 +71,12 @@ export default function QuoteDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900">{quote.quoteNumber}</h1>
           <p className="text-sm text-gray-500">{quote.customer?.name} | {formatDate(quote.createdAt)}</p>
         </div>
-        <div className="flex gap-2">
-          <Select options={quoteStatuses} value={quote.status} onChange={e => updateStatus(e.target.value)} className="w-36" />
+        <div className="flex gap-2 items-center">
+          <Select options={quoteStatuses} value={quote.status} onChange={e => updateStatus(e.target.value)} className="w-36" disabled={updating} />
           {['ACCEPTED', 'SENT'].includes(quote.status) && !quote.order && (
-            <Button onClick={() => convertToOrder(true)}>Convert to Order + Create Jobs</Button>
+            <Button onClick={() => convertToOrder(true)} disabled={converting}>
+              {converting ? 'Converting...' : 'Convert to Order + Create Jobs'}
+            </Button>
           )}
         </div>
       </div>

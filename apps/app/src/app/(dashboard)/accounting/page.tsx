@@ -12,6 +12,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { TrendingUp, TrendingDown, DollarSign, BarChart2, Package, Percent } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 // ── Recharts custom tooltip ──────────────────────────────────────────────────
 function CurrencyTooltip({ active, payload, label }: any) {
@@ -50,6 +51,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
 }
 
 export default function AccountingPage() {
+  const { toast } = useToast();
   const [report, setReport] = useState<any>(null);
   const [trend, setTrend] = useState<any[]>([]);
   const [margins, setMargins] = useState<any[]>([]);
@@ -67,7 +69,10 @@ export default function AccountingPage() {
       api.get<any[]>('/reports/product-margins'),
     ])
       .then(([r, t, m]) => { setReport(r); setTrend(t); setMargins(m); })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        toast('error', 'Failed to load accounting data');
+      })
       .finally(() => setLoading(false));
   }
 
@@ -181,11 +186,11 @@ export default function AccountingPage() {
                 </dl>
 
                 {/* Expenses by category */}
-                {Object.keys(report.expensesByCategory || {}).length > 0 && (
+                {report.expensesByCategory && Object.keys(report.expensesByCategory).length > 0 && (
                   <div className="mt-5 pt-4 border-t dark:border-gray-700">
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Expenses by Category</p>
                     <div className="space-y-1.5">
-                      {Object.entries(report.expensesByCategory)
+                      {Object.entries(report.expensesByCategory || {})
                         .sort(([, a]: any, [, b]: any) => (b as number) - (a as number))
                         .map(([cat, amount]: any) => (
                           <div key={cat} className="flex justify-between text-sm">

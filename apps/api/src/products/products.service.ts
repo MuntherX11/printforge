@@ -258,6 +258,15 @@ export class ProductsService {
           printer: null,
           materials: [{ gramsUsed: totalGrams, costPerGram: avgCostPerGram }],
         });
+      } else if (!comp.materialId) {
+        // No material assigned and no sub-materials — calculate machine time cost only
+        estimate = await this.costingService.calculateJobCost({
+          printDuration: totalMinutes * 60,
+          colorChanges: 0,
+          purgeWasteGrams: 0,
+          printer: null,
+          materials: [],
+        });
       } else {
         estimate = await this.costingService.estimateFromParams({
           gramsUsed: totalGrams,

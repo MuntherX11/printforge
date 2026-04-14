@@ -35,6 +35,12 @@ export default function ProductDetailPage() {
   const [editComponentName, setEditComponentName] = useState('');
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [savingComponent, setSavingComponent] = useState(false);
+  const [showDeleteProduct, setShowDeleteProduct] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  const [showDeleteComponent, setShowDeleteComponent] = useState<string | null>(null);
+  const [deletingComponent, setDeletingComponent] = useState<string | null>(null);
+  const [showDeleteImage, setShowDeleteImage] = useState<string | null>(null);
+  const [deletingImage, setDeletingImage] = useState<string | null>(null);
 
   const load = () => {
     Promise.all([
@@ -47,7 +53,10 @@ export default function ProductDetailPage() {
       setMaterials(m);
       setPrinters(pr);
       setImages(imgs);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err) => {
+      console.error(err);
+      toast('error', 'Failed to load product details');
+    }).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [id]);
@@ -74,12 +83,15 @@ export default function ProductDetailPage() {
   }
 
   async function handleDeleteComponent(componentId: string) {
-    if (!confirm('Remove this component?')) return;
+    setDeletingComponent(componentId);
     try {
       await api.delete(`/products/components/${componentId}`);
+      setShowDeleteComponent(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setDeletingComponent(null);
     }
   }
 
@@ -198,12 +210,26 @@ export default function ProductDetailPage() {
   }
 
   async function handleDeleteImage(attachmentId: string) {
-    if (!confirm('Remove this image?')) return;
+    setDeletingImage(attachmentId);
     try {
       await api.delete(`/products/${id}/images/${attachmentId}`);
+      setShowDeleteImage(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setDeletingImage(null);
+    }
+  }
+
+  async function handleDeleteProduct() {
+    setDeletingProduct(true);
+    try {
+      await api.delete(`/products/${id}`);
+      router.push('/products');
+    } catch (err: any) {
+      toast('error', err.message || 'Delete failed');
+      setDeletingProduct(false);
     }
   }
 
@@ -223,15 +249,7 @@ export default function ProductDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/20" onClick={async () => {
-            if (!confirm('Delete this product and all its components? This cannot be undone.')) return;
-            try {
-              await api.delete(`/products/${id}`);
-              router.push('/products');
-            } catch (err: any) {
-              toast('error', err.message || 'Delete failed');
-            }
-          }}>
+          <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/20" onClick={() => setShowDeleteProduct(true)}>
             <Trash2 className="h-4 w-4 mr-2" /> Delete
           </Button>
           <Button variant="outline" onClick={() => setShowEditProduct(true)}>
@@ -475,7 +493,7 @@ export default function ProductDetailPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      <button onClick={() => handleDeleteComponent(c.id)} className="text-red-400 hover:text-red-600">
+                      <button onClick={() => setShowDeleteComponent(c.id)} className="text-red-400 hover:text-red-600">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </TableCell>
@@ -529,7 +547,7 @@ export default function ProductDetailPage() {
                     className="w-full h-32 object-cover rounded-md border dark:border-gray-700"
                   />
                   <button
-                    onClick={() => handleDeleteImage(img.id)}
+                    onClick={() => setShowDeleteImage(img.id)}
                     className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X className="h-3 w-3" />
@@ -578,6 +596,48 @@ export default function ProductDetailPage() {
             <Button type="submit">Save Changes</Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog open={showDeleteProduct} onClose={() => setShowDeleteProduct(false)} title="Delete Product">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete this product and all its components? This action cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteProduct(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteProduct} disabled={deletingProduct}>
+              {deletingProduct ? 'Deleting...' : 'Delete Product'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!showDeleteComponent} onClose={() => setShowDeleteComponent(null)} title="Remove Component">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Remove this component from the product?
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteComponent(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => showDeleteComponent && handleDeleteComponent(showDeleteComponent)} disabled={!!deletingComponent}>
+              {deletingComponent ? 'Removing...' : 'Remove Component'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!showDeleteImage} onClose={() => setShowDeleteImage(null)} title="Delete Image">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Permanently remove this image?
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteImage(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => showDeleteImage && handleDeleteImage(showDeleteImage)} disabled={!!deletingImage}>
+              {deletingImage ? 'Deleting...' : 'Delete Image'}
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

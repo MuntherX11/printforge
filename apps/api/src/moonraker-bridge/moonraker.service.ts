@@ -56,7 +56,11 @@ export class MoonrakerService {
       if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
       // .local mDNS hostnames
       if (hostname.endsWith('.local')) return true;
-      // Only allow http (not https to external services)
+      // Tailscale CGNAT range: 100.64.0.0/10 (100.64.x.x – 100.127.x.x)
+      // Allows remote printers on the same Tailscale network
+      const octets = hostname.split('.').map(Number);
+      if (octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) return true;
+      // Only allow http for non-Tailscale (prevents redirects to external HTTPS services)
       if (parsed.protocol !== 'http:') return false;
       return false;
     } catch {

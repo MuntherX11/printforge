@@ -32,6 +32,12 @@ export default function MaterialDetailPage() {
   const [selectedSpoolIds, setSelectedSpoolIds] = useState<Set<string>>(new Set());
   const [printingLabels, setPrintingLabels] = useState(false);
   const [scannedFields, setScannedFields] = useState<any>(null);
+  const [showDeleteMaterial, setShowDeleteMaterial] = useState(false);
+  const [deletingMaterial, setDeletingMaterial] = useState(false);
+  const [showDeleteSpool, setShowDeleteSpool] = useState<string | null>(null);
+  const [deletingSpool, setDeletingSpool] = useState<string | null>(null);
+  const [showDeactivateSpool, setShowDeactivateSpool] = useState<string | null>(null);
+  const [deactivatingSpool, setDeactivatingSpool] = useState<string | null>(null);
 
   const load = () => {
     Promise.all([
@@ -110,32 +116,39 @@ export default function MaterialDetailPage() {
   }
 
   async function handleDeactivateSpool(spoolId: string) {
-    if (!confirm('Deactivate this spool?')) return;
+    setDeactivatingSpool(spoolId);
     try {
       await api.patch(`/spools/${spoolId}`, { isActive: false });
+      setShowDeactivateSpool(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setDeactivatingSpool(null);
     }
   }
 
   async function handleDeleteSpool(spoolId: string) {
-    if (!confirm('Permanently delete this spool? This cannot be undone.')) return;
+    setDeletingSpool(spoolId);
     try {
       await api.delete(`/spools/${spoolId}`);
+      setShowDeleteSpool(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setDeletingSpool(null);
     }
   }
 
   async function handleDeleteMaterial() {
-    if (!confirm('Delete this material and all its spools? This cannot be undone.')) return;
+    setDeletingMaterial(true);
     try {
       await api.delete(`/materials/${id}`);
       router.push('/inventory');
     } catch (err: any) {
       toast('error', err.message);
+      setDeletingMaterial(false);
     }
   }
 
@@ -197,7 +210,7 @@ export default function MaterialDetailPage() {
             </Button>
           )}
           {user?.role === 'ADMIN' && (
-            <Button variant="destructive" onClick={handleDeleteMaterial}>
+            <Button variant="destructive" onClick={() => setShowDeleteMaterial(true)}>
               <Trash2 className="h-4 w-4 mr-2" /> Delete
             </Button>
           )}
@@ -297,7 +310,7 @@ export default function MaterialDetailPage() {
                         </button>
                         {s.isActive && (
                           <button
-                            onClick={() => handleDeactivateSpool(s.id)}
+                            onClick={() => setShowDeactivateSpool(s.id)}
                             className="p-1 text-gray-400 hover:text-yellow-600"
                             title="Deactivate spool"
                           >
@@ -306,7 +319,7 @@ export default function MaterialDetailPage() {
                         )}
                         {user?.role === 'ADMIN' && (
                           <button
-                            onClick={() => handleDeleteSpool(s.id)}
+                            onClick={() => setShowDeleteSpool(s.id)}
                             className="p-1 text-gray-400 hover:text-red-600"
                             title="Delete spool permanently"
                           >
@@ -442,6 +455,48 @@ export default function MaterialDetailPage() {
           setShowAddSpool(true);
         }}
       />
+
+      <Dialog open={showDeleteMaterial} onClose={() => setShowDeleteMaterial(false)} title="Delete Material">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete this material and all its spools? This cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteMaterial(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteMaterial} disabled={deletingMaterial}>
+              {deletingMaterial ? 'Deleting...' : 'Delete Material'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!showDeleteSpool} onClose={() => setShowDeleteSpool(null)} title="Delete Spool">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Permanently delete this spool? This cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteSpool(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => showDeleteSpool && handleDeleteSpool(showDeleteSpool)} disabled={!!deletingSpool}>
+              {deletingSpool ? 'Deleting...' : 'Delete Spool'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!showDeactivateSpool} onClose={() => setShowDeactivateSpool(null)} title="Deactivate Spool">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Deactivate this spool?
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeactivateSpool(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => showDeactivateSpool && handleDeactivateSpool(showDeactivateSpool)} disabled={!!deactivatingSpool}>
+              {deactivatingSpool ? 'Deactivating...' : 'Deactivate Spool'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

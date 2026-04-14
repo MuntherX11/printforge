@@ -77,6 +77,9 @@ export class PrintersService {
   }
 
   async updateStatus(id: string, status: string, lastSeen?: Date) {
+    const validStatuses = ['IDLE', 'PRINTING', 'PAUSED', 'MAINTENANCE', 'ERROR', 'OFFLINE'];
+    if (!validStatuses.includes(status)) return; // silently ignore invalid status from bridge
+
     return this.prisma.printer.update({
       where: { id },
       data: { status: status as any, lastSeen: lastSeen || new Date() },

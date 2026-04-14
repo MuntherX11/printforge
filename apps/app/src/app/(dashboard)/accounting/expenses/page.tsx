@@ -23,11 +23,15 @@ export default function ExpensesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [showDelete, setShowDelete] = useState<string | null>(null);
 
   const load = () => Promise.all([
     api.get<any[]>('/accounting/expenses').then(setExpenses),
     api.get<any[]>('/accounting/categories').then(setCategories),
-  ]).catch(console.error).finally(() => setLoading(false));
+  ]).catch((err) => {
+    console.error(err);
+    toast('error', 'Failed to load expenses');
+  }).finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
 
@@ -67,11 +71,11 @@ export default function ExpensesPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this expense?')) return;
     setDeleting(id);
     try {
       await api.delete(`/accounting/expenses/${id}`);
       toast('success', 'Expense deleted');
+      setShowDelete(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
@@ -144,7 +148,7 @@ export default function ExpensesPage() {
                     <TableCell className="text-right font-medium">{formatCurrency(e.amount)}</TableCell>
                     <TableCell className="text-right">
                       <button
-                        onClick={() => handleDelete(e.id)}
+                        onClick={() => setShowDelete(e.id)}
                         disabled={deleting === e.id}
                         className="text-gray-400 hover:text-red-500 transition-colors"
                         aria-label="Delete"
@@ -165,6 +169,25 @@ export default function ExpensesPage() {
           </CardContent>
         )}
       </Card>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!showDelete} onClose={() => setShowDelete(null)} title="Delete Expense">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete this expense? This action cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDelete(null)}>Cancel</Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => showDelete && handleDelete(showDelete)}
+              disabled={!!deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Expense'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Add expense dialog */}
       <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add Expense">

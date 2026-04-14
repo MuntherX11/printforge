@@ -18,8 +18,13 @@ export default function LocationsPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [showDelete, setShowDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
-  const load = () => api.get<any[]>('/locations').then(setLocations).catch(console.error).finally(() => setLoading(false));
+  const load = () => api.get<any[]>('/locations').then(setLocations).catch((err) => {
+    console.error(err);
+    toast('error', 'Failed to load locations');
+  }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
@@ -41,12 +46,15 @@ export default function LocationsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this location?')) return;
+    setDeleting(id);
     try {
       await api.delete(`/locations/${id}`);
+      setShowDelete(null);
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -90,7 +98,7 @@ export default function LocationsPage() {
                     <TableCell className="text-gray-500">{l.description || '-'}</TableCell>
                     <TableCell>{l._count?.spools || 0}</TableCell>
                     <TableCell>
-                      <button onClick={() => handleDelete(l.id)} className="text-red-400 hover:text-red-600">
+                      <button onClick={() => setShowDelete(l.id)} className="text-red-400 hover:text-red-600">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </TableCell>
@@ -111,6 +119,20 @@ export default function LocationsPage() {
             <Button type="submit" disabled={adding}>{adding ? 'Adding...' : 'Add Location'}</Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog open={!!showDelete} onClose={() => setShowDelete(null)} title="Delete Location">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">
+            Are you sure you want to delete this storage location?
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => showDelete && handleDelete(showDelete)} disabled={!!deleting}>
+              {deleting ? 'Deleting...' : 'Delete Location'}
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

@@ -84,10 +84,12 @@ export class CostingService {
     const electricityCost = (wattage / 1000) * hours * electricityRate;
 
     // Waste cost (multi-color purge)
-    // Use actual purge volume from gcode if provided, otherwise fall back to settings-based estimate
+    // Priority: gcode-parsed volume > job-recorded actual waste > settings-based estimate
     const purgeGrams = (job.purgeVolumeGrams != null && job.purgeVolumeGrams > 0)
       ? job.purgeVolumeGrams
-      : job.colorChanges * purgeWastePerChange;
+      : (job.purgeWasteGrams > 0
+        ? job.purgeWasteGrams
+        : job.colorChanges * purgeWastePerChange);
     const avgCostPerGram = job.materials.length > 0
       ? job.materials.reduce((sum, m) => sum + m.costPerGram, 0) / job.materials.length
       : 0;
