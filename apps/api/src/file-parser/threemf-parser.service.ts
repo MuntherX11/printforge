@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import JSZip from 'jszip';
 import { GcodeParserService } from './gcode-parser.service';
 import { ThreeMfAnalysis, ThreeMfPlateInfo } from '@printforge/types';
@@ -8,7 +8,12 @@ export class ThreeMfParserService {
   constructor(private readonly gcodeParser: GcodeParserService) {}
 
   async parse(buffer: Buffer): Promise<ThreeMfAnalysis> {
-    const zip = await JSZip.loadAsync(buffer);
+    let zip: JSZip;
+    try {
+      zip = await JSZip.loadAsync(buffer);
+    } catch {
+      throw new BadRequestException('Invalid or corrupt .3mf file — could not unzip');
+    }
 
     const analysis: ThreeMfAnalysis = {
       slicer: null,
@@ -48,55 +53,59 @@ export class ThreeMfParserService {
 
     analysis.totalPlates = plateStats.size;
 
-    // Process each plate
-    for (const [plateIndex, stats] of plateStats.entries()) {
-      const plate: ThreeMfPlateInfo = {
-        plateIndex,
-        name: `Plate ${plateIndex}`,
-        printSeconds: stats.printSeconds,
-        weightGrams: stats.weightGrams,
-        toolChanges: stats.toolChanges,
-        tools: [],
-      };
+    // Process all plates in parallel
+    const THUMBNAIL_SIZE_LIMIT = 512 * 1024; // 512 KB
+    const plateResults = await Promise.all(
+      Array.from(plateStats.entries()).map(async ([plateIndex, stats]) => {
+        const plate: ThreeMfPlateInfo = {
+          plateIndex,
+          name: `Plate ${plateIndex}`,
+          printSeconds: stats.printSeconds,
+          weightGrams: stats.weightGrams,
+          toolChanges: stats.toolChanges,
+          tools: [],
+        };
 
-      // Parse embedded G-code for per-tool color/material info
-      const gcodeFile = zip.file(`Metadata/plate_${plateIndex}.gcode`);
-      if (gcodeFile) {
-        const gcodeBuffer = await gcodeFile.async('nodebuffer');
-        const gcodeAnalysis = this.gcodeParser.parseHeader(gcodeBuffer);
+        // Parse embedded G-code and extract thumbnail in parallel per plate
+        const [gcodeFile, pngFile] = await Promise.all([
+          Promise.resolve(zip.file(`Metadata/plate_${plateIndex}.gcode`)),
+          Promise.resolve(zip.file(`Metadata/plate_${plateIndex}.png`)),
+        ]);
 
-        // Use the first plate's slicer name as the project slicer
-        if (!analysis.slicer && gcodeAnalysis.slicer) {
-          analysis.slicer = gcodeAnalysis.slicer;
+        if (gcodeFile) {
+          const gcodeBuffer = await gcodeFile.async('nodebuffer');
+          const gcodeAnalysis = this.gcodeParser.parseHeader(gcodeBuffer);
+
+          if (gcodeAnalysis.tools?.length) {
+            plate.tools = gcodeAnalysis.tools.map((t) => ({
+              index: t.index,
+              filamentGrams: t.filamentGrams || 0,
+              colorHex: t.colorHex,
+              materialType: t.materialType,
+            }));
+          }
+
+          if (!plate.weightGrams && gcodeAnalysis.filamentUsedGrams) {
+            plate.weightGrams = gcodeAnalysis.filamentUsedGrams;
+          }
+
+          // Capture slicer name from any plate's G-code
+          if (gcodeAnalysis.slicer) analysis.slicer = analysis.slicer ?? gcodeAnalysis.slicer;
         }
 
-        if (gcodeAnalysis.tools?.length) {
-          plate.tools = gcodeAnalysis.tools.map((t) => ({
-            index: t.index,
-            filamentGrams: t.filamentGrams || 0,
-            colorHex: t.colorHex,
-            materialType: t.materialType,
-          }));
+        if (pngFile) {
+          const pngBuffer = await pngFile.async('nodebuffer');
+          if (pngBuffer.length <= THUMBNAIL_SIZE_LIMIT) {
+            plate.thumbnailBase64 = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+          }
+          // Silently skip oversized thumbnails — card will show fallback icon
         }
 
-        // If slice_info had no weight but gcode has it, use gcode value
-        if (!plate.weightGrams && gcodeAnalysis.filamentUsedGrams) {
-          plate.weightGrams = gcodeAnalysis.filamentUsedGrams;
-        }
-      }
+        return plate;
+      }),
+    );
 
-      // Extract plate thumbnail
-      const pngFile = zip.file(`Metadata/plate_${plateIndex}.png`);
-      if (pngFile) {
-        const pngBuffer = await pngFile.async('nodebuffer');
-        plate.thumbnailBase64 = `data:image/png;base64,${pngBuffer.toString('base64')}`;
-      }
-
-      analysis.plates.push(plate);
-    }
-
-    // Return plates sorted by index
-    analysis.plates.sort((a: ThreeMfPlateInfo, b: ThreeMfPlateInfo) => a.plateIndex - b.plateIndex);
+    analysis.plates = plateResults.sort((a: ThreeMfPlateInfo, b: ThreeMfPlateInfo) => a.plateIndex - b.plateIndex);
 
     return analysis;
   }

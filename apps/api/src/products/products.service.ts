@@ -660,7 +660,7 @@ export class ProductsService {
 
         // Save plate thumbnail as product attachment if available
         if (plate.thumbnailBase64) {
-          await this.savePlateThumbail(productId, plate.plateIndex, plate.thumbnailBase64);
+          await this.savePlateThumbnail(productId, plate.plateIndex, plate.thumbnailBase64);
         }
 
         results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 1 });
@@ -688,19 +688,19 @@ export class ProductsService {
         });
 
         if (plate.thumbnailBase64) {
-          await this.savePlateThumbail(productId, plate.plateIndex, plate.thumbnailBase64);
+          await this.savePlateThumbnail(productId, plate.plateIndex, plate.thumbnailBase64);
         }
 
         results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 1 });
       }
     }
 
-    // Update color changes if any plate has tool changes
-    const totalColorChanges = platesToProcess.reduce((s, p) => s + p.toolChanges, 0);
-    if (totalColorChanges > 0) {
+    // Atomically increment color changes so repeated imports don't wipe previous counts
+    const importedColorChanges = platesToProcess.reduce((s, p) => s + p.toolChanges, 0);
+    if (importedColorChanges > 0) {
       await this.prisma.product.update({
         where: { id: productId },
-        data: { colorChanges: totalColorChanges },
+        data: { colorChanges: { increment: importedColorChanges } },
       });
     }
 
@@ -711,7 +711,7 @@ export class ProductsService {
   /**
    * Decode a base64 thumbnail and store it as a product attachment.
    */
-  private async savePlateThumbail(productId: string, plateIndex: number, thumbnailBase64: string) {
+  private async savePlateThumbnail(productId: string, plateIndex: number, thumbnailBase64: string) {
     try {
       const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
       const now = new Date();

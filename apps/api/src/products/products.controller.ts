@@ -118,8 +118,17 @@ export class ProductsController {
     if (!file.originalname?.toLowerCase().endsWith('.3mf')) {
       throw new BadRequestException('File must be a .3mf');
     }
-    const selectedPlates: number[] = JSON.parse(selectedPlatesRaw || '[]');
-    const plateNames: Record<string, string> = plateNamesRaw ? JSON.parse(plateNamesRaw) : {};
+    let selectedPlates: number[];
+    let plateNames: Record<string, string>;
+    try {
+      selectedPlates = JSON.parse(selectedPlatesRaw || '[]');
+      plateNames = plateNamesRaw ? JSON.parse(plateNamesRaw) : {};
+    } catch {
+      throw new BadRequestException('selectedPlates and plateNames must be valid JSON');
+    }
+    if (!Array.isArray(selectedPlates) || !selectedPlates.every((n) => typeof n === 'number')) {
+      throw new BadRequestException('selectedPlates must be an array of numbers');
+    }
     if (!selectedPlates.length) throw new BadRequestException('No plates selected');
     return this.productsService.onboardFromThreeMf(id, file.buffer, { selectedPlates, plateNames });
   }

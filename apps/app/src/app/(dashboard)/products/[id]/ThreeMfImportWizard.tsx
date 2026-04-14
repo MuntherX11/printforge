@@ -28,7 +28,7 @@ export function ThreeMfImportWizard({
   const [importing, setImporting] = useState(false);
   const { toast } = useToast();
 
-  // When analysis arrives, select all plates by default
+  // Select all plates by default when a new analysis arrives; clear state on close
   useEffect(() => {
     if (open && analysis) {
       setSelectedPlates(analysis.plates.map((p) => p.plateIndex));
@@ -37,6 +37,9 @@ export function ThreeMfImportWizard({
         initialNames[String(p.plateIndex)] = p.name;
       });
       setPlateNames(initialNames);
+    } else if (!open) {
+      setSelectedPlates([]);
+      setPlateNames({});
     }
   }, [open, analysis]);
 
