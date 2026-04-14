@@ -334,6 +334,7 @@ export interface UpdatePrinterDto extends Partial<CreatePrinterDto> {
 
 export interface CreateProductionJobDto {
   name: string;
+  productId?: string;
   printerId?: string;
   assignedToId?: string;
   orderId?: string;

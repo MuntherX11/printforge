@@ -16,9 +16,13 @@ export class JobsService {
   ) {}
 
   async create(dto: CreateProductionJobDto) {
+    if (!dto.orderId && !dto.productId) {
+      throw new BadRequestException('A production job must be linked to an order or a product');
+    }
     return this.prisma.productionJob.create({
       data: {
         name: dto.name,
+        productId: dto.productId,
         printerId: dto.printerId,
         assignedToId: dto.assignedToId,
         orderId: dto.orderId,

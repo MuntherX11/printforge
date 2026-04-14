@@ -31,6 +31,8 @@ export default function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showFailDialog, setShowFailDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showReprintDialog, setShowReprintDialog] = useState(false);
   const [materials, setMaterials] = useState<any[]>([]);
   const [spools, setSpools] = useState<any[]>([]);
 
@@ -100,10 +102,21 @@ export default function JobDetailPage() {
     }
   }
 
+  async function handleCancel() {
+    try {
+      await api.patch(`/jobs/${id}`, { status: 'CANCELLED' });
+      setShowCancelDialog(false);
+      toast('success', 'Job cancelled');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    }
+  }
+
   async function handleReprint() {
-    if (!confirm('Create a reprint job? This will clone this job as a new QUEUED job.')) return;
     try {
       const newJob = await api.post<any>(`/jobs/${id}/reprint`);
+      setShowReprintDialog(false);
       toast('success', `Reprint job created: ${newJob.name}`);
       load();
     } catch (err: any) {
@@ -128,12 +141,17 @@ export default function JobDetailPage() {
           <Select options={jobStatuses} value={job.status} onChange={e => updateJob({ status: e.target.value })} className="w-36" />
           <Button variant="outline" onClick={calculateCost}><Calculator className="h-4 w-4 mr-2" /> Calculate Cost</Button>
           {!['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
-            <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowFailDialog(true)}>
-              <AlertTriangle className="h-4 w-4 mr-2" /> Mark Failed
-            </Button>
+            <>
+              <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowFailDialog(true)}>
+                <AlertTriangle className="h-4 w-4 mr-2" /> Mark Failed
+              </Button>
+              <Button variant="outline" className="text-gray-600 border-gray-300 hover:bg-gray-50" onClick={() => setShowCancelDialog(true)}>
+                Cancel Job
+              </Button>
+            </>
           )}
           {job.status === 'FAILED' && (
-            <Button variant="outline" onClick={handleReprint}>
+            <Button variant="outline" onClick={() => setShowReprintDialog(true)}>
               <RefreshCw className="h-4 w-4 mr-2" /> Reprint
             </Button>
           )}
@@ -234,6 +252,22 @@ export default function JobDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={showCancelDialog} onClose={() => setShowCancelDialog(false)} title="Cancel Job">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Are you sure you want to cancel <strong>{job.name}</strong>? This cannot be undone.</p>
+        <div className="flex gap-3 justify-end">
+          <Button variant="outline" onClick={() => setShowCancelDialog(false)}>Back</Button>
+          <Button className="bg-gray-700 hover:bg-gray-800 text-white" onClick={handleCancel}>Cancel Job</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={showReprintDialog} onClose={() => setShowReprintDialog(false)} title="Create Reprint Job">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">This will clone <strong>{job.name}</strong> as a new QUEUED job. Continue?</p>
+        <div className="flex gap-3 justify-end">
+          <Button variant="outline" onClick={() => setShowReprintDialog(false)}>Back</Button>
+          <Button onClick={handleReprint}><RefreshCw className="h-4 w-4 mr-2" /> Create Reprint</Button>
+        </div>
+      </Dialog>
 
       <Dialog open={showAddMaterial} onClose={() => setShowAddMaterial(false)} title="Add Material">
         <form onSubmit={handleAddMaterial} className="space-y-4">

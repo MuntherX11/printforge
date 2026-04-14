@@ -242,19 +242,34 @@ export class ProductsService {
       const totalGrams = comp.gramsUsed * comp.quantity;
       const totalMinutes = comp.printMinutes * comp.quantity;
 
-      const estimate = await this.costingService.estimateFromParams({
-        gramsUsed: totalGrams,
-        printMinutes: totalMinutes,
-        materialId: comp.materialId,
-        colorChanges: 0,
-      });
+      // Multicolor components have materialId=null — estimateFromParams would crash with null ID
+      const isMulticolor = !comp.materialId && (comp.materials?.length > 0 || (comp as any).componentMaterials?.length > 0);
+      const subMaterials: any[] = comp.materials ?? (comp as any).componentMaterials ?? [];
+
+      let estimate: any;
+      if (isMulticolor) {
+        const avgCostPerGram = subMaterials.length
+          ? subMaterials.reduce((s: number, cm: any) => s + (cm.material?.costPerGram ?? 0), 0) / subMaterials.length
+          : 0;
+        estimate = await this.costingService.calculateJobCost({
+          printDuration: totalMinutes * 60,
+          colorChanges: 0,
+          purgeWasteGrams: 0,
+          printer: null,
+          materials: [{ gramsUsed: totalGrams, costPerGram: avgCostPerGram }],
+        });
+      } else {
+        estimate = await this.costingService.estimateFromParams({
+          gramsUsed: totalGrams,
+          printMinutes: totalMinutes,
+          materialId: comp.materialId,
+          colorChanges: 0,
+        });
+      }
 
       totalMaterialCost += estimate.materialCost;
       totalMachineCost += estimate.machineCost;
 
-      // Multicolor components have materialId=null; derive a display name from sub-materials
-      const isMulticolor = !comp.materialId && (comp.materials?.length > 0 || comp.componentMaterials?.length > 0);
-      const subMaterials: any[] = comp.materials ?? comp.componentMaterials ?? [];
       const materialName = comp.material?.name
         ?? (isMulticolor
           ? subMaterials.map((cm: any) => cm.material?.name).filter(Boolean).join(' / ') || 'Multicolor'
