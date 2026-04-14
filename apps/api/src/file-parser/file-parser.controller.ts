@@ -5,6 +5,7 @@ import { StlEstimatorService } from './stl-estimator.service';
 import { UrlScraperService } from './url-scraper.service';
 import { CostingService } from '../costing/costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ThreeMfParserService } from './threemf-parser.service';
 
 @Controller('file-parser')
 @UseGuards(JwtAuthGuard)
@@ -14,10 +15,11 @@ export class FileParserController {
     private stlEstimator: StlEstimatorService,
     private urlScraper: UrlScraperService,
     private costingService: CostingService,
+    private threeMfParser: ThreeMfParserService,
   ) {}
 
   /**
-   * Upload a G-code or STL file, get parsed metadata + instant cost estimate.
+   * Upload a G-code, STL, or 3MF file, get parsed metadata + instant cost estimate.
    * Query params: ?materialId=xxx&printerId=xxx&colorChanges=1&infill=20
    */
   @Post('analyze')
@@ -34,9 +36,20 @@ export class FileParserController {
     const name = (file.originalname || '').toLowerCase();
     const isGcode = name.endsWith('.gcode') || name.endsWith('.gco') || name.endsWith('.g');
     const isStl = name.endsWith('.stl');
+    const is3mf = name.endsWith('.3mf');
 
-    if (!isGcode && !isStl) {
-      throw new BadRequestException('File must be .gcode or .stl');
+    if (!isGcode && !isStl && !is3mf) {
+      throw new BadRequestException('File must be .gcode, .stl, or .3mf');
+    }
+
+    // 3MF — return full plate analysis, no cost estimate at this stage
+    if (is3mf) {
+      const analysis = await this.threeMfParser.parse(file.buffer);
+      return {
+        filename: file.originalname,
+        fileSize: file.size,
+        analysis: { type: '3mf', ...analysis },
+      };
     }
 
     let gramsUsed = 0;
@@ -66,7 +79,6 @@ export class FileParserController {
           materialId,
           printerId,
           colorChanges: colorChanges ? parseInt(colorChanges) : 0,
-          // Pass actual purge volume from gcode parser if available
           purgeVolumeGrams: fileAnalysis?.purgeVolumeGrams ?? undefined,
         });
       } catch {

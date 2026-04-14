@@ -154,6 +154,36 @@ export interface ApiResponse<T = unknown> {
   message?: string;
 }
 
+// ============ 3MF PARSER ============
+
+export interface ThreeMfToolInfo {
+  index: number;
+  filamentGrams: number;
+  colorHex?: string;
+  materialType?: string;
+}
+
+export interface ThreeMfPlateInfo {
+  plateIndex: number;
+  name: string;
+  printSeconds: number;
+  weightGrams: number;
+  toolChanges: number;
+  tools: ThreeMfToolInfo[];
+  thumbnailBase64?: string; // 'data:image/png;base64,...'
+}
+
+export interface ThreeMfAnalysis {
+  slicer: string | null;
+  totalPlates: number;
+  plates: ThreeMfPlateInfo[];
+}
+
+export interface OnboardThreeMfDto {
+  selectedPlates: number[];
+  plateNames?: Record<string, string>; // key = plateIndex as string
+}
+
 // ============ AUTH ============
 
 export type UserType = 'staff' | 'customer';

@@ -12,7 +12,8 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode } from 'lucide-react';
+import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { useToast } from '@/components/ui/toast';
 
 export default function ProductDetailPage() {
@@ -41,6 +42,10 @@ export default function ProductDetailPage() {
   const [deletingComponent, setDeletingComponent] = useState<string | null>(null);
   const [showDeleteImage, setShowDeleteImage] = useState<string | null>(null);
   const [deletingImage, setDeletingImage] = useState<string | null>(null);
+  const [showThreeMfWizard, setShowThreeMfWizard] = useState(false);
+  const [threeMfFile, setThreeMfFile] = useState<File | null>(null);
+  const [threeMfAnalysis, setThreeMfAnalysis] = useState<any>(null);
+  const [analyzingThreeMf, setAnalyzingThreeMf] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -154,6 +159,35 @@ export default function ProductDetailPage() {
       }
     } finally {
       setUploadingGcode(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handle3MfSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAnalyzingThreeMf(true);
+    setThreeMfFile(file);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/file-parser/analyze', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || `Analysis failed (${res.status})`);
+      }
+      const data = await res.json();
+      setThreeMfAnalysis(data.analysis);
+      setShowThreeMfWizard(true);
+    } catch (err: any) {
+      toast('error', err.message || 'Failed to read 3MF file');
+      setThreeMfFile(null);
+    } finally {
+      setAnalyzingThreeMf(false);
       e.target.value = '';
     }
   }
@@ -505,20 +539,28 @@ export default function ProductDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Gcode Onboarding */}
+      {/* Slicer File Onboarding */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Quick Onboard from Gcode</CardTitle>
-          <label className="cursor-pointer">
-            <input type="file" accept=".gcode,.gco,.g" multiple className="hidden" onChange={handleGcodeUpload} disabled={uploadingGcode} />
-            <span className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 cursor-pointer">
-              <Upload className="h-4 w-4" /> {uploadingGcode ? 'Processing...' : 'Upload Gcode Files'}
-            </span>
-          </label>
+          <CardTitle>Import from Slicer</CardTitle>
+          <div className="flex gap-2">
+            <label className="cursor-pointer">
+              <input type="file" accept=".3mf" className="hidden" onChange={handle3MfSelect} disabled={analyzingThreeMf || uploadingGcode} />
+              <span className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 cursor-pointer disabled:opacity-50">
+                <FileCode className="h-4 w-4" /> {analyzingThreeMf ? 'Reading...' : 'Import 3MF (OrcaSlicer)'}
+              </span>
+            </label>
+            <label className="cursor-pointer">
+              <input type="file" accept=".gcode,.gco,.g" multiple className="hidden" onChange={handleGcodeUpload} disabled={uploadingGcode || analyzingThreeMf} />
+              <span className="inline-flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                <Upload className="h-4 w-4" /> {uploadingGcode ? 'Processing...' : 'Upload G-code'}
+              </span>
+            </label>
+          </div>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Upload one or more .gcode files to auto-create components with material, weight, and print time.
+            Import a <strong>.3mf</strong> project file from OrcaSlicer to auto-create components per plate — with thumbnails, weight, and print time. Or upload individual <strong>.gcode</strong> files directly.
           </p>
         </CardContent>
       </Card>
@@ -639,6 +681,14 @@ export default function ProductDetailPage() {
           </div>
         </div>
       </Dialog>
+      <ThreeMfImportWizard
+        open={showThreeMfWizard}
+        onClose={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); }}
+        analysis={threeMfAnalysis}
+        file={threeMfFile}
+        productId={id as string}
+        onSuccess={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); load(); }}
+      />
     </div>
   );
 }

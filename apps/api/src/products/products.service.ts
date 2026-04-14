@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CostingService } from '../costing/costing.service';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
+import { ThreeMfParserService } from '../file-parser/threemf-parser.service';
 import {
   CreateProductDto,
   UpdateProductDto,
   AddProductComponentDto,
   UpdateProductComponentDto,
   ProductCostResult,
+  OnboardThreeMfDto,
 } from '@printforge/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +20,7 @@ export class ProductsService {
     private prisma: PrismaService,
     private costingService: CostingService,
     private gcodeParser: GcodeParserService,
+    private threeMfParser: ThreeMfParserService,
   ) {}
 
   async create(dto: CreateProductDto) {
@@ -611,6 +614,139 @@ export class ProductsService {
     }
 
     return { deleted: true };
+  }
+
+  async onboardFromThreeMf(productId: string, fileBuffer: Buffer, dto: OnboardThreeMfDto) {
+    await this.findOne(productId);
+
+    const analysis = await this.threeMfParser.parse(fileBuffer);
+    const allMaterials = await this.prisma.material.findMany();
+    const results: Array<{ plateIndex: number; name: string; componentsCreated: number }> = [];
+
+    // Determine which plates to process
+    const platesToProcess = analysis.plates.filter(p => dto.selectedPlates.includes(p.plateIndex));
+
+    for (const plate of platesToProcess) {
+      const componentName = dto.plateNames?.[String(plate.plateIndex)] || plate.name;
+
+      if (plate.tools.length > 1) {
+        // Multicolor plate — one component with multiple ComponentMaterials
+        const component = await this.prisma.productComponent.create({
+          data: {
+            productId,
+            materialId: null,
+            description: componentName,
+            gramsUsed: plate.weightGrams,
+            printMinutes: Math.round(plate.printSeconds / 60),
+            quantity: 1,
+            sortOrder: plate.plateIndex,
+            isMultiColor: true,
+          },
+        });
+
+        for (const tool of plate.tools) {
+          const materialType = tool.materialType || 'PLA';
+          const materialId = await this.findOrCreateMaterial(allMaterials, materialType, tool.colorHex);
+          await this.prisma.componentMaterial.create({
+            data: {
+              componentId: component.id,
+              materialId,
+              gramsUsed: tool.filamentGrams,
+              colorIndex: tool.index,
+              sortOrder: tool.index,
+            },
+          });
+        }
+
+        // Save plate thumbnail as product attachment if available
+        if (plate.thumbnailBase64) {
+          await this.savePlateThumbail(productId, plate.plateIndex, plate.thumbnailBase64);
+        }
+
+        results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 1 });
+      } else {
+        // Single-color plate
+        if (plate.weightGrams === 0) {
+          results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 0 });
+          continue;
+        }
+
+        const tool = plate.tools[0];
+        const materialType = tool?.materialType || 'PLA';
+        const materialId = await this.findOrCreateMaterial(allMaterials, materialType, tool?.colorHex);
+
+        await this.prisma.productComponent.create({
+          data: {
+            productId,
+            materialId,
+            description: componentName,
+            gramsUsed: plate.weightGrams,
+            printMinutes: Math.round(plate.printSeconds / 60),
+            quantity: 1,
+            sortOrder: plate.plateIndex,
+          },
+        });
+
+        if (plate.thumbnailBase64) {
+          await this.savePlateThumbail(productId, plate.plateIndex, plate.thumbnailBase64);
+        }
+
+        results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 1 });
+      }
+    }
+
+    // Update color changes if any plate has tool changes
+    const totalColorChanges = platesToProcess.reduce((s, p) => s + p.toolChanges, 0);
+    if (totalColorChanges > 0) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { colorChanges: totalColorChanges },
+      });
+    }
+
+    await this.recalculateAggregates(productId);
+    return { slicer: analysis.slicer, results, product: await this.findOne(productId) };
+  }
+
+  /**
+   * Decode a base64 thumbnail and store it as a product attachment.
+   */
+  private async savePlateThumbail(productId: string, plateIndex: number, thumbnailBase64: string) {
+    try {
+      const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+      const now = new Date();
+      const dateDir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+      const fullDir = path.join(uploadDir, dateDir);
+      if (!fs.existsSync(fullDir)) fs.mkdirSync(fullDir, { recursive: true });
+
+      // Strip data URL prefix if present
+      const base64Data = thumbnailBase64.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+      const fileName = `plate-${plateIndex}-${Date.now()}.png`;
+      const filePath = path.join(fullDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+
+      const storagePath = path.join(dateDir, fileName);
+      await this.prisma.attachment.create({
+        data: {
+          entityType: 'product',
+          entityId: productId,
+          filename: fileName,
+          originalName: `Plate ${plateIndex} thumbnail`,
+          mimeType: 'image/png',
+          sizeBytes: buffer.length,
+          storagePath,
+        },
+      });
+
+      // Set as product imageUrl if none set yet
+      const product = await this.prisma.product.findUnique({ where: { id: productId } });
+      if (product && !product.imageUrl) {
+        await this.prisma.product.update({ where: { id: productId }, data: { imageUrl: storagePath } });
+      }
+    } catch {
+      // Non-fatal — thumbnail save failure should not abort the import
+    }
   }
 
   private async recalculateAggregates(productId: string) {

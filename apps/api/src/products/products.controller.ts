@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -101,6 +102,26 @@ export class ProductsController {
   async onboardGcode(@Param('id') id: string, @UploadedFiles() files: any[]) {
     if (!files?.length) throw new BadRequestException('No files uploaded');
     return this.productsService.onboardFromGcode(id, files);
+  }
+
+  @Post(':id/onboard-3mf')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
+  async onboardThreeMf(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @Body('selectedPlates') selectedPlatesRaw: string,
+    @Body('plateNames') plateNamesRaw?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!file.originalname?.toLowerCase().endsWith('.3mf')) {
+      throw new BadRequestException('File must be a .3mf');
+    }
+    const selectedPlates: number[] = JSON.parse(selectedPlatesRaw || '[]');
+    const plateNames: Record<string, string> = plateNamesRaw ? JSON.parse(plateNamesRaw) : {};
+    if (!selectedPlates.length) throw new BadRequestException('No plates selected');
+    return this.productsService.onboardFromThreeMf(id, file.buffer, { selectedPlates, plateNames });
   }
 
   @Post(':id/images')
