@@ -37,6 +37,8 @@ export class JobMaterialsService {
   }
 
   async removeMaterial(id: string) {
+    const exists = await this.prisma.jobMaterial.findUnique({ where: { id } });
+    if (!exists) throw new NotFoundException('Job material not found');
     return this.prisma.jobMaterial.delete({ where: { id } });
   }
 }

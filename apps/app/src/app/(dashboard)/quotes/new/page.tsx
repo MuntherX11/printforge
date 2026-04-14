@@ -8,10 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
 import { Plus, Trash2 } from 'lucide-react';
 
 export default function NewQuotePage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,7 +58,7 @@ export default function NewQuotePage() {
       });
       router.push('/quotes');
     } catch (err: any) {
-      setError(err.message);
+      toast('error', err.message || 'Failed to create quote');
     } finally {
       setLoading(false);
     }

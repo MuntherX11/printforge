@@ -47,6 +47,9 @@ export class ExpensesService {
   }
 
   async update(id: string, data: Partial<CreateExpenseDto>) {
+    const exists = await this.prisma.expense.findUnique({ where: { id } });
+    if (!exists) throw new NotFoundException('Expense not found');
+
     return this.prisma.expense.update({
       where: { id },
       data: {
@@ -58,6 +61,8 @@ export class ExpensesService {
   }
 
   async remove(id: string) {
+    const exists = await this.prisma.expense.findUnique({ where: { id } });
+    if (!exists) throw new NotFoundException('Expense not found');
     return this.prisma.expense.delete({ where: { id } });
   }
 }
