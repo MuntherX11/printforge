@@ -100,9 +100,9 @@ export default function NewQuotePage() {
                     </select>
                   )}
                   <div className="flex gap-3 items-end">
-                    <div className="flex-1"><Input placeholder="Description" value={item.description} onChange={e => { const u = [...items]; u[i].description = e.target.value; setItems(u); }} required /></div>
-                    <div className="w-20"><Input type="number" min="1" value={item.quantity} onChange={e => { const u = [...items]; u[i].quantity = parseInt(e.target.value) || 1; setItems(u); }} /></div>
-                    <div className="w-28"><Input type="number" step="0.001" value={item.unitPrice} onChange={e => { const u = [...items]; u[i].unitPrice = parseFloat(e.target.value) || 0; setItems(u); }} /></div>
+                    <div className="flex-1"><Input placeholder="Description" value={item.description} onChange={e => { const u = [...items]; u[i] = { ...u[i], description: e.target.value }; setItems(u); }} required /></div>
+                    <div className="w-20"><Input type="number" min="1" value={item.quantity} onChange={e => { const u = [...items]; u[i] = { ...u[i], quantity: parseInt(e.target.value) || 1 }; setItems(u); }} /></div>
+                    <div className="w-28"><Input type="number" step="0.001" value={item.unitPrice} onChange={e => { const u = [...items]; u[i] = { ...u[i], unitPrice: parseFloat(e.target.value) || 0 }; setItems(u); }} /></div>
                     <div className="w-24 text-right text-sm font-medium py-2">{(item.quantity * item.unitPrice).toFixed(3)}</div>
                     {items.length > 1 && <Button type="button" variant="ghost" size="sm" onClick={() => setItems(items.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4 text-red-500" /></Button>}
                   </div>
