@@ -1,6 +1,6 @@
 # PrintForge — Project Handoff Document
 
-> Last updated: 2026-04-14 | Current version: **v3.1**
+> Last updated: 2026-04-14 | Current version: **v2.10**
 
 ---
 
@@ -106,7 +106,7 @@ Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttl
 1. **WebSocket frontend** — `useWebSocket()` hook (shared `socket.io-client` singleton), `WsNotifications` component, live printer status replaces polling. Socket.IO path: `/api/socket.io/`.
 2. **PWA** — Rewritten service worker (versioned, stale-while-revalidate), `InstallPrompt` (`beforeinstallprompt`), `OfflineIndicator` (amber top bar), PNG icons, updated manifest.
 
-### v3.0 — COGS + Accounting
+### v2.10 — COGS + Accounting
 1. **COGS auto-tracking** — `completeJob()` auto-calls `calculateCost()` so every completed job records material/machine/waste/overhead costs.
 2. **Accounting page** — 6 KPI cards, 6-month recharts BarChart (revenue/COGS/grossProfit), P&L summary, product margins table with color-coded badges.
 3. **Expenses** — Category pills, add/delete expenses, total row.
@@ -114,7 +114,7 @@ Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttl
 5. **Quote expiry scheduler** — `@Cron(EVERY_DAY_AT_MIDNIGHT)` auto-expires old quotes; `convertToOrder()` blocks on expired quotes.
 6. **Invoice PAID flow** — Auto-sets `paidAt`, increments `order.paidAmount`, guards on null `orderId`.
 
-### v3.1 — UX Audit + Logic Fixes (current)
+### v2.10.1 — UX Audit + Logic Fixes (current)
 1. **calculateCost multicolor fix** — Products with multicolor components (null `materialId`) no longer crash; uses `calculateJobCost` with averaged sub-material costPerGram.
 2. **Production job cancel** — "Cancel Job" button on job detail page with confirmation Dialog; Reprint `confirm()` replaced with Dialog.
 3. **New job form redesign** — Mode selector (For Order / Build Stock) forces linking to an order or product; backend enforces this too.
@@ -127,7 +127,7 @@ Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttl
 
 ---
 
-## Pending Issues (from last audit — not yet fixed)
+## Pending Issues (audit as of v2.10.1 — not yet fixed)
 
 ### Frontend
 | File | Issue |
