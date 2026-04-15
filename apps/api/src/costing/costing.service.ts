@@ -6,6 +6,9 @@ import {
   MultiColorEstimateInput,
   ColorCostDetail,
   PurgeTransition,
+  EstimatePlatesDto,
+  EstimatePlatesResult,
+  PlateCostResult,
 } from '@printforge/types';
 
 @Injectable()
@@ -249,6 +252,113 @@ export class CostingService {
       purgeTransitions,
       totalPurgeGrams: Math.round(totalPurgeGrams * 100) / 100,
       suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
+      markupMultiplier,
+    };
+  }
+
+  /**
+   * Estimate cost for one or more 3MF plates in a single call.
+   * Each plate is costed independently; multicolor plates resolve material
+   * by materialType from the DB, falling back to defaultMaterialId.
+   */
+  async estimatePlates(dto: EstimatePlatesDto): Promise<EstimatePlatesResult> {
+    // Fetch default material
+    const defaultMaterial = await this.prisma.material.findUnique({
+      where: { id: dto.defaultMaterialId },
+    });
+
+    // Collect all material types referenced by tools across all plates
+    const materialTypes = new Set<string>();
+    for (const plate of dto.plates) {
+      for (const tool of plate.tools) {
+        if (tool.materialType) materialTypes.add(tool.materialType.toUpperCase());
+      }
+    }
+
+    // Fetch cheapest material per type (one query, first-match wins after sort)
+    const typeToMaterial = new Map<string, { costPerGram: number }>();
+    if (materialTypes.size > 0) {
+      const byType = await this.prisma.material.findMany({
+        where: { type: { in: [...materialTypes] as any } },
+        orderBy: { costPerGram: 'asc' },
+        select: { type: true, costPerGram: true },
+      });
+      for (const mat of byType) {
+        if (!typeToMaterial.has(mat.type)) {
+          typeToMaterial.set(mat.type, { costPerGram: mat.costPerGram });
+        }
+      }
+    }
+
+    // Fetch printer once
+    const printer = dto.printerId
+      ? await this.prisma.printer.findUnique({ where: { id: dto.printerId } })
+      : null;
+
+    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
+    const markupMultiplier =
+      printer?.markupMultiplier && printer.markupMultiplier > 0
+        ? printer.markupMultiplier
+        : globalMarkup;
+
+    const plates: PlateCostResult[] = await Promise.all(
+      dto.plates.map(async (plate) => {
+        const isMultiColor = plate.tools.length > 1;
+
+        // Resolve materials for this plate
+        let materials: Array<{ gramsUsed: number; costPerGram: number }>;
+        if (isMultiColor && plate.tools.length > 0) {
+          materials = plate.tools.map((tool) => {
+            const typeMat = tool.materialType
+              ? typeToMaterial.get(tool.materialType.toUpperCase())
+              : undefined;
+            const costPerGram =
+              typeMat?.costPerGram ?? defaultMaterial?.costPerGram ?? 0;
+            return { gramsUsed: tool.filamentGrams, costPerGram };
+          });
+        } else {
+          materials = defaultMaterial
+            ? [{ gramsUsed: plate.weightGrams, costPerGram: defaultMaterial.costPerGram }]
+            : [{ gramsUsed: plate.weightGrams, costPerGram: 0 }];
+        }
+
+        const breakdown = await this.calculateJobCost({
+          printDuration: plate.printSeconds,
+          colorChanges: plate.toolChanges,
+          purgeWasteGrams: 0,
+          printer: printer
+            ? { hourlyRate: printer.hourlyRate, wattage: printer.wattage }
+            : null,
+          materials,
+        });
+
+        const suggestedPrice = breakdown.totalCost * markupMultiplier;
+
+        return {
+          plateIndex: plate.plateIndex,
+          name: plate.name,
+          printSeconds: plate.printSeconds,
+          weightGrams: plate.weightGrams,
+          isMultiColor,
+          breakdown: {
+            ...breakdown,
+            suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
+            markupMultiplier,
+          },
+        };
+      }),
+    );
+
+    const grandTotalCost = plates.reduce((sum, p) => sum + p.breakdown.totalCost, 0);
+    const grandSuggestedPrice = plates.reduce(
+      (sum, p) => sum + p.breakdown.suggestedPrice,
+      0,
+    );
+
+    return {
+      plates,
+      grandTotalCost: Math.round(grandTotalCost * 1000) / 1000,
+      grandSuggestedPrice: Math.round(grandSuggestedPrice * 1000) / 1000,
       markupMultiplier,
     };
   }

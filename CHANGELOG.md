@@ -2,7 +2,16 @@
 
 All notable changes to PrintForge are documented here.
 
-## [v2.9.10] — 2026-04-15 (current)
+## [v2.10.3] — 2026-04-16 (current)
+
+### Added
+- **3MF → Quick Quote integration** — Staff and customer Quick Quote pages now accept `.3mf` files (OrcaSlicer project files). Uploading a `.3mf` auto-parses it, shows all plates with thumbnails/stats for selection, then estimates cost per plate via the new `POST /costing/estimate-plates` endpoint. Staff get full per-plate breakdown cards + grand total + save as multi-item quote (one item per plate). Customers get a simpler plate checklist + total price view.
+- **`POST /costing/estimate-plates`** — New backend endpoint that costs one or more 3MF plates in a single call. Single-color plates use the default material; multicolor plates auto-resolve `costPerGram` by `materialType` from the inventory DB (cheapest match), falling back to the default material. All plates priced in parallel with `Promise.all`.
+- **`EstimatePlatesDto / EstimatePlatesResult / PlateCostResult`** — New types in `@printforge/types` for the plate costing API.
+
+---
+
+## [v2.9.10] — 2026-04-15
 
 ### Fixed
 - **calculateCost crash for materialless components** — Components with `materialId = null` and no sub-materials (e.g. unassigned gcode imports) no longer crash Prisma. Machine time cost is still calculated; material cost is zero.

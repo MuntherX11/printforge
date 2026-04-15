@@ -184,6 +184,45 @@ export interface OnboardThreeMfDto {
   plateNames?: Record<string, string>; // key = plateIndex as string
 }
 
+// ============ PLATE COSTING ============
+
+export interface PlateEstimateToolInput {
+  filamentGrams: number;
+  materialType?: string;
+  colorHex?: string;
+}
+
+export interface PlateEstimateInput {
+  plateIndex: number;
+  name: string;
+  printSeconds: number;
+  weightGrams: number;
+  toolChanges: number;
+  tools: PlateEstimateToolInput[];
+}
+
+export interface EstimatePlatesDto {
+  plates: PlateEstimateInput[];
+  defaultMaterialId: string;
+  printerId?: string;
+}
+
+export interface PlateCostResult {
+  plateIndex: number;
+  name: string;
+  printSeconds: number;
+  weightGrams: number;
+  isMultiColor: boolean;
+  breakdown: CostBreakdown & { suggestedPrice: number; markupMultiplier: number };
+}
+
+export interface EstimatePlatesResult {
+  plates: PlateCostResult[];
+  grandTotalCost: number;
+  grandSuggestedPrice: number;
+  markupMultiplier: number;
+}
+
 // ============ AUTH ============
 
 export type UserType = 'staff' | 'customer';

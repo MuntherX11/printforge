@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
-import { Upload, Calculator, FileText, Box, Save, Link2 } from 'lucide-react';
+import { Upload, Calculator, FileText, Box, Save, Link2, FileCode2, Layers } from 'lucide-react';
+import PlatePreviewCard from '../products/[id]/PlatePreviewCard';
 
 export default function QuickQuotePage() {
   const [materials, setMaterials] = useState<any[]>([]);
@@ -47,6 +48,14 @@ export default function QuickQuotePage() {
   const [printMinutes, setPrintMinutes] = useState('');
   const [multiResult, setMultiResult] = useState<any>(null);
 
+  // 3MF state
+  const [threeMfAnalysis, setThreeMfAnalysis] = useState<any>(null);
+  const [threeMfLoading, setThreeMfLoading] = useState(false);
+  const [threeMfSelected, setThreeMfSelected] = useState<Set<number>>(new Set());
+  const [threeMfPlateNames, setThreeMfPlateNames] = useState<Record<string, string>>({});
+  const [threeMfResult, setThreeMfResult] = useState<any>(null);
+  const [threeMfEstimating, setThreeMfEstimating] = useState(false);
+
   useEffect(() => {
     Promise.all([
       api.get<any>('/materials').then(r => r.data || r),
@@ -59,12 +68,13 @@ export default function QuickQuotePage() {
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
   async function handleAnalyze() {
     if (!file) return;
     setAnalyzing(true);
     setError('');
     setResult(null);
-
     try {
       const params: Record<string, string> = {};
       if (materialId) params.materialId = materialId;
@@ -74,7 +84,6 @@ export default function QuickQuotePage() {
 
       const data = await api.upload('/file-parser/analyze', file, params);
       setResult(data);
-      // Auto-populate color changes from gcode analysis
       if (data?.analysis?.totalFilamentChanges != null) {
         setColorChanges(String(data.analysis.totalFilamentChanges));
       }
@@ -82,6 +91,65 @@ export default function QuickQuotePage() {
       setError(err.message || 'Analysis failed');
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleAnalyze3mf(f: File) {
+    setThreeMfLoading(true);
+    setThreeMfAnalysis(null);
+    setThreeMfResult(null);
+    setError('');
+    try {
+      const data = await api.upload('/file-parser/analyze', f, {});
+      if (data?.analysis?.type === '3mf') {
+        setThreeMfAnalysis(data.analysis);
+        // Pre-select all plates
+        const allIndices = new Set<number>(
+          (data.analysis.plates as any[]).map((p: any) => p.plateIndex as number),
+        );
+        setThreeMfSelected(allIndices);
+        // Default plate names from parser
+        const names: Record<string, string> = {};
+        for (const plate of data.analysis.plates as any[]) {
+          names[String(plate.plateIndex)] = plate.name;
+        }
+        setThreeMfPlateNames(names);
+      } else {
+        setError('Unexpected response from 3MF parser');
+      }
+    } catch (err: any) {
+      setError(err.message || '3MF analysis failed');
+    } finally {
+      setThreeMfLoading(false);
+    }
+  }
+
+  async function handleEstimatePlates() {
+    if (!threeMfAnalysis || threeMfSelected.size === 0 || !materialId) return;
+    setThreeMfEstimating(true);
+    setThreeMfResult(null);
+    setError('');
+    try {
+      const selectedPlates = (threeMfAnalysis.plates as any[])
+        .filter((p: any) => threeMfSelected.has(p.plateIndex))
+        .map((p: any) => ({
+          plateIndex: p.plateIndex,
+          name: threeMfPlateNames[String(p.plateIndex)] || p.name,
+          printSeconds: p.printSeconds,
+          weightGrams: p.weightGrams,
+          toolChanges: p.toolChanges,
+          tools: p.tools,
+        }));
+      const data = await api.post('/costing/estimate-plates', {
+        plates: selectedPlates,
+        defaultMaterialId: materialId,
+        printerId: printerId || undefined,
+      });
+      setThreeMfResult(data);
+    } catch (err: any) {
+      setError(err.message || 'Plate estimation failed');
+    } finally {
+      setThreeMfEstimating(false);
     }
   }
 
@@ -107,6 +175,33 @@ export default function QuickQuotePage() {
     }
   }
 
+  async function handleSave3mfQuote() {
+    if (!threeMfResult || !saveCustomerId) {
+      toast('error', 'Select a customer first');
+      return;
+    }
+    setSaving(true);
+    try {
+      const items = (threeMfResult.plates as any[]).map((p: any) => ({
+        description: `${file?.name} — ${p.name}`,
+        quantity: 1,
+        unitPrice: p.breakdown.suggestedPrice,
+        estimatedGrams: Math.round(p.weightGrams),
+        estimatedMinutes: Math.round(p.printSeconds / 60),
+      }));
+      await api.post('/quotes', {
+        customerId: saveCustomerId,
+        items,
+        notes: `3MF import from ${file?.name} — ${threeMfResult.plates.length} plate(s)`,
+      });
+      toast('success', 'Quote saved');
+    } catch (err: any) {
+      toast('error', err.message || 'Failed to save quote');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleScrapeUrl() {
     if (!linkUrl.trim()) return;
     setScraping(true);
@@ -125,13 +220,11 @@ export default function QuickQuotePage() {
   async function handleMultiColorEstimate() {
     setError('');
     setMultiResult(null);
-
     const validColors = colors.filter(c => c.materialId && c.gramsUsed);
     if (validColors.length < 2) {
       setError('Add at least 2 colors with material and grams');
       return;
     }
-
     setAnalyzing(true);
     try {
       const data = await api.post('/costing/estimate-multicolor', {
@@ -171,118 +264,270 @@ export default function QuickQuotePage() {
     setColors(prev => prev.map((c, i) => i === idx ? { ...c, [field]: value } : c));
   }
 
+  function togglePlate(plateIndex: number) {
+    setThreeMfSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(plateIndex)) next.delete(plateIndex);
+      else next.add(plateIndex);
+      return next;
+    });
+  }
+
+  function updatePlateName(plateIndex: number, name: string) {
+    setThreeMfPlateNames(prev => ({ ...prev, [String(plateIndex)]: name }));
+  }
+
+  function resetFileState() {
+    setResult(null);
+    setError('');
+    setMultiResult(null);
+    setScrapedData(null);
+    setThreeMfAnalysis(null);
+    setThreeMfResult(null);
+    setThreeMfSelected(new Set());
+    setThreeMfPlateNames({});
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
   if (loading) return <Loading />;
 
-  const matOptions = materials.map(m => ({ value: m.id, label: `${m.name}${m.color ? ` (${m.color})` : ''}` }));
-  const printerOptions = [{ value: '', label: 'Select printer...' }, ...printers.map(p => ({ value: p.id, label: p.name }))];
+  const matOptions = materials.map(m => ({
+    value: m.id,
+    label: `${m.name}${m.color ? ` (${m.color})` : ''}`,
+  }));
+  const printerOptions = [
+    { value: '', label: 'Select printer...' },
+    ...printers.map(p => ({ value: p.id, label: p.name })),
+  ];
+  const is3mfFile = file?.name.toLowerCase().endsWith('.3mf') ?? false;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
+      {/* Header + mode tabs */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Quick Quote</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Quick Quote</h1>
         <div className="flex gap-2">
-          <Button variant={mode === 'file' ? 'primary' : 'outline'} onClick={() => { setMode('file'); setMultiMode(false); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
+          <Button
+            variant={mode === 'file' ? 'primary' : 'outline'}
+            onClick={() => { setMode('file'); setMultiMode(false); resetFileState(); setFile(null); }}
+          >
             <Upload className="h-4 w-4 mr-2" /> File Upload
           </Button>
-          <Button variant={mode === 'multi' ? 'primary' : 'outline'} onClick={() => { setMode('multi'); setMultiMode(true); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
+          <Button
+            variant={mode === 'multi' ? 'primary' : 'outline'}
+            onClick={() => { setMode('multi'); setMultiMode(true); resetFileState(); }}
+          >
             <Calculator className="h-4 w-4 mr-2" /> Multi-Color
           </Button>
-          <Button variant={mode === 'link' ? 'primary' : 'outline'} onClick={() => { setMode('link'); setResult(null); setError(''); setMultiResult(null); setScrapedData(null); }}>
+          <Button
+            variant={mode === 'link' ? 'primary' : 'outline'}
+            onClick={() => { setMode('link'); resetFileState(); }}
+          >
             <Link2 className="h-4 w-4 mr-2" /> Link Quote
           </Button>
         </div>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{error}</div>}
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
 
-      {mode === 'file' ? (
+      {/* ── FILE MODE ───────────────────────────────────────────────────── */}
+      {mode === 'file' && (
         <>
-          {/* File upload mode */}
+          {/* Upload zone */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Upload G-code or STL File</label>
-                <label className="flex items-center justify-center w-full h-32 px-4 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-brand-400 transition-colors">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Upload G-code, STL, or 3MF File
+                </label>
+                <label className="flex items-center justify-center w-full h-32 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 transition-colors">
                   <input
                     type="file"
-                    accept=".gcode,.gco,.g,.stl"
+                    accept=".gcode,.gco,.g,.stl,.3mf"
                     className="hidden"
                     onChange={e => {
                       const f = e.target.files?.[0] || null;
                       setFile(f);
-                      setResult(null);
-                      setError('');
-                      setMultiResult(null);
-                      setScrapedData(null);
+                      resetFileState();
+                      if (f?.name.toLowerCase().endsWith('.3mf')) {
+                        handleAnalyze3mf(f);
+                      }
                     }}
                   />
                   <div className="text-center">
                     {file ? (
                       <>
-                        <FileText className="h-8 w-8 mx-auto text-brand-500 mb-2" />
-                        <p className="text-sm font-medium">{file.name}</p>
+                        {is3mfFile
+                          ? <FileCode2 className="h-8 w-8 mx-auto text-brand-500 mb-2" />
+                          : <FileText className="h-8 w-8 mx-auto text-brand-500 mb-2" />
+                        }
+                        <p className="text-sm font-medium dark:text-gray-200">{file.name}</p>
                         <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
                       </>
                     ) : (
                       <>
                         <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500">Click to upload .gcode or .stl</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Click to upload .gcode, .stl, or .3mf
+                        </p>
                       </>
                     )}
                   </div>
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Select
-                  label="Material"
-                  name="materialId"
-                  value={materialId}
-                  onChange={e => setMaterialId(e.target.value)}
-                  options={[{ value: '', label: 'Select material...' }, ...matOptions]}
-                />
-                <Select
-                  label="Printer"
-                  name="printerId"
-                  value={printerId}
-                  onChange={e => setPrinterId(e.target.value)}
-                  options={printerOptions}
-                />
-              </div>
+              {/* Non-3MF options: material, printer, analyze button */}
+              {!is3mfFile && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Select
+                      label="Material"
+                      name="materialId"
+                      value={materialId}
+                      onChange={e => setMaterialId(e.target.value)}
+                      options={[{ value: '', label: 'Select material...' }, ...matOptions]}
+                    />
+                    <Select
+                      label="Printer"
+                      name="printerId"
+                      value={printerId}
+                      onChange={e => setPrinterId(e.target.value)}
+                      options={printerOptions}
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Color Changes"
-                  type="number"
-                  value={colorChanges}
-                  onChange={e => setColorChanges(e.target.value)}
-                  min="0"
-                />
-                {file?.name?.toLowerCase().endsWith('.stl') && (
-                  <Input
-                    label="Infill % (STL only)"
-                    type="number"
-                    value={infill}
-                    onChange={e => setInfill(e.target.value)}
-                    min="0"
-                    max="100"
-                  />
-                )}
-              </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Color Changes"
+                      type="number"
+                      value={colorChanges}
+                      onChange={e => setColorChanges(e.target.value)}
+                      min="0"
+                    />
+                    {file?.name?.toLowerCase().endsWith('.stl') && (
+                      <Input
+                        label="Infill % (STL only)"
+                        type="number"
+                        value={infill}
+                        onChange={e => setInfill(e.target.value)}
+                        min="0"
+                        max="100"
+                      />
+                    )}
+                  </div>
 
-              <Button onClick={handleAnalyze} disabled={!file || analyzing || !materialId || !printerId} className="w-full">
-                {analyzing ? 'Analyzing...' : 'Analyze & Quote'}
-              </Button>
+                  <Button
+                    onClick={handleAnalyze}
+                    disabled={!file || analyzing || !materialId || !printerId}
+                    className="w-full"
+                  >
+                    {analyzing ? 'Analyzing...' : 'Analyze & Quote'}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
 
-          {/* Results */}
-          {result && (
+          {/* 3MF: parsing spinner */}
+          {is3mfFile && threeMfLoading && (
+            <div className="flex items-center justify-center py-8 gap-3 text-gray-500 dark:text-gray-400">
+              <svg className="animate-spin h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="text-sm">Parsing 3MF file…</span>
+            </div>
+          )}
+
+          {/* 3MF: plate selection + estimate */}
+          {is3mfFile && threeMfAnalysis && !threeMfLoading && (
+            <Card>
+              <CardContent className="p-6 space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-brand-500" />
+                    <h3 className="font-semibold dark:text-gray-100">
+                      {threeMfAnalysis.totalPlates} Plate
+                      {threeMfAnalysis.totalPlates !== 1 ? 's' : ''} detected
+                    </h3>
+                    {threeMfAnalysis.slicer && (
+                      <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded">
+                        {threeMfAnalysis.slicer}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    {threeMfSelected.size} selected
+                  </span>
+                </div>
+
+                {/* Material + printer selectors */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Select
+                    label="Default Material"
+                    name="materialId"
+                    value={materialId}
+                    onChange={e => setMaterialId(e.target.value)}
+                    options={[{ value: '', label: 'Select material...' }, ...matOptions]}
+                  />
+                  <Select
+                    label="Printer"
+                    name="printerId"
+                    value={printerId}
+                    onChange={e => setPrinterId(e.target.value)}
+                    options={printerOptions}
+                  />
+                </div>
+
+                <p className="text-xs text-gray-400 dark:text-gray-500 -mt-2">
+                  For multicolor plates, material cost is resolved per tool type from your inventory.
+                  The default material is used as fallback.
+                </p>
+
+                {/* Plate grid */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {(threeMfAnalysis.plates as any[]).map((plate: any) => (
+                    <PlatePreviewCard
+                      key={plate.plateIndex}
+                      plate={plate}
+                      selected={threeMfSelected.has(plate.plateIndex)}
+                      name={threeMfPlateNames[String(plate.plateIndex)] || plate.name}
+                      onToggle={togglePlate}
+                      onNameChange={updatePlateName}
+                    />
+                  ))}
+                </div>
+
+                <Button
+                  onClick={handleEstimatePlates}
+                  disabled={threeMfSelected.size === 0 || !materialId || threeMfEstimating}
+                  className="w-full"
+                >
+                  {threeMfEstimating
+                    ? 'Estimating…'
+                    : `Estimate ${threeMfSelected.size} Plate${threeMfSelected.size !== 1 ? 's' : ''}`}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Normal gcode/stl results */}
+          {result && !is3mfFile && (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-3 flex items-center gap-2">
-                    {result.analysis?.type === 'gcode' ? <FileText className="h-5 w-5" /> : <Box className="h-5 w-5" />}
+                    {result.analysis?.type === 'gcode'
+                      ? <FileText className="h-5 w-5" />
+                      : <Box className="h-5 w-5" />}
                     File Analysis
                   </h3>
                   <dl className="space-y-2 text-sm">
@@ -298,7 +543,16 @@ export default function QuickQuotePage() {
                     {result.analysis?.estimatedGrams && <div className="flex justify-between"><dt className="text-gray-500">Est. Weight</dt><dd>{result.analysis.estimatedGrams.toFixed(1)}g</dd></div>}
                     {result.analysis?.estimatedMinutes && <div className="flex justify-between"><dt className="text-gray-500">Est. Time</dt><dd>{result.analysis.estimatedMinutes} min</dd></div>}
                     {result.analysis?.triangleCount && <div className="flex justify-between"><dt className="text-gray-500">Triangles</dt><dd>{result.analysis.triangleCount.toLocaleString()}</dd></div>}
-                    {result.analysis?.boundingBox && <div className="flex justify-between"><dt className="text-gray-500">Bounding Box</dt><dd>{result.analysis.boundingBox.x.toFixed(1)} × {result.analysis.boundingBox.y.toFixed(1)} × {result.analysis.boundingBox.z.toFixed(1)} mm</dd></div>}
+                    {result.analysis?.boundingBox && (
+                      <div className="flex justify-between">
+                        <dt className="text-gray-500">Bounding Box</dt>
+                        <dd>
+                          {result.analysis.boundingBox.x.toFixed(1)} ×{' '}
+                          {result.analysis.boundingBox.y.toFixed(1)} ×{' '}
+                          {result.analysis.boundingBox.z.toFixed(1)} mm
+                        </dd>
+                      </div>
+                    )}
                     {result.analysis?.totalFilamentChanges != null && (
                       <div className="flex justify-between"><dt className="text-gray-500">Tool Changes</dt><dd>{result.analysis.totalFilamentChanges}</dd></div>
                     )}
@@ -361,10 +615,92 @@ export default function QuickQuotePage() {
               )}
             </div>
           )}
+
+          {/* 3MF results: per-plate cards + grand total */}
+          {threeMfResult && is3mfFile && (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {(threeMfResult.plates as any[]).map((plate: any) => (
+                  <Card key={plate.plateIndex}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-medium text-sm dark:text-gray-100 truncate">{plate.name}</h4>
+                        {plate.isMultiColor && (
+                          <span className="text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded ml-2 shrink-0">
+                            Multi-color
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+                        {Math.round(plate.printSeconds / 60)} min · {Math.round(plate.weightGrams)}g
+                      </div>
+                      <dl className="space-y-1 text-xs">
+                        <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{plate.breakdown.materialCost.toFixed(3)} OMR</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{plate.breakdown.machineCost.toFixed(3)} OMR</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{(plate.breakdown.electricityCost || 0).toFixed(3)} OMR</dd></div>
+                        {plate.breakdown.wasteCost > 0 && (
+                          <div className="flex justify-between"><dt className="text-gray-500">Waste</dt><dd>{plate.breakdown.wasteCost.toFixed(3)} OMR</dd></div>
+                        )}
+                        <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{plate.breakdown.overheadCost.toFixed(3)} OMR</dd></div>
+                        <div className="flex justify-between border-t dark:border-gray-700 pt-1 mt-1 font-medium text-sm">
+                          <dt className="dark:text-gray-200">Cost</dt>
+                          <dd>{plate.breakdown.totalCost.toFixed(3)} OMR</dd>
+                        </div>
+                        <div className="flex justify-between text-brand-600 dark:text-brand-400 font-semibold">
+                          <dt>Price</dt>
+                          <dd>{plate.breakdown.suggestedPrice.toFixed(3)} OMR</dd>
+                        </div>
+                      </dl>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Grand total + save */}
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <h3 className="font-semibold dark:text-gray-100">
+                      Total — {threeMfResult.plates.length} plate{threeMfResult.plates.length !== 1 ? 's' : ''}
+                    </h3>
+                    <div className="text-right">
+                      <div className="text-sm text-gray-500">
+                        Cost: {threeMfResult.grandTotalCost.toFixed(3)} OMR
+                      </div>
+                      <div className="text-2xl font-bold text-brand-600 dark:text-brand-400">
+                        {threeMfResult.grandSuggestedPrice.toFixed(3)} OMR
+                      </div>
+                      <div className="text-xs text-gray-400">{threeMfResult.markupMultiplier}× markup</div>
+                    </div>
+                  </div>
+                  <div className="pt-4 border-t dark:border-gray-700 space-y-3">
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Save as Quote</h4>
+                    <Select
+                      label="Customer"
+                      value={saveCustomerId}
+                      onChange={e => setSaveCustomerId(e.target.value)}
+                      options={[{ value: '', label: 'Select customer...' }, ...customers.map(c => ({ value: c.id, label: c.name }))]}
+                    />
+                    <Button
+                      onClick={handleSave3mfQuote}
+                      disabled={saving || !saveCustomerId}
+                      className="w-full"
+                      variant="secondary"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {saving ? 'Saving...' : `Save Quote (${threeMfResult.plates.length} items)`}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </>
-      ) : mode === 'multi' ? (
+      )}
+
+      {/* ── MULTI-COLOR MODE ─────────────────────────────────────────────── */}
+      {mode === 'multi' && (
         <>
-          {/* Multi-color mode */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between">
@@ -384,11 +720,7 @@ export default function QuickQuotePage() {
                     />
                   </div>
                   <div className="col-span-2">
-                    <Input
-                      label="Name"
-                      value={c.colorName}
-                      onChange={e => updateColor(idx, 'colorName', e.target.value)}
-                    />
+                    <Input label="Name" value={c.colorName} onChange={e => updateColor(idx, 'colorName', e.target.value)} />
                   </div>
                   <div className="col-span-5">
                     <Select
@@ -399,31 +731,18 @@ export default function QuickQuotePage() {
                     />
                   </div>
                   <div className="col-span-3">
-                    <Input
-                      label="Grams"
-                      type="number"
-                      step="0.1"
-                      value={c.gramsUsed}
-                      onChange={e => updateColor(idx, 'gramsUsed', e.target.value)}
-                    />
+                    <Input label="Grams" type="number" step="0.1" value={c.gramsUsed} onChange={e => updateColor(idx, 'gramsUsed', e.target.value)} />
                   </div>
                   <div className="col-span-1">
                     {colors.length > 1 && (
-                      <Button variant="outline" size="sm" onClick={() => removeColor(idx)} className="text-red-500 w-full">
-                        ×
-                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => removeColor(idx)} className="text-red-500 w-full">×</Button>
                     )}
                   </div>
                 </div>
               ))}
 
               <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Print Minutes"
-                  type="number"
-                  value={printMinutes}
-                  onChange={e => setPrintMinutes(e.target.value)}
-                />
+                <Input label="Print Minutes" type="number" value={printMinutes} onChange={e => setPrintMinutes(e.target.value)} />
                 <Select
                   label="Printer"
                   name="printerId"
@@ -497,9 +816,11 @@ export default function QuickQuotePage() {
             </div>
           )}
         </>
-      ) : (
+      )}
+
+      {/* ── LINK MODE ────────────────────────────────────────────────────── */}
+      {mode === 'link' && (
         <>
-          {/* Link quote mode */}
           <Card>
             <CardContent className="p-6 space-y-4">
               <div>
@@ -543,7 +864,12 @@ export default function QuickQuotePage() {
                     {scrapedData.description && (
                       <p className="text-sm text-gray-500 mt-1 line-clamp-3">{scrapedData.description}</p>
                     )}
-                    <a href={scrapedData.url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline mt-2 inline-block">
+                    <a
+                      href={scrapedData.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-brand-600 hover:underline mt-2 inline-block"
+                    >
                       View on {scrapedData.siteName || 'site'}
                     </a>
                   </div>

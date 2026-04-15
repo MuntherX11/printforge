@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { CostingService } from './costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { MultiColorEstimateInput } from '@printforge/types';
+import { MultiColorEstimateInput, EstimatePlatesDto } from '@printforge/types';
 
 @Controller('costing')
 @UseGuards(JwtAuthGuard)
@@ -26,5 +26,15 @@ export class CostingController {
   @Post('estimate-multicolor')
   estimateMultiColor(@Body() body: MultiColorEstimateInput) {
     return this.costingService.estimateMultiColor(body);
+  }
+
+  /**
+   * Estimate cost for one or more 3MF plates.
+   * Each plate is costed independently; multicolor plates auto-resolve
+   * material cost by materialType, falling back to defaultMaterialId.
+   */
+  @Post('estimate-plates')
+  estimatePlates(@Body() body: EstimatePlatesDto) {
+    return this.costingService.estimatePlates(body);
   }
 }
