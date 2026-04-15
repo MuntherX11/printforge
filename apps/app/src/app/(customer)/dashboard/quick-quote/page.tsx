@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,15 +28,7 @@ interface AnalysisResult {
   layerHeight?: number;
 }
 
-function formatTime(seconds?: number) {
-  if (!seconds) return '—';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-function formatTimeSec(seconds: number): string {
+function formatTime(seconds?: number): string {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -58,6 +51,8 @@ export default function CustomerQuickQuotePage() {
   const [threeMfSelected, setThreeMfSelected] = useState<Set<number>>(new Set());
   const [threeMfResult, setThreeMfResult] = useState<any>(null);
   const [threeMfEstimating, setThreeMfEstimating] = useState(false);
+  const [quoteRequested, setQuoteRequested] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     api.get<Material[]>('/materials').then(setMaterials).catch(() => {});
@@ -72,6 +67,7 @@ export default function CustomerQuickQuotePage() {
     setThreeMfAnalysis(null);
     setThreeMfResult(null);
     setThreeMfSelected(new Set());
+    setQuoteRequested(false);
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -248,7 +244,7 @@ export default function CustomerQuickQuotePage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium dark:text-gray-200">{plate.name}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatTimeSec(plate.printSeconds)} · {Math.round(plate.weightGrams)}g
+                          {formatTime(plate.printSeconds)} · {Math.round(plate.weightGrams)}g
                           {plate.toolChanges > 0 ? ` · ${plate.toolChanges} color change${plate.toolChanges !== 1 ? 's' : ''}` : ''}
                         </p>
                       </div>
@@ -308,16 +304,25 @@ export default function CustomerQuickQuotePage() {
               </div>
             </div>
 
-            <div className="border-t dark:border-gray-700 pt-4">
+            <div className="border-t dark:border-gray-700 pt-4 space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-lg font-semibold dark:text-gray-100">Estimated Price</span>
                 <span className="text-2xl font-bold text-brand-600 dark:text-brand-400">
                   {estimate.suggestedPrice.toFixed(3)} OMR
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 This is an estimate. Final price may vary based on printer and material availability.
               </p>
+              {quoteRequested ? (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-4 py-3 text-sm text-green-700 dark:text-green-400">
+                  Quote request received! Our team will review and contact you shortly.
+                </div>
+              ) : (
+                <Button className="w-full" onClick={() => setQuoteRequested(true)}>
+                  Request This Quote
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -340,7 +345,7 @@ export default function CustomerQuickQuotePage() {
                   <div>
                     <p className="text-sm font-medium dark:text-gray-200">{plate.name}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {formatTimeSec(plate.printSeconds)} · {Math.round(plate.weightGrams)}g
+                      {formatTime(plate.printSeconds)} · {Math.round(plate.weightGrams)}g
                       {plate.isMultiColor ? ' · Multi-color' : ''}
                     </p>
                   </div>
@@ -364,6 +369,22 @@ export default function CustomerQuickQuotePage() {
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 This is an estimate. Final price may vary based on printer and material availability.
               </p>
+            </div>
+
+            {/* Request quote CTA */}
+            <div className="border-t dark:border-gray-700 pt-4">
+              {quoteRequested ? (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-4 py-3 text-sm text-green-700 dark:text-green-400">
+                  Quote request received! Our team will review and contact you shortly.
+                </div>
+              ) : (
+                <Button
+                  className="w-full"
+                  onClick={() => setQuoteRequested(true)}
+                >
+                  Request This Quote
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

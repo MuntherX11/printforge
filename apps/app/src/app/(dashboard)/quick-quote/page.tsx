@@ -182,8 +182,9 @@ export default function QuickQuotePage() {
     }
     setSaving(true);
     try {
+      const fileName = file?.name ?? 'project.3mf';
       const items = (threeMfResult.plates as any[]).map((p: any) => ({
-        description: `${file?.name} — ${p.name}`,
+        description: `${fileName} — ${p.name}`,
         quantity: 1,
         unitPrice: p.breakdown.suggestedPrice,
         estimatedGrams: Math.round(p.weightGrams),
@@ -192,7 +193,7 @@ export default function QuickQuotePage() {
       await api.post('/quotes', {
         customerId: saveCustomerId,
         items,
-        notes: `3MF import from ${file?.name} — ${threeMfResult.plates.length} plate(s)`,
+        notes: `3MF import from ${fileName} — ${threeMfResult.plates.length} plate(s)`,
       });
       toast('success', 'Quote saved');
     } catch (err: any) {

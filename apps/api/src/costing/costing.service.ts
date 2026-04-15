@@ -305,9 +305,11 @@ export class CostingService {
       dto.plates.map(async (plate) => {
         const isMultiColor = plate.tools.length > 1;
 
-        // Resolve materials for this plate
+        // Resolve materials for this plate.
+        // Both single-tool and multi-tool plates attempt materialType resolution
+        // first; defaultMaterial is the fallback for unknown/missing types.
         let materials: Array<{ gramsUsed: number; costPerGram: number }>;
-        if (isMultiColor && plate.tools.length > 0) {
+        if (plate.tools.length > 0) {
           materials = plate.tools.map((tool) => {
             const typeMat = tool.materialType
               ? typeToMaterial.get(tool.materialType.toUpperCase())
@@ -317,6 +319,7 @@ export class CostingService {
             return { gramsUsed: tool.filamentGrams, costPerGram };
           });
         } else {
+          // No tool metadata — use total weight against default material
           materials = defaultMaterial
             ? [{ gramsUsed: plate.weightGrams, costPerGram: defaultMaterial.costPerGram }]
             : [{ gramsUsed: plate.weightGrams, costPerGram: 0 }];
