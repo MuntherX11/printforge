@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { forwardRef } from 'react';
+import { forwardRef, useId } from 'react';
 
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
@@ -8,11 +8,19 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, label, error, options, ...props }, ref) => {
+  ({ className, label, error, options, id: propsId, ...props }, ref) => {
+    const generatedId = useId();
+    const id = propsId || generatedId;
+
     return (
       <div className="space-y-1">
-        {label && <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>}
+        {label && (
+          <label htmlFor={id} className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {label}
+          </label>
+        )}
         <select
+          id={id}
           ref={ref}
           className={cn(
             'flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
@@ -23,7 +31,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           {...props}
         >
           {options.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
         </select>
         {error && <p className="text-xs text-red-600">{error}</p>}
