@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { Upload } from 'lucide-react';
+import { Upload, Send } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function SettingsPage() {
@@ -18,6 +19,10 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testWaTo, setTestWaTo] = useState('');
+  const [testingWa, setTestingWa] = useState(false);
 
   useEffect(() => {
     api.get<Record<string, string>>('/settings').then(setSettings).catch(console.error).finally(() => setLoading(false));
@@ -113,31 +118,25 @@ export default function SettingsPage() {
               <Input name="overhead_percent" label="Overhead (%)" type="number" step="0.1" defaultValue={settings.overhead_percent || '15'} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Locale</label>
-                <select name="locale" defaultValue={settings.locale || 'en-GB'} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
-                  <option value="en-GB">English (UK) — dd/MM/yyyy</option>
-                  <option value="en-US">English (US) — MM/dd/yyyy</option>
-                  <option value="ar-OM">Arabic (Oman)</option>
-                  <option value="ar-SA">Arabic (Saudi Arabia)</option>
-                  <option value="ar-AE">Arabic (UAE)</option>
-                  <option value="de-DE">German</option>
-                  <option value="fr-FR">French</option>
-                  <option value="es-ES">Spanish</option>
-                  <option value="ja-JP">Japanese</option>
-                  <option value="zh-CN">Chinese (Simplified)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date Format</label>
-                <select name="date_format" defaultValue={settings.date_format || 'dd MMM yyyy'} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
-                  <option value="dd MMM yyyy">11 Apr 2026</option>
-                  <option value="MMM dd, yyyy">Apr 11, 2026</option>
-                  <option value="yyyy-MM-dd">2026-04-11</option>
-                  <option value="dd/MM/yyyy">11/04/2026</option>
-                  <option value="MM/dd/yyyy">04/11/2026</option>
-                </select>
-              </div>
+              <Select name="locale" label="Locale" defaultValue={settings.locale || 'en-GB'} options={[
+                { value: 'en-GB', label: 'English (UK) — dd/MM/yyyy' },
+                { value: 'en-US', label: 'English (US) — MM/dd/yyyy' },
+                { value: 'ar-OM', label: 'Arabic (Oman)' },
+                { value: 'ar-SA', label: 'Arabic (Saudi Arabia)' },
+                { value: 'ar-AE', label: 'Arabic (UAE)' },
+                { value: 'de-DE', label: 'German' },
+                { value: 'fr-FR', label: 'French' },
+                { value: 'es-ES', label: 'Spanish' },
+                { value: 'ja-JP', label: 'Japanese' },
+                { value: 'zh-CN', label: 'Chinese (Simplified)' },
+              ]} />
+              <Select name="date_format" label="Date Format" defaultValue={settings.date_format || 'dd MMM yyyy'} options={[
+                { value: 'dd MMM yyyy', label: '11 Apr 2026' },
+                { value: 'MMM dd, yyyy', label: 'Apr 11, 2026' },
+                { value: 'yyyy-MM-dd', label: '2026-04-11' },
+                { value: 'dd/MM/yyyy', label: '11/04/2026' },
+                { value: 'MM/dd/yyyy', label: '04/11/2026' },
+              ]} />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.01" defaultValue={settings.markup_multiplier || '2.5'} />
@@ -163,7 +162,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader><CardTitle>Email (SMTP)</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-gray-500">For Gmail: use smtp.gmail.com, port 587, your Gmail address, and an App Password.</p>
+            <p className="text-sm text-gray-500">For Gmail: use smtp.gmail.com, port 587, your Gmail address, and an App Password (not your regular password).</p>
             <div className="grid grid-cols-2 gap-4">
               <Input name="smtp_host" label="SMTP Host" defaultValue={settings.smtp_host || 'smtp.gmail.com'} />
               <Input name="smtp_port" label="SMTP Port" defaultValue={settings.smtp_port || '587'} />
@@ -172,14 +171,114 @@ export default function SettingsPage() {
               <Input name="smtp_user" label="SMTP Username / Email" defaultValue={settings.smtp_user || ''} />
               <Input name="smtp_pass" label="SMTP Password / App Password" type="password" defaultValue={settings.smtp_pass || ''} />
             </div>
+            <Input name="admin_email" label="Admin Email (for internal alerts)" defaultValue={settings.admin_email || ''} />
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <input
+                type="text"
+                placeholder="test@example.com"
+                value={testEmailTo}
+                onChange={e => setTestEmailTo(e.target.value)}
+                className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={testingEmail || !testEmailTo}
+                onClick={async () => {
+                  setTestingEmail(true);
+                  try {
+                    await api.post('/communications/test-email', { to: testEmailTo });
+                    toast('success', 'Test email sent!');
+                  } catch (err: any) {
+                    toast('error', err.message);
+                  } finally {
+                    setTestingEmail(false);
+                  }
+                }}
+              >
+                <Send className="h-3.5 w-3.5 mr-1" />
+                {testingEmail ? 'Sending...' : 'Send Test Email'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>WhatsApp</CardTitle></CardHeader>
+          <CardHeader><CardTitle>WhatsApp Business</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-gray-500">WhatsApp messages open in a new tab using wa.me links. Set a default message template below.</p>
-            <Textarea name="whatsapp_template" label="Default WhatsApp Message Template" placeholder="Hello {name}, your order {order} is ready for pickup!" defaultValue={settings.whatsapp_template || 'Hello {name}, this is {company}. '} />
+            <p className="text-sm text-gray-500">
+              Uses the <strong>Meta WhatsApp Business Cloud API</strong>. Requires a Meta Business account, a verified phone number, and a permanent access token.{' '}
+              <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Setup guide →</a>
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <Input name="whatsapp_phone_id" label="Phone Number ID" placeholder="123456789012345" defaultValue={settings.whatsapp_phone_id || ''} />
+              <Input name="whatsapp_token" label="Permanent Access Token" type="password" placeholder="EAAxxxxxxxxxxxxxxx" defaultValue={settings.whatsapp_token || ''} />
+            </div>
+            <div className="flex items-center gap-3">
+              <input type="checkbox" name="whatsapp_enabled" id="whatsapp_enabled" value="true" defaultChecked={settings.whatsapp_enabled === 'true'} className="rounded border-gray-300 text-brand-600" />
+              <label htmlFor="whatsapp_enabled" className="text-sm text-gray-700 dark:text-gray-300">Enable WhatsApp notifications</label>
+            </div>
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              ⚠️ Free-form text messages work only within 24 hours of a customer contacting you. For proactive outbound notifications, create approved Message Templates in Meta Business Manager.
+            </p>
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <input
+                type="text"
+                placeholder="+96812345678"
+                value={testWaTo}
+                onChange={e => setTestWaTo(e.target.value)}
+                className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={testingWa || !testWaTo}
+                onClick={async () => {
+                  setTestingWa(true);
+                  try {
+                    await api.post('/communications/test-whatsapp', { to: testWaTo });
+                    toast('success', 'Test WhatsApp message sent!');
+                  } catch (err: any) {
+                    toast('error', err.message);
+                  } finally {
+                    setTestingWa(false);
+                  }
+                }}
+              >
+                <Send className="h-3.5 w-3.5 mr-1" />
+                {testingWa ? 'Sending...' : 'Send Test Message'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Notification Events</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-gray-500">Choose which events send email and/or WhatsApp messages to customers automatically.</p>
+            <div className="space-y-2">
+              {[
+                { key: 'notify_quote_sent', label: 'Quote sent to customer' },
+                { key: 'notify_order_confirmed', label: 'Order confirmed' },
+                { key: 'notify_order_production', label: 'Order moved to In Production' },
+                { key: 'notify_order_ready', label: 'Order ready for pickup' },
+                { key: 'notify_order_completed', label: 'All production jobs completed' },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-3 py-1">
+                  <input
+                    type="checkbox"
+                    name={key}
+                    id={key}
+                    value="true"
+                    defaultChecked={settings[key] !== 'false'}
+                    className="rounded border-gray-300 text-brand-600"
+                  />
+                  <label htmlFor={key} className="text-sm text-gray-700 dark:text-gray-300">{label}</label>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 

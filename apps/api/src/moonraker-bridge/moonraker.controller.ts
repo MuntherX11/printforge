@@ -80,4 +80,16 @@ export class MoonrakerController {
     const ok = await this.moonraker.controlPrint(printer.moonrakerUrl, action as any);
     return { success: ok };
   }
+
+  /**
+   * Re-connect a Creality WebSocket printer immediately after its IP is updated.
+   */
+  @Post('reconnect/:printerId')
+  async reconnectPrinter(@Param('printerId') printerId: string) {
+    const printer = await this.prisma.printer.findUnique({ where: { id: printerId } });
+    if (!printer) throw new NotFoundException('Printer not found');
+    if (printer.connectionType !== 'CREALITY_WS') return { skipped: true };
+    await this.crealityWs.reconnectPrinter(printerId);
+    return { reconnecting: true };
+  }
 }

@@ -1,6 +1,6 @@
 # PrintForge — Project Handoff Document
 
-> Last updated: 2026-04-18 | Current version: **v2.10.8**
+> Last updated: 2026-04-18 | Current version: **v2.11.0**
 
 ---
 
@@ -109,13 +109,24 @@ packages/
 
 18. **ACCOUNTING role** — Added to `Role` enum. Sidebar nav: Dashboard + Orders + Quotes + Customers + Accounting. No access to Quick Quote, Production, Design, Filaments, Products, Printers, Settings.
 
-19. **Currency context** — `LocaleProvider` wraps the entire `(dashboard)` layout. `useFormatCurrency()` from `locale-context.tsx` replaces hardcoded `formatCurrency(amount)` calls on the dashboard — currency setting now propagates live.
+19. **Currency context** — `LocaleProvider` wraps the entire `(dashboard)` layout.
+
+20. **Customer communications** — `CommunicationsModule` exports `EmailService`, `EmailNotificationService`, `WhatsAppService`. All three are injected with `@Optional()` into `QuotesService`, `OrdersService`, and `JobsService` to avoid circular dependencies. Notifications only fire when the relevant `notify_*` system setting is not `'false'`. SMTP config lives in `smtp_*` settings; WhatsApp in `whatsapp_token`, `whatsapp_phone_id`, `whatsapp_enabled`. Test endpoints at `POST /communications/test-email` and `POST /communications/test-whatsapp` (ADMIN only). `useFormatCurrency()` from `locale-context.tsx` replaces hardcoded `formatCurrency(amount)` calls on the dashboard — currency setting now propagates live.
 
 ---
 
 ## Version History (Highlights)
 
-### v2.10.8 — Creality LAN + ACCOUNTING Role + Currency Fix (current)
+### v2.11.0 — Customer Notifications (Email + WhatsApp) (current)
+1. **`WhatsAppService`** — Meta Cloud API, `ws://phone_id/messages`, silent fallback when not configured.
+2. **Lifecycle hooks** — Quote SENT, Order CONFIRMED/IN_PRODUCTION/READY, all-jobs-completed all fire email + WhatsApp.
+3. **4 new email templates** — quote sent, order confirmed, order ready, all built off existing `EmailNotificationService` base.
+4. **Notification toggles** — Per-event checkboxes in Settings, default all on. Services read the toggle before firing.
+5. **Test endpoints** — `POST /communications/test-email` + `POST /communications/test-whatsapp` with inline test buttons in settings UI.
+6. **Creality IP hot-reload** — `POST /moonraker/reconnect/:id` endpoint + auto-called from printer detail save.
+7. **Settings native select sweep** — Locale and Date Format fields use `Select` component.
+
+### v2.10.8 — Creality LAN + ACCOUNTING Role + Currency Fix
 1. **Creality LAN WS bridge** — `CrealityWsService` with persistent WS, heartbeat, exponential backoff reconnect. Both printer types broadcast through the same scheduler. Control endpoint routes by `connectionType`.
 2. **`CREALITY_WS` enum value** — Printer form shows "Printer IP Address" field for this type. Live Status card works for both Moonraker and Creality.
 3. **`ACCOUNTING` role** — New schema role. Sidebar shows Quotes + Customers + Accounting only (no ops pages).
@@ -166,12 +177,12 @@ Dashboard, quotes, orders, inventory, printers (Moonraker), costing engine, quic
 
 ---
 
-## Known Gaps / Deferred (as of v2.10.8)
+## Known Gaps / Deferred (as of v2.11.0)
 
 | Area | Gap | Notes |
 |------|-----|-------|
-| UI audit | `Select` component still bypassed on some pages | `settings` page and customer quick-quote page still use native `<select>`. `orders/new` and `quotes/new` are resolved. |
-| Creality WS | `reconnectPrinter()` not called after IP edit | Saving a new IP in the printer form doesn't hot-reload the WS connection — requires API restart. Fix: call `POST /moonraker/reconnect/:id` (not yet wired) after save. |
+| WhatsApp templates | Free-form messages only work within 24h customer service window | For proactive outbound notifications, create Message Templates in Meta Business Manager and switch the payload `type` to `template` in `WhatsAppService.sendMessage()`. |
+| UI audit | Customer quick-quote page may still have native `<select>` | Check `apps/app/src/app/(customer)/dashboard/quick-quote/page.tsx` — settings page is resolved. |
 | Redesign trial | Not merged | `worktree-agent-add3e32e` branch has full Warm Precision theme. Merge when approved: `git merge worktree-agent-add3e32e`. |
 
 ---

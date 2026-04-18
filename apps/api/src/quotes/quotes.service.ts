@@ -6,6 +6,9 @@ import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagina
 import { generateNumber } from '../common/utils/number-generator';
 import { OrdersService } from '../orders/orders.service';
 import { EventsGateway } from '../websocket/events.gateway';
+import { EmailNotificationService } from '../communications/email-notification.service';
+import { WhatsAppService } from '../communications/whatsapp.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class QuotesService {
@@ -13,6 +16,9 @@ export class QuotesService {
     private prisma: PrismaService,
     private ordersService: OrdersService,
     @Optional() private eventsGateway?: EventsGateway,
+    @Optional() private emailNotifications?: EmailNotificationService,
+    @Optional() private whatsapp?: WhatsAppService,
+    @Optional() private settingsService?: SettingsService,
   ) {}
 
   async createFromAnalysis(dto: SaveQuoteFromAnalysisDto, createdById?: string) {
@@ -276,10 +282,10 @@ export class QuotesService {
   }
 
   async update(id: string, dto: UpdateQuoteDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
     const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
-    
-    return this.prisma.quote.update({
+
+    const updated = await this.prisma.quote.update({
       where: { id },
       data: {
         status: (dto.status && validStatuses.includes(dto.status)) ? (dto.status as any) : undefined,
@@ -288,6 +294,37 @@ export class QuotesService {
       },
       include: { customer: true, items: true },
     });
+
+    // Fire customer notification when quote is marked SENT
+    if (dto.status === 'SENT' && existing.status !== 'SENT') {
+      const notifyEnabled = await this.settingsService?.get('notify_quote_sent', 'true') ?? 'true';
+      if (notifyEnabled !== 'false') {
+        const customer = updated.customer as any;
+        const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
+        const currency = await this.settingsService?.get('currency', 'OMR') ?? 'OMR';
+        const decimals = parseInt(await this.settingsService?.get('currency_decimals', '3') ?? '3');
+        const formattedTotal = updated.total.toLocaleString('en-GB', {
+          style: 'currency', currency, minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+        });
+
+        if (customer?.email) {
+          this.emailNotifications?.notifyCustomerQuoteSent(customer.email, {
+            quoteNumber: updated.quoteNumber,
+            total: updated.total,
+          }).catch(() => {});
+        }
+        if (customer?.phone) {
+          this.whatsapp?.sendQuoteSent(customer.phone, {
+            customerName: customer.name,
+            quoteNumber: updated.quoteNumber,
+            total: formattedTotal,
+            companyName,
+          }).catch(() => {});
+        }
+      }
+    }
+
+    return updated;
   }
 
   async convertToOrder(id: string, options?: { autoCreateJobs?: boolean }) {

@@ -186,6 +186,10 @@ export default function PrinterDetailPage() {
               });
               load();
               setFormKey(k => k + 1);
+              const savedConnectionType = form.get('connectionType') as string;
+              if (savedConnectionType === 'CREALITY_WS') {
+                await api.post(`/moonraker/reconnect/${id}`).catch(() => {});
+              }
               toast('success', 'Printer details saved');
             } catch (err: any) {
               toast('error', err.message);

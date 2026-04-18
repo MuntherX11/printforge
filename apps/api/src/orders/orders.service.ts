@@ -1,12 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
+import { EmailNotificationService } from '../communications/email-notification.service';
+import { WhatsAppService } from '../communications/whatsapp.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private emailNotifications?: EmailNotificationService,
+    @Optional() private whatsapp?: WhatsAppService,
+    @Optional() private settingsService?: SettingsService,
+  ) {}
 
   async create(dto: CreateOrderDto) {
     const orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
@@ -228,10 +236,10 @@ export class OrdersService {
   }
 
   async update(id: string, dto: UpdateOrderDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
     const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_PICKUP', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
-    
-    return this.prisma.order.update({
+
+    const updated = await this.prisma.order.update({
       where: { id },
       data: {
         status: (dto.status && validStatuses.includes(dto.status)) ? (dto.status as any) : undefined,
@@ -240,5 +248,35 @@ export class OrdersService {
       },
       include: { customer: true, items: true },
     });
+
+    // Fire customer notifications on status transitions
+    const prevStatus = (existing as any).status;
+    const newStatus = updated.status;
+    if (dto.status && newStatus !== prevStatus) {
+      const customer = updated.customer as any;
+      const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
+
+      if (newStatus === 'CONFIRMED') {
+        const enabled = await this.settingsService?.get('notify_order_confirmed', 'true') ?? 'true';
+        if (enabled !== 'false') {
+          if (customer?.email) this.emailNotifications?.notifyCustomerOrderConfirmed(customer.email, { orderNumber: updated.orderNumber }).catch(() => {});
+          if (customer?.phone) this.whatsapp?.sendOrderConfirmed(customer.phone, { customerName: customer.name, orderNumber: updated.orderNumber, companyName }).catch(() => {});
+        }
+      } else if (newStatus === 'IN_PRODUCTION') {
+        const enabled = await this.settingsService?.get('notify_order_production', 'true') ?? 'true';
+        if (enabled !== 'false') {
+          if (customer?.email) this.emailNotifications?.notifyCustomerOrderProduction(customer.email, { orderNumber: updated.orderNumber }).catch(() => {});
+          if (customer?.phone) this.whatsapp?.sendOrderInProduction(customer.phone, { customerName: customer.name, orderNumber: updated.orderNumber, companyName }).catch(() => {});
+        }
+      } else if (newStatus === 'READY') {
+        const enabled = await this.settingsService?.get('notify_order_ready', 'true') ?? 'true';
+        if (enabled !== 'false') {
+          if (customer?.email) this.emailNotifications?.notifyCustomerOrderReady(customer.email, { orderNumber: updated.orderNumber }).catch(() => {});
+          if (customer?.phone) this.whatsapp?.sendOrderReady(customer.phone, { customerName: customer.name, orderNumber: updated.orderNumber, companyName }).catch(() => {});
+        }
+      }
+    }
+
+    return updated;
   }
 }

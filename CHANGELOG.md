@@ -2,7 +2,30 @@
 
 All notable changes to PrintForge are documented here.
 
-## [v2.10.8] — 2026-04-18 (current)
+## [v2.11.0] — 2026-04-18 (current)
+
+### Added
+- **`WhatsAppService`** — Meta WhatsApp Business Cloud API integration. Sends free-form text messages to customer phone numbers via `https://graph.facebook.com/v18.0/{phoneId}/messages`. Configured via `whatsapp_token` + `whatsapp_phone_id` + `whatsapp_enabled` system settings. Falls back silently when not configured. Methods: `sendQuoteSent`, `sendOrderConfirmed`, `sendOrderInProduction`, `sendOrderReady`, `sendOrderCompleted`.
+- **Email + WhatsApp lifecycle hooks** — Notifications fire automatically on status transitions:
+  - Quote → `SENT`: emails customer quote summary + total; WhatsApp quote notification
+  - Order → `CONFIRMED`: email + WhatsApp confirmation
+  - Order → `IN_PRODUCTION`: email + WhatsApp production start notice
+  - Order → `READY`: email + WhatsApp ready-for-pickup notice
+  - All production jobs complete: email + WhatsApp order completion notice
+- **4 new email templates** — `notifyCustomerQuoteSent`, `notifyCustomerOrderConfirmed`, `notifyCustomerOrderReady` added to `EmailNotificationService`. Quote template includes formatted total with currency and decimals from system settings.
+- **Notification toggles** — Settings page "Notification Events" card with per-event enable/disable checkboxes (`notify_quote_sent`, `notify_order_confirmed`, `notify_order_production`, `notify_order_ready`, `notify_order_completed`). Default on; each hook reads the toggle before firing.
+- **`POST /communications/test-email`** — Send a test email to any address to verify SMTP config. Admin only.
+- **`POST /communications/test-whatsapp`** — Send a test WhatsApp message to verify Cloud API config. Admin only.
+- **Settings UI — Communications overhaul** — WhatsApp card now has Phone Number ID + Access Token fields + enabled toggle + test button. Email card adds Admin Email field + test button with inline address input. Both test buttons are outside the Save form so settings don't need to be saved first.
+- **Creality IP hot-reload** — `POST /moonraker/reconnect/:printerId` endpoint. Printer Details save now calls it automatically when `connectionType === CREALITY_WS`. No API restart needed after changing printer IP.
+- **Native `<select>` sweep (Settings)** — Locale and Date Format selects replaced with the `Select` component. Dark mode consistent.
+
+### Fixed
+- `OrderStatus.READY_FOR_PICKUP` typo — enum value is `READY` (matches schema).
+
+---
+
+## [v2.10.8] — 2026-04-18
 
 ### Added
 - **`CrealityWsService`** — Persistent `ws://IP:9999` WebSocket client per Creality printer. Push-based state (no polling), 10s heartbeat, exponential backoff reconnect (2s base → 120s cap, 1.8× multiplier). Maps `deviceState`, `printProgress`, temps, and `boxsInfo` to internal `PrinterStatus` shape. Auto-completes matching production jobs on print finish, deducts spool weight, fires notifications on error and completion.

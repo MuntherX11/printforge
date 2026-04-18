@@ -6,9 +6,11 @@ import { JobPlanningService } from './job-planning.service';
 import { JobSchedulingService } from './job-scheduling.service';
 import { CostingModule } from '../costing/costing.module';
 import { WebSocketModule } from '../websocket/websocket.module';
+import { CommunicationsModule } from '../communications/communications.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [CostingModule, WebSocketModule],
+  imports: [CostingModule, WebSocketModule, CommunicationsModule, SettingsModule],
   controllers: [JobsController],
   providers: [JobsService, JobMaterialsService, JobPlanningService, JobSchedulingService],
   exports: [JobsService, JobMaterialsService, JobPlanningService, JobSchedulingService],

@@ -6,6 +6,9 @@ import { JobPlanningService } from './job-planning.service';
 import { JobSchedulingService } from './job-scheduling.service';
 import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import { EmailNotificationService } from '../communications/email-notification.service';
+import { WhatsAppService } from '../communications/whatsapp.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class JobsService {
@@ -15,6 +18,9 @@ export class JobsService {
     @Optional() private gateway: EventsGateway,
     private jobPlanning: JobPlanningService,
     private jobScheduling: JobSchedulingService,
+    @Optional() private emailNotifications?: EmailNotificationService,
+    @Optional() private whatsapp?: WhatsAppService,
+    @Optional() private settingsService?: SettingsService,
   ) {}
 
   async create(dto: CreateProductionJobDto) {
@@ -179,7 +185,45 @@ export class JobsService {
       title: 'Job Completed',
       message: `"${job.name}" finished successfully.`,
     });
+
+    // If this job belongs to an order, check if all order jobs are now done
+    // and notify the customer
+    if (job.orderId) {
+      await this.notifyOrderCompletedIfAllDone(job.orderId).catch(() => {});
+    }
+
     return completed;
+  }
+
+  private async notifyOrderCompletedIfAllDone(orderId: string) {
+    const allJobs = await this.prisma.productionJob.findMany({
+      where: { orderId },
+      select: { status: true },
+    });
+
+    const allDone = allJobs.length > 0 && allJobs.every(j =>
+      ['COMPLETED', 'FAILED', 'CANCELLED'].includes(j.status),
+    );
+    if (!allDone) return;
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: true },
+    });
+    if (!order) return;
+
+    const notifyEnabled = await this.settingsService?.get('notify_order_completed', 'true') ?? 'true';
+    if (notifyEnabled === 'false') return;
+
+    const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
+    const customer = order.customer as any;
+
+    if (customer?.email) {
+      this.emailNotifications?.notifyCustomerOrderCompleted(customer.email, { orderNumber: order.orderNumber }).catch(() => {});
+    }
+    if (customer?.phone) {
+      this.whatsapp?.sendOrderCompleted(customer.phone, { customerName: customer.name, orderNumber: order.orderNumber, companyName }).catch(() => {});
+    }
   }
 
   async failJob(id: string, dto: FailJobDto) {

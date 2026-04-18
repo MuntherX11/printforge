@@ -103,6 +103,46 @@ export class EmailNotificationService {
     `);
   }
 
+  async notifyCustomerQuoteSent(to: string, quote: { quoteNumber: string; total: number }) {
+    const companyName = this.escapeHtml(await this.settingsService.get('company_name', 'PrintForge'));
+    const currency = await this.settingsService.get('currency', 'OMR');
+    const decimals = parseInt(await this.settingsService.get('currency_decimals', '3'));
+    const formattedTotal = quote.total.toLocaleString('en-GB', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+
+    await this.trySend(to, `Quote ${quote.quoteNumber} from ${companyName}`, `
+      <h2 style="color: #1f2937; font-size: 18px;">Your Quote is Ready</h2>
+      <p style="color: #4b5563;">${companyName} has prepared a quote for you:</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+        <tr><td style="padding: 8px; color: #6b7280; border-bottom: 1px solid #e5e7eb;">Quote Number</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: 600;">${this.escapeHtml(quote.quoteNumber)}</td></tr>
+        <tr><td style="padding: 8px; color: #6b7280;">Total</td><td style="padding: 8px; font-weight: 600; color: #1a56db;">${this.escapeHtml(formattedTotal)}</td></tr>
+      </table>
+      <p style="color: #4b5563;">Please log in to your customer portal to review, accept, or request changes.</p>
+      <p style="color: #9ca3af; font-size: 12px; margin-top: 16px;">This quote may have an expiry date. Please review it promptly.</p>
+    `);
+  }
+
+  async notifyCustomerOrderConfirmed(to: string, order: { orderNumber: string }) {
+    await this.trySend(to, `Order ${order.orderNumber} — Confirmed`, `
+      <h2 style="color: #1f2937; font-size: 18px;">Order Confirmed</h2>
+      <p style="color: #4b5563;">Your order <strong>${this.escapeHtml(order.orderNumber)}</strong> has been confirmed.</p>
+      <p style="color: #4b5563;">We'll notify you when it moves into production.</p>
+    `);
+  }
+
+  async notifyCustomerOrderReady(to: string, order: { orderNumber: string }) {
+    const companyName = this.escapeHtml(await this.settingsService.get('company_name', 'PrintForge'));
+    await this.trySend(to, `Order ${order.orderNumber} — Ready for Pickup`, `
+      <h2 style="color: #1f2937; font-size: 18px;">Your Order is Ready!</h2>
+      <p style="color: #4b5563;">Your order <strong>${this.escapeHtml(order.orderNumber)}</strong> is ready.</p>
+      <p style="color: #4b5563;">Please contact ${companyName} to arrange pickup or delivery.</p>
+    `);
+  }
+
   async notifyCustomerApproved(to: string, name: string) {
     await this.trySend(to, 'Account Approved — Welcome!', `
       <h2 style="color: #1f2937; font-size: 18px;">Welcome, ${this.escapeHtml(name)}!</h2>
