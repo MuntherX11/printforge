@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { SidebarProvider } from '@/components/sidebar-provider';
+import { LocaleProvider } from '@/lib/locale-context';
 
 // Public pages that render inside the dashboard route group but without chrome
 const publicPathPatterns = [
@@ -30,22 +31,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (isPublic) {
     return (
       <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
-        {children}
+        <LocaleProvider>{children}</LocaleProvider>
       </main>
     );
   }
 
   return (
-    <SidebarProvider>
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <Topbar />
-          <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
-            {children}
-          </main>
+    <LocaleProvider>
+      <SidebarProvider>
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <Topbar />
+            <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
-    </SidebarProvider>
+      </SidebarProvider>
+    </LocaleProvider>
   );
 }

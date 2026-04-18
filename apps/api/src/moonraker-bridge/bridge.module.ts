@@ -4,6 +4,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { MoonrakerService } from './moonraker.service';
 import { MoonrakerScheduler } from './moonraker.scheduler';
 import { MoonrakerController } from './moonraker.controller';
+import { CrealityWsService } from './creality-ws.service';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { MoonrakerController } from './moonraker.controller';
     NotificationsModule,
   ],
   controllers: [MoonrakerController],
-  providers: [MoonrakerService, MoonrakerScheduler],
-  exports: [MoonrakerService, MoonrakerScheduler],
+  providers: [MoonrakerService, CrealityWsService, MoonrakerScheduler],
+  exports: [MoonrakerService, CrealityWsService, MoonrakerScheduler],
 })
 export class BridgeModule {}

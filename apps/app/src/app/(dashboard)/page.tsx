@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useWebSocket, type PrinterStatusEvent } from '@/lib/use-websocket';
 import type { DashboardKPIs } from '@printforge/types';
 import { ShoppingCart, Hammer, Printer, TrendingUp, AlertTriangle, Thermometer, Pause, Play, XCircle } from 'lucide-react';
@@ -115,6 +115,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [printerNames, setPrinterNames] = useState<Record<string, string>>({});
   const { printerStatuses } = useWebSocket();
+  const formatCurrency = useFormatCurrency();
 
   // Fetch printer names once for the active print cards
   useEffect(() => {

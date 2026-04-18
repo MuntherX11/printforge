@@ -114,6 +114,7 @@ export default function PrinterDetailPage() {
   if (!printer) return <div className="text-center py-12 text-gray-500">Printer not found</div>;
 
   const isMoonraker = printer.connectionType === 'MOONRAKER' && printer.moonrakerUrl;
+  const hasLiveStatus = ['MOONRAKER', 'CREALITY_WS'].includes(printer.connectionType) && printer.moonrakerUrl;
   const progress = liveStatus?.progress ? Math.round(liveStatus.progress * 100) : 0;
   const isMaintenanceDue = printer.nextMaintenanceDue && new Date(printer.nextMaintenanceDue) <= new Date();
   const activeMaintenance = maintenanceLogs.find((l: any) => !l.completedDate);
@@ -200,11 +201,21 @@ export default function PrinterDetailPage() {
               <Select name="connectionType" label="Connection Type" defaultValue={printer.connectionType} options={[
                 { value: 'MANUAL', label: 'Manual' },
                 { value: 'MOONRAKER', label: 'Moonraker (Klipper)' },
+                { value: 'CREALITY_WS', label: 'Creality LAN (WebSocket)' },
                 { value: 'CREALITY_CLOUD', label: 'Creality Cloud' },
               ]} />
               <div>
-                <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" defaultValue={printer.moonrakerUrl || ''} />
-                <p className="mt-1 text-xs text-gray-500">Local IPs, .local hostnames, or Tailscale IPs (100.x.x.x) for remote printers.</p>
+                {printer.connectionType === 'CREALITY_WS' ? (
+                  <>
+                    <Input name="moonrakerUrl" label="Printer IP Address" placeholder="192.168.1.55" defaultValue={printer.moonrakerUrl || ''} />
+                    <p className="mt-1 text-xs text-gray-500">Local IP of the printer. Connects via WebSocket on port 9999.</p>
+                  </>
+                ) : (
+                  <>
+                    <Input name="moonrakerUrl" label="Moonraker URL" placeholder="http://192.168.1.50:7125" defaultValue={printer.moonrakerUrl || ''} />
+                    <p className="mt-1 text-xs text-gray-500">Local IPs, .local hostnames, or Tailscale IPs (100.x.x.x) for remote printers.</p>
+                  </>
+                )}
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -217,8 +228,8 @@ export default function PrinterDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Live Moonraker Status */}
-      {isMoonraker && liveStatus && (
+      {/* Live Status (Moonraker + Creality WS) */}
+      {hasLiveStatus && liveStatus && (
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2"><Thermometer className="h-5 w-5" /> Live Status</CardTitle></CardHeader>
           <CardContent className="space-y-4">

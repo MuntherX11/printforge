@@ -33,14 +33,14 @@ const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Quick Quote', href: '/quick-quote', icon: Zap, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Orders', href: '/orders', icon: ShoppingCart },
-  { name: 'Quotes', href: '/quotes', icon: FileText, roles: ['ADMIN', 'VIEWER'] },
+  { name: 'Quotes', href: '/quotes', icon: FileText, roles: ['ADMIN', 'ACCOUNTING', 'VIEWER'] },
   { name: 'Production', href: '/production', icon: Hammer, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Design Center', href: '/design', icon: Palette, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Filaments', href: '/inventory', icon: Package, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Products', href: '/products', icon: Box, roles: ['ADMIN', 'OPERATOR'] },
   { name: 'Printers', href: '/printers', icon: Printer, roles: ['ADMIN', 'OPERATOR'] },
-  { name: 'Customers', href: '/customers', icon: Users, roles: ['ADMIN', 'VIEWER'] },
-  { name: 'Accounting', href: '/accounting', icon: DollarSign, roles: ['ADMIN', 'VIEWER'] },
+  { name: 'Customers', href: '/customers', icon: Users, roles: ['ADMIN', 'ACCOUNTING', 'VIEWER'] },
+  { name: 'Accounting', href: '/accounting', icon: DollarSign, roles: ['ADMIN', 'ACCOUNTING', 'VIEWER'] },
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['ADMIN'] },
 ];
 

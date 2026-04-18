@@ -1,5 +1,6 @@
 import { Controller, Post, Param, Body, Get, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
 import { MoonrakerService } from './moonraker.service';
+import { CrealityWsService } from './creality-ws.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -8,6 +9,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class MoonrakerController {
   constructor(
     private moonraker: MoonrakerService,
+    private crealityWs: CrealityWsService,
     private prisma: PrismaService,
   ) {}
 
@@ -55,6 +57,7 @@ export class MoonrakerController {
 
   /**
    * Control a print: pause, resume, or cancel.
+   * Routes to the correct bridge based on connectionType.
    */
   @Post('control/:printerId/:action')
   async controlPrint(
@@ -66,8 +69,14 @@ export class MoonrakerController {
     }
 
     const printer = await this.prisma.printer.findUnique({ where: { id: printerId } });
-    if (!printer?.moonrakerUrl) throw new BadRequestException('No Moonraker URL');
+    if (!printer) throw new NotFoundException('Printer not found');
 
+    if (printer.connectionType === 'CREALITY_WS') {
+      const ok = await this.crealityWs.control(printerId, action as any);
+      return { success: ok };
+    }
+
+    if (!printer.moonrakerUrl) throw new BadRequestException('No Moonraker URL');
     const ok = await this.moonraker.controlPrint(printer.moonrakerUrl, action as any);
     return { success: ok };
   }
