@@ -183,4 +183,60 @@ describe('CostingService', () => {
       expect(purge).toBeCloseTo(base, 1);
     });
   });
+
+  describe('estimatePlates', () => {
+    it('should calculate cost for multiple plates and handle multicolor transition average', async () => {
+      prisma.material.findUnique.mockResolvedValue({ id: 'mat1', type: 'PLA', costPerGram: 0.025 });
+      prisma.material.findMany.mockResolvedValue([
+        { type: 'PLA', costPerGram: 0.025 },
+        { type: 'PETG', costPerGram: 0.030 },
+      ]);
+      prisma.printer.findUnique.mockResolvedValue({ id: 'printer1', hourlyRate: 0.5, wattage: 200 });
+
+      const dto = {
+        defaultMaterialId: 'mat1',
+        printerId: 'printer1',
+        plates: [
+          {
+            plateIndex: 1,
+            name: 'Plate 1',
+            printSeconds: 3600,
+            weightGrams: 100,
+            toolChanges: 0,
+            tools: [{ filamentGrams: 100, materialType: 'PLA' }],
+          },
+          {
+            plateIndex: 2,
+            name: 'Plate 2',
+            printSeconds: 3600,
+            weightGrams: 50,
+            toolChanges: 10,
+            // 2 tools: Black (#000000) and White (#FFFFFF)
+            tools: [
+              { filamentGrams: 25, materialType: 'PLA', colorHex: '#000000' },
+              { filamentGrams: 25, materialType: 'PLA', colorHex: '#FFFFFF' },
+            ],
+          },
+        ],
+      };
+
+      const result = await service.estimatePlates(dto);
+
+      expect(result.plates).toHaveLength(2);
+      // Plate 1: 100g PLA (0.025) + 1hr machine (0.5) + electricity (0.005) + overhead
+      // (2.5 + 0.5 + 0.005) * 1.15 = 3.45575 → 3.456
+      expect(result.plates[0].breakdown.totalCost).toBeCloseTo(3.456, 2);
+
+      // Plate 2: 50g PLA (0.025) + 1hr machine (0.5) + electricity (0.005) + waste
+      // Transition Black→White = purge > 5g, White→Black = purge < 5g.
+      expect(result.plates[1].breakdown.wasteCost).toBeGreaterThan(1);
+      expect(result.plates[1].isMultiColor).toBe(true);
+
+      // Check cache: findUnique for overhead_percent should only be called once despite 2 plates
+      const overheadCalls = prisma.systemSetting.findUnique.mock.calls.filter(
+        (c: any) => c[0].where.key === 'overhead_percent'
+      );
+      expect(overheadCalls.length).toBe(1);
+    });
+  });
 });

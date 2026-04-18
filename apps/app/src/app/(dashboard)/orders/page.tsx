@@ -20,6 +20,8 @@ export default function OrdersPage() {
   const [filter, setFilter] = useState('ALL');
 
   useEffect(() => {
+    setLoading(true);
+    setData(null);
     const params = filter !== 'ALL' ? `?status=${filter}` : '';
     api.get(`/orders${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
   }, [filter]);
@@ -30,7 +32,7 @@ export default function OrdersPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Orders</h1>
         <Link href="/orders/new"><Button><Plus className="h-4 w-4 mr-2" /> New Order</Button></Link>
       </div>
 
@@ -38,7 +40,7 @@ export default function OrdersPage() {
         {statusFilters.map(s => (
           <button
             key={s}
-            onClick={() => { setFilter(s); setLoading(true); }}
+            onClick={() => setFilter(s)}
             className={`px-3 py-1 text-xs rounded-full border transition-colors ${
               filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
             }`}

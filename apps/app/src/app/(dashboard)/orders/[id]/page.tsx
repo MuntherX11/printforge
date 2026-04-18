@@ -140,7 +140,7 @@ export default function OrderDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{order.orderNumber}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{order.orderNumber}</h1>
           <p className="text-sm text-gray-500">
             <Link href={`/customers/${order.customer?.id}`} className="text-brand-600 hover:underline">
               {order.customer?.name}

@@ -13,11 +13,26 @@ import {
 
 @Injectable()
 export class CostingService {
+  private settingsCache = new Map<string, { value: string; expires: number }>();
+  private readonly CACHE_TTL = 30000; // 30s cache for performance
+
   constructor(private prisma: PrismaService) {}
 
   private async getSetting(key: string, defaultValue: string): Promise<string> {
+    const cached = this.settingsCache.get(key);
+    if (cached && cached.expires > Date.now()) {
+      return cached.value;
+    }
+
     const setting = await this.prisma.systemSetting.findUnique({ where: { key } });
-    return setting?.value ?? defaultValue;
+    const value = setting?.value ?? defaultValue;
+    
+    this.settingsCache.set(key, { 
+      value, 
+      expires: Date.now() + this.CACHE_TTL 
+    });
+    
+    return value;
   }
 
   /**
@@ -325,10 +340,33 @@ export class CostingService {
             : [{ gramsUsed: plate.weightGrams, costPerGram: 0 }];
         }
 
+        // Estimate purge waste grams using luminance-aware logic if multicolor.
+        // Since we don't know the exact sequence of tool changes in a 3MF plate info,
+        // we use the average transition purge between all distinct pairs of tools.
+        let purgeWasteGrams = 0;
+        if (plate.toolChanges > 0 && isMultiColor) {
+          const basePurge = parseFloat(await this.getSetting('purge_waste_grams', '5'));
+          let totalPurgeRate = 0;
+          let pairCount = 0;
+          for (let i = 0; i < plate.tools.length; i++) {
+            for (let j = 0; j < plate.tools.length; j++) {
+              if (i === j) continue;
+              totalPurgeRate += this.calculateTransitionPurge(
+                plate.tools[i].colorHex,
+                plate.tools[j].colorHex,
+                basePurge,
+              );
+              pairCount++;
+            }
+          }
+          const avgPurge = pairCount > 0 ? totalPurgeRate / pairCount : basePurge;
+          purgeWasteGrams = plate.toolChanges * avgPurge;
+        }
+
         const breakdown = await this.calculateJobCost({
           printDuration: plate.printSeconds,
           colorChanges: plate.toolChanges,
-          purgeWasteGrams: 0,
+          purgeWasteGrams,
           printer: printer
             ? { hourlyRate: printer.hourlyRate, wattage: printer.wattage }
             : null,

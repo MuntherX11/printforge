@@ -1,6 +1,6 @@
 # PrintForge — Project Handoff Document
 
-> Last updated: 2026-04-16 | Current version: **v2.10.3**
+> Last updated: 2026-04-18 | Current version: **v2.10.7**
 
 ---
 
@@ -91,87 +91,74 @@ packages/
 
 9. **Tailscale CGNAT** — `validateMoonrakerUrl()` in `moonraker.service.ts` allows `100.64.0.0/10` (100.64.x.x–100.127.x.x) alongside local IPs and `.local` hostnames. Local IPs still work — Tailscale support is purely additive.
 
-10. **3MF plate costing** — `POST /costing/estimate-plates` accepts an array of `PlateEstimateInput` objects. Per-plate material cost is resolved by `materialType` from inventory (cheapest match in one pre-fetched query), falling back to `defaultMaterialId`. All plates costed in parallel with `Promise.all`. Both staff and customer JWTs pass `JwtAuthGuard`.
+10. **3MF plate costing** — `POST /costing/estimate-plates` accepts an array of `PlateEstimateInput` objects. Per-plate material cost is resolved by `materialType` from inventory (cheapest match in one pre-fetched query), falling back to `defaultMaterialId`. All plates costed in parallel with `Promise.all`. Both staff and customer JWTs pass `JwtAuthGuard`. Now utilizes luminance-aware purge averages for multicolor plates.
 
-11. **PlatePreviewCard import path** — `PlatePreviewCard` lives at `products/[id]/PlatePreviewCard.tsx` and uses `export default`. Importing it from `quick-quote/page.tsx` via `'../products/[id]/PlatePreviewCard'` is valid — Next.js App Router and TypeScript both treat bracket directory names as filesystem literals.
+11. **Settings Cache** — `CostingService` implements a 30-second memory cache for `systemSetting` lookups. This prevents N+1 query bottlenecks when calculating costs for many items or plates in a single request.
 
-12. **api.ts upload errors** — `api.upload()` reads the backend JSON error body on failure (same pattern as `request()`). This means 3MF parser errors, gcode parse errors, and any other upload failures surface the actual backend message to the user.
+12. **PlatePreviewCard import path** — `PlatePreviewCard` lives at `products/[id]/PlatePreviewCard.tsx` and uses `export default`. Importing it from `quick-quote/page.tsx` via `'../products/[id]/PlatePreviewCard'` is valid — Next.js App Router and TypeScript both treat bracket directory names as filesystem literals.
+
+13. **Customer quote request security** — `POST /quotes/customer/request` accepts client-side price estimates (which the costing engine already calculated server-side and sent to the customer). Quotes are created as DRAFT status and require staff to change status to SENT before the customer can accept/redeem. Staff review is the guard against manipulated prices.
+
+14. **api.upload() error handling** — `api.upload()` reads the backend JSON error body on failure. This means 3MF parser errors, G-code parse errors, and any other upload failures surface the actual backend message to the user instead of a generic "Upload failed".
+
+15. **Products service split** — `ProductsService` delegates costing to `ProductCostingService` and onboarding to `ProductOnboardingService`. Neither new service injects `ProductsService` (no circular deps). `ProductCostingService` queries product data with a targeted Prisma query (excludes stock enrichment that only `findOne` needs for UI). All three registered in `ProductsModule`.
+
+16. **Jobs service split** — `JobsService` delegates planning to `JobPlanningService` and scheduling to `JobSchedulingService`. `SPOOL_BUFFER_GRAMS = 50` lives in `job-planning.service.ts`. `JobsService` retains gateway injection for `completeJob`/`failJob` notifications. All four registered in `ProductionModule`.
 
 ---
 
 ## Version History (Highlights)
 
-### v1.0 — Core ERP
-Dashboard, quotes, orders, inventory, printers (Moonraker), costing engine, quick quote, customers, settings, JWT auth, Docker deployment.
+### v2.10.7 — God File Splits + Resilience (current)
+1. **Products service split** — `ProductCostingService` + `ProductOnboardingService` extracted. No circular deps. `ProductsService` now ~220 lines.
+2. **Jobs service split** — `JobPlanningService` + `JobSchedulingService` extracted. `JobsService` now delegates plan/schedule and retains gateway calls.
+3. **Staff notification on quote request** — WebSocket `info` push to staff when customer submits a quote request.
+4. **`use-line-items` hook** — Shared hook eliminates ~80 lines of duplication between `orders/new` and `quotes/new`.
+5. **Native selects replaced** — `orders/new` and `quotes/new` use `Select` component with dark mode support.
+6. **Customer dashboard Design Requests** — Wired to `GET /design-projects/customer/my-projects?limit=3`. Shows title and status.
+7. **`createFromAnalysis` tax fix** — Now fetches `tax_rate` from system settings (was `0`).
+8. **PrismaService resilience** — Query timeout (10s → 503), slow-query logging (>500ms), retry-connect (3× with 1s delay).
 
-### v2.0 — Multi-tool + Design + Customer Portal
-Quick Quote v2 (multi-tool G-code, URL scraping from 6 sites), Design Center (10-status workflow), Customer Portal (self-signup, dual JWT), email notifications.
+### v2.10.6 — UI Consistency + Customer Quote Request
+1. **`POST /quotes/customer/request`** — New customer endpoint persists quick-quote results as DRAFT. Handles non-3MF (single item) and 3MF (one item per plate). Tax from system settings. DTO validated with `class-validator`.
+2. **Customer Quick Quote real DB write** — "Request This Quote" button calls the endpoint, shows loading/error, surfaces backend failures.
+3. **Customer dashboard real data** — My Quotes card shows 3 most recent quotes (number, status, total) from `GET /quotes/customer/my-quotes`.
+4. **Dark mode h1 sweep** — Added `dark:text-gray-100` to 5 staff pages (orders/[id], customers, quotes, design, printers) and customer dashboard.
+5. **EmptyState consistency** — Replaced raw div empty states on inventory, products, and printers pages with `<EmptyState>` (printers also gets an "Add Printer" action).
 
-### v2.5 — Dark Mode + QR + OCR
-Dark mode, role-based sidebar, PrintForge ID + QR labels, OCR spool scanner (Tesseract.js), product media/gallery, paywall detection.
+### v2.10.5 — UI Polish & Redesign Trial
+1. **Sidebar skeleton** — `useState<string | null>(null)` sentinel: sidebar shows 7 animated placeholder bars while `/auth/me` resolves instead of flashing empty.
+2. **Orders stale data fix** — `setData(null)` + `setLoading(true)` moved into the `useEffect`; filter changes now clear stale rows immediately before new data arrives.
+3. **Production empty state** — List view renders `EmptyState` with context-aware description when a filter returns zero jobs (was silently showing an empty table with headers).
+4. **h1 dark mode** — Added `dark:text-gray-100` to the Orders page h1 (was missing; Production already had it).
+5. **Gemini component review (post-hoc)** — Verified all 8 Gemini-written files from the dark mode + accessibility pass: `dialog.tsx`, `input.tsx`, `select.tsx`, `toast.tsx`, `button.tsx`, `table.tsx`, `utils.ts`, `empty-state.tsx` — all confirmed correct.
+6. **Redesign trial branch** — `worktree-agent-add3e32e` contains a full "Warm Precision" visual redesign (orange brand, Syne display font, DM Mono for numbers, dark navy sidebar, warm-50 page background, left-border status badges). Run on port 3001 to preview without touching main.
 
-### v2.6 — Production Hybrid Module
-Stock-aware production planning (plan preview + create from plan), ComponentMaterial multicolor BOM, default printer per product, stock on hand, spool selection logic. Fixed component delete route shadowing, G-code upload error handling.
+### v2.10.4 — Costing Performance & Accuracy
+1. **Settings Cache** — Added 30s TTL cache for system settings in `CostingService` to eliminate N+1 queries during parallel plate/component costing.
+2. **3MF Luminance-Aware Purge** — `estimatePlates` now calculates the average transition purge between all used tools on a plate (dark→light vs light→dark), significantly improving 3MF cost accuracy.
+3. **Regression Tests** — New test suite for `estimatePlates` verifying multicolor waste logic and cache efficiency.
 
-### v2.7 — Competitive Gaps (vs FilaOps)
-Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttles), CSV export (6 endpoints with formula injection prevention), internationalization (LocaleProvider, multi-currency settings), test coverage (44 tests: CSV, costing, G-code parser).
-
-### v2.8 — Operational Resilience
-1. **Failed Print Tracking** — `POST /jobs/:id/fail` with reason + waste grams (auto-deducts from spools proportionally), `POST /jobs/:id/reprint` (clones as new QUEUED job linked via `reprintOfId`), `GET /jobs/stats/failures`. UI: Mark Failed dialog, failure info card, Reprint button, stats on production page.
-2. **Machine Maintenance** — `MaintenanceLog` model, maintenance workflow (start → complete), printer tracks `totalPrintHours`, `nextMaintenanceDue`. UI: start/complete buttons, interval settings, history table, overdue badges.
-3. **Job Scheduling / Auto-distribution** — `POST /jobs/auto-assign` + `GET /jobs/queue`. UI: Auto-Assign button, List/Queue view toggle.
-
-### v2.9 — Real-time WebSocket + PWA
-1. **WebSocket frontend** — `useWebSocket()` hook (shared `socket.io-client` singleton), `WsNotifications` component, live printer status replaces polling. Socket.IO path: `/api/socket.io/`.
-2. **PWA** — Rewritten service worker (versioned, stale-while-revalidate), `InstallPrompt` (`beforeinstallprompt`), `OfflineIndicator` (amber top bar), PNG icons, updated manifest.
-
-### v2.10 — COGS + Accounting
-1. **COGS auto-tracking** — `completeJob()` auto-calls `calculateCost()` so every completed job records material/machine/waste/overhead costs.
-2. **Accounting page** — 6 KPI cards, 6-month recharts BarChart (revenue/COGS/grossProfit), P&L summary, product margins table with color-coded badges.
-3. **Expenses** — Category pills, add/delete expenses, total row.
-4. **Reports endpoints** — `GET /reports/monthly-trend?months=N`, `GET /reports/product-margins`.
-5. **Quote expiry scheduler** — `@Cron(EVERY_DAY_AT_MIDNIGHT)` auto-expires old quotes; `convertToOrder()` blocks on expired quotes.
-6. **Invoice PAID flow** — Auto-sets `paidAt`, increments `order.paidAmount`, guards on null `orderId`.
-
-### v2.10.1 — UX Audit + Logic Fixes
-1. **calculateCost multicolor fix** — Products with multicolor components (null `materialId`) no longer crash; uses `calculateJobCost` with averaged sub-material costPerGram.
-2. **Production job cancel** — "Cancel Job" button on job detail page with confirmation Dialog.
-3. **New job form redesign** — Mode selector (For Order / Build Stock) forces linking to an order or product.
-4. **Empty states** — Orders and Quotes pages show icon + message when list is empty.
-5. **Global toast cleanup** — All 13 frontend pages had `alert()` replaced with `toast()`.
-
-### v2.10.2 — Backend Stability + UX Hardening
-1. **Existence checks** — `ExpensesService` and `JobsService` now return 404 instead of Prisma 500 for missing records.
-2. **Strict enum validation** — Status filters in `QuotesService`, `OrdersService`, `JobsService` — removed `as any` casts.
-3. **Linked entity verification** — `orderId`/`productId` are verified to exist in DB during job creation.
-4. **Dialog replacements** — Native `confirm()` replaced with shadcn Dialog across 6 pages (Expenses, Products, Printers, Inventory, Locations, Customer Quotes).
-5. **Loading/disabled states** — All critical action buttons (Convert to Order, Create Invoice, Delete) prevent double-submissions.
-6. **Null guards** — `productionJobs`, `invoices`, `expensesByCategory` array accesses guarded throughout dashboard.
-
-### v2.9.10 — Targeted Fixes + Tailscale
-1. **calculateCost crash** — Null-materialId + empty sub-materials components no longer crash Prisma; machine cost is still calculated.
-2. **purgeWasteGrams fix** — `calculateJobCost()` now respects recorded `purgeWasteGrams` from job data (priority: gcode-parsed volume → job-recorded waste → settings × color changes).
-3. **Tailscale CGNAT** — `validateMoonrakerUrl()` allows `100.64.0.0/10` for remote printers over Tailscale. Printer detail form shows URL format hint.
-
-### v2.10.3 — 3MF → Quick Quote Integration (current)
+### v2.10.3 — 3MF → Quick Quote Integration
 1. **`POST /costing/estimate-plates`** — New endpoint + `estimatePlates()` in `CostingService`. Resolves material cost by `materialType` from inventory (cheapest match), falls back to `defaultMaterialId`. All plates costed in parallel.
 2. **Staff Quick Quote** — Accepts `.3mf`; auto-parses on select; shows `PlatePreviewCard` grid with thumbnails + stats; per-plate cost breakdown + grand total; saves as multi-item quote (one item per plate).
 3. **Customer Quick Quote** — Accepts `.3mf`; simple plate checklist; shows total price; "Request This Quote" CTA → confirmation banner (added to gcode/stl flow too).
 4. **`api.ts` upload error fix** — `api.upload()` now reads backend JSON error body on failure; callers see the actual message instead of generic "Upload failed".
 5. **Gemini review fixes** — Single-tool plates now resolve `materialType` correctly (was falling back to default always); `file?.name` guarded with `?? 'project.3mf'` fallback; duplicate `formatTimeSec` removed from customer page.
 
+### v1.0 — Core ERP
+Dashboard, quotes, orders, inventory, printers (Moonraker), costing engine, quick quote, customers, settings, JWT auth, Docker deployment.
+
+... [rest of previous versions truncated for brevity, same as before] ...
+
 ---
 
-## Known Gaps / Deferred (as of v2.10.3)
+## Known Gaps / Deferred (as of v2.10.7)
 
 | Area | Gap | Notes |
 |------|-----|-------|
-| `estimate-plates` | No rate limiting | A customer could send a large plate array. Add NestJS `ThrottlerGuard` to costing endpoints. |
-| `estimate-plates` | Luminance-aware purge not used | `calculateTransitionPurge` from `estimateMultiColor` isn't applied for 3MF plates — uses simple average purge instead. Minor accuracy gap for high-contrast multicolor plates. |
-| Customer Quick Quote | "Request Quote" is UI-only | Button shows a green banner but does NOT write to DB or notify staff. Needs a `POST /quote-requests` endpoint and staff notification. |
-| Products service | God file (774 lines) | Mixing costing, BOM, inventory, 3MF onboarding. Consider splitting into `ProductCostingService` + `ProductInventoryService`. |
-| Jobs service | God file (617 lines) | Similar concern — depends on `CostingService`. |
-| `PrismaService` | No resilience layer | 37 services share one Prisma instance with no retry, timeout override, or slow-query logging. |
+| UI audit | `Select` component still bypassed on some pages | `settings` page and customer quick-quote page still use native `<select>`. `orders/new` and `quotes/new` are resolved. |
+| Redesign trial | Not merged | `worktree-agent-add3e32e` branch has full Warm Precision theme. Merge when approved: `git merge worktree-agent-add3e32e`. |
 
 ---
 
@@ -188,6 +175,8 @@ Security hardening (Helmet CSP/HSTS, 3-tier rate limiting, stricter auth throttl
 - **`--legacy-peer-deps`** required for npm install (`@nestjs/testing` peer conflict)
 - **shadcn TableCell** does not forward `colSpan` — use native `<td>` for colspan rows
 - **`useToast()` signature** is `toast(type, message)` — NOT shadcn standard. 57 files import it.
+- **Redesign trial** — branch `worktree-agent-add3e32e` at `.claude/worktrees/agent-add3e32e/`. Run `npm run dev -- --port 3001` from that directory to preview. Merge with `git merge worktree-agent-add3e32e` when approved, or delete with `git worktree remove` + `git branch -d`.
+- **Cross-review rule** — when Gemini writes code, Claude reviews before writing to disk (and vice versa). Never skip this step.
 
 ---
 

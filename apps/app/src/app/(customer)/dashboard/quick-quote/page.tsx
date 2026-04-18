@@ -52,6 +52,8 @@ export default function CustomerQuickQuotePage() {
   const [threeMfResult, setThreeMfResult] = useState<any>(null);
   const [threeMfEstimating, setThreeMfEstimating] = useState(false);
   const [quoteRequested, setQuoteRequested] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -68,6 +70,48 @@ export default function CustomerQuickQuotePage() {
     setThreeMfResult(null);
     setThreeMfSelected(new Set());
     setQuoteRequested(false);
+    setSubmitError('');
+  }
+
+  async function handleRequestQuote() {
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      if (threeMfResult && is3mfFile) {
+        await api.post('/quotes/customer/request', {
+          plates: (threeMfResult.plates as any[]).map((p: any) => ({
+            plateIndex: p.plateIndex,
+            name: p.name,
+            printSeconds: p.printSeconds,
+            weightGrams: p.weightGrams,
+            isMultiColor: p.isMultiColor,
+            breakdown: {
+              suggestedPrice: p.breakdown.suggestedPrice,
+              totalCost: p.breakdown.totalCost,
+            },
+          })),
+        });
+      } else if (analysis && estimate) {
+        await api.post('/quotes/customer/request', {
+          analysis: {
+            fileName: analysis.fileName,
+            fileType: analysis.fileType,
+            slicer: analysis.slicer,
+            estimatedTimeSeconds: analysis.estimatedTimeSeconds,
+            filamentUsedGrams: analysis.filamentUsedGrams,
+          },
+          costEstimate: {
+            suggestedPrice: estimate.suggestedPrice,
+            totalCost: estimate.totalCost,
+          },
+        });
+      }
+      setQuoteRequested(true);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to submit quote request. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -319,9 +363,12 @@ export default function CustomerQuickQuotePage() {
                   Quote request received! Our team will review and contact you shortly.
                 </div>
               ) : (
-                <Button className="w-full" onClick={() => setQuoteRequested(true)}>
-                  Request This Quote
-                </Button>
+                <>
+                  {submitError && <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>}
+                  <Button className="w-full" onClick={handleRequestQuote} disabled={submitting}>
+                    {submitting ? 'Submitting…' : 'Request This Quote'}
+                  </Button>
+                </>
               )}
             </div>
           </CardContent>
@@ -378,12 +425,12 @@ export default function CustomerQuickQuotePage() {
                   Quote request received! Our team will review and contact you shortly.
                 </div>
               ) : (
-                <Button
-                  className="w-full"
-                  onClick={() => setQuoteRequested(true)}
-                >
-                  Request This Quote
-                </Button>
+                <>
+                  {submitError && <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>}
+                  <Button className="w-full" onClick={handleRequestQuote} disabled={submitting}>
+                    {submitting ? 'Submitting…' : 'Request This Quote'}
+                  </Button>
+                </>
               )}
             </div>
           </CardContent>

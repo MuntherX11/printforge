@@ -26,7 +26,7 @@ export default function QuotesPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Quotes</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Quotes</h1>
         <Link href="/quotes/new"><Button><Plus className="h-4 w-4 mr-2" /> New Quote</Button></Link>
       </div>
 

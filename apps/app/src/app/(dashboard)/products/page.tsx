@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Box } from 'lucide-react';
 
 export default function ProductsPage() {
@@ -33,10 +34,12 @@ export default function ProductsPage() {
       <Card>
         <CardContent className="p-0">
           {products.length === 0 ? (
-            <div className="py-12 text-center text-gray-500">
-              <Box className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-              <p>No products added yet</p>
-            </div>
+            <EmptyState
+              icon={<Box className="h-12 w-12" />}
+              title="No products added yet"
+              description="Create your first product to link it to orders and production jobs"
+              action={<Link href="/products/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add Product</Button></Link>}
+            />
           ) : (
             <Table>
               <TableHeader>

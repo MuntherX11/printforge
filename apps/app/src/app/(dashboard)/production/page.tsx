@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
+import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
-import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks } from 'lucide-react';
+import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
 
 const statusFilters = ['ALL', 'QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -31,10 +32,12 @@ export default function ProductionPage() {
   useEffect(() => {
     if (view === 'list') {
       setLoading(true);
+      setData(null);
       const params = filter !== 'ALL' ? `?status=${filter}` : '';
       api.get(`/jobs${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
     } else {
       setLoading(true);
+      setQueue(null);
       api.get('/jobs/queue').then(setQueue).catch(console.error).finally(() => setLoading(false));
     }
   }, [filter, view]);
@@ -95,7 +98,7 @@ export default function ProductionPage() {
       <div className="flex items-center justify-between">
         <div className="flex gap-2 flex-wrap">
           {view === 'list' && statusFilters.map(s => (
-            <button key={s} onClick={() => { setFilter(s); setLoading(true); }}
+            <button key={s} onClick={() => setFilter(s)}
               className={`px-3 py-1 text-xs rounded-full border transition-colors ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
               {s.replace(/_/g, ' ')}
             </button>
@@ -112,40 +115,52 @@ export default function ProductionPage() {
       </div>
 
       {/* List View */}
-      {view === 'list' && (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Job Name</TableHead>
-                  <TableHead>Printer</TableHead>
-                  <TableHead>Assigned To</TableHead>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(data?.data || data || []).map((j: any) => (
-                  <TableRow key={j.id}>
-                    <TableCell>
-                      <Link href={`/production/${j.id}`} className="font-medium text-brand-600 hover:underline">{j.name}</Link>
-                    </TableCell>
-                    <TableCell>{j.printer?.name || <span className="text-amber-500 text-xs font-medium">Unassigned</span>}</TableCell>
-                    <TableCell>{j.assignedTo?.name || '-'}</TableCell>
-                    <TableCell>{j.order ? <Link href={`/orders/${j.order.id}`} className="text-brand-600 hover:underline">{j.order.orderNumber}</Link> : '-'}</TableCell>
-                    <TableCell><StatusBadge status={j.status} /></TableCell>
-                    <TableCell>{j.totalCost ? formatCurrency(j.totalCost) : '-'}</TableCell>
-                    <TableCell>{formatDate(j.createdAt)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      {view === 'list' && (() => {
+        const jobs: any[] = data?.data || data || [];
+        return (
+          <Card>
+            <CardContent className="p-0">
+              {jobs.length === 0 ? (
+                <EmptyState
+                  icon={<Hammer className="h-12 w-12" />}
+                  title="No jobs found"
+                  description={filter === 'ALL' ? 'Create your first production job to get started' : `No jobs with status "${filter.replace(/_/g, ' ')}"`}
+                  action={filter === 'ALL' ? <Link href="/production/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Job</Button></Link> : undefined}
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Job Name</TableHead>
+                      <TableHead>Printer</TableHead>
+                      <TableHead>Assigned To</TableHead>
+                      <TableHead>Order</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Cost</TableHead>
+                      <TableHead>Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {jobs.map((j: any) => (
+                      <TableRow key={j.id}>
+                        <TableCell>
+                          <Link href={`/production/${j.id}`} className="font-medium text-brand-600 hover:underline">{j.name}</Link>
+                        </TableCell>
+                        <TableCell>{j.printer?.name || <span className="text-amber-500 text-xs font-medium">Unassigned</span>}</TableCell>
+                        <TableCell>{j.assignedTo?.name || '-'}</TableCell>
+                        <TableCell>{j.order ? <Link href={`/orders/${j.order.id}`} className="text-brand-600 hover:underline">{j.order.orderNumber}</Link> : '-'}</TableCell>
+                        <TableCell><StatusBadge status={j.status} /></TableCell>
+                        <TableCell>{j.totalCost ? formatCurrency(j.totalCost) : '-'}</TableCell>
+                        <TableCell>{formatDate(j.createdAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Queue View */}
       {view === 'queue' && queue && (

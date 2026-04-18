@@ -46,18 +46,19 @@ const navigation: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [role, setRole] = useState<string>('');
+  const [role, setRole] = useState<string | null>(null);
   const { open, setOpen } = useSidebar();
 
   useEffect(() => {
     api.get<{ role: string }>('/auth/me')
       .then(u => setRole(u.role))
-      .catch(() => {});
+      .catch(() => setRole(''));
   }, []);
 
-  const filteredNav = role
-    ? navigation.filter(item => !item.roles || item.roles.includes(role))
-    : [];
+  // null = still loading, '' = loaded but no role (error), string = loaded
+  const filteredNav = role === null
+    ? null
+    : navigation.filter(item => !item.roles || item.roles.includes(role));
 
   return (
     <>
@@ -90,25 +91,35 @@ export function Sidebar() {
           </button>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
-          {filteredNav.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname.startsWith(item.href));
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
-                )}
-              >
-                <item.icon className="h-5 w-5 flex-shrink-0" />
-                {item.name}
-              </Link>
-            );
-          })}
+          {filteredNav === null ? (
+            // Skeleton while /auth/me resolves
+            Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-md px-3 py-2 animate-pulse">
+                <div className="h-5 w-5 flex-shrink-0 rounded bg-gray-200 dark:bg-gray-700" />
+                <div className="h-4 rounded bg-gray-200 dark:bg-gray-700" style={{ width: `${60 + (i % 3) * 20}px` }} />
+              </div>
+            ))
+          ) : (
+            filteredNav.map((item) => {
+              const isActive = pathname === item.href ||
+                (item.href !== '/' && pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
+                  )}
+                >
+                  <item.icon className="h-5 w-5 flex-shrink-0" />
+                  {item.name}
+                </Link>
+              );
+            })
+          )}
         </nav>
       </aside>
     </>

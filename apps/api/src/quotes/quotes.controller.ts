@@ -7,6 +7,7 @@ import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
+import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 @Controller('quotes')
@@ -55,6 +56,12 @@ export class QuotesController {
   }
 
   // ============ CUSTOMER ENDPOINTS ============
+
+  @Post('customer/request')
+  @UseGuards(CustomerGuard)
+  customerRequestQuote(@Body() dto: CustomerQuoteRequestDto, @CurrentUser() user: any) {
+    return this.quotesService.customerRequestQuote(user.id, dto);
+  }
 
   @Get('customer/my-quotes')
   @UseGuards(CustomerGuard)

@@ -1,15 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
 import { OrdersService } from '../orders/orders.service';
+import { EventsGateway } from '../websocket/events.gateway';
 
 @Injectable()
 export class QuotesService {
   constructor(
     private prisma: PrismaService,
     private ordersService: OrdersService,
+    @Optional() private eventsGateway?: EventsGateway,
   ) {}
 
   async createFromAnalysis(dto: SaveQuoteFromAnalysisDto, createdById?: string) {
@@ -22,6 +25,10 @@ export class QuotesService {
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + 3);
 
+    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
+    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
+    const tax = suggestedPrice * taxRate;
+
     const isGcode = !!dto.analysis?.slicer;
 
     return this.prisma.quote.create({
@@ -32,8 +39,8 @@ export class QuotesService {
         notes: dto.notes || null,
         validUntil,
         subtotal: suggestedPrice,
-        tax: 0,
-        total: suggestedPrice,
+        tax,
+        total: suggestedPrice + tax,
         gcodeMetadata: isGcode ? dto.analysis : undefined,
         stlMetadata: !isGcode ? dto.analysis : undefined,
         costBreakdown: cost || undefined,
@@ -55,6 +62,80 @@ export class QuotesService {
       },
       include: { customer: true, items: true },
     });
+  }
+
+  async customerRequestQuote(customerId: string, dto: CustomerQuoteRequestDto) {
+    const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + 3);
+
+    let items: {
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      totalPrice: number;
+      estimatedGrams?: number | null;
+      estimatedMinutes?: number | null;
+      estimatedCost?: number | null;
+    }[];
+    let total: number;
+
+    if (dto.plates && dto.plates.length > 0) {
+      items = dto.plates.map(plate => ({
+        description: plate.name,
+        quantity: 1,
+        unitPrice: plate.breakdown.suggestedPrice,
+        totalPrice: plate.breakdown.suggestedPrice,
+        estimatedGrams: Math.round(plate.weightGrams),
+        estimatedMinutes: Math.round(plate.printSeconds / 60),
+        estimatedCost: plate.breakdown.totalCost,
+      }));
+      total = dto.plates.reduce((sum, p) => sum + p.breakdown.suggestedPrice, 0);
+    } else if (dto.analysis && dto.costEstimate) {
+      items = [{
+        description: dto.analysis.fileName || 'Custom print',
+        quantity: 1,
+        unitPrice: dto.costEstimate.suggestedPrice,
+        totalPrice: dto.costEstimate.suggestedPrice,
+        estimatedGrams: dto.analysis.filamentUsedGrams ?? null,
+        estimatedMinutes: dto.analysis.estimatedTimeSeconds
+          ? Math.round(dto.analysis.estimatedTimeSeconds / 60)
+          : null,
+        estimatedCost: dto.costEstimate.totalCost,
+      }];
+      total = dto.costEstimate.suggestedPrice;
+    } else {
+      throw new BadRequestException('Provide either plates (3MF) or analysis + costEstimate');
+    }
+
+    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
+    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
+    const tax = total * taxRate;
+
+    const quote = await this.prisma.quote.create({
+      data: {
+        quoteNumber,
+        customerId,
+        source: 'CUSTOMER',
+        notes: dto.notes || null,
+        validUntil,
+        subtotal: total,
+        tax,
+        total: total + tax,
+        gcodeMetadata: dto.analysis?.slicer ? (dto.analysis as any) : undefined,
+        stlMetadata: dto.analysis && !dto.analysis.slicer ? (dto.analysis as any) : undefined,
+        items: { create: items },
+      },
+      include: { customer: true, items: true },
+    });
+
+    this.eventsGateway?.broadcastNotification({
+      type: 'info',
+      title: 'New Quote Request',
+      message: `New quote request received: ${quote.quoteNumber}`,
+    });
+
+    return quote;
   }
 
   async findForCustomer(customerId: string, query: PaginationDto) {

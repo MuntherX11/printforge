@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
@@ -151,10 +152,11 @@ export default function InventoryPage() {
       <Card>
         <CardContent className="p-0">
           {materials.length === 0 ? (
-            <div className="py-12 text-center text-gray-500">
-              <Package className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-              <p>No materials added yet</p>
-            </div>
+            <EmptyState
+              icon={<Package className="h-12 w-12" />}
+              title="No materials added yet"
+              description="Add your first material spool to start tracking inventory"
+            />
           ) : (
             <Table>
               <TableHeader>

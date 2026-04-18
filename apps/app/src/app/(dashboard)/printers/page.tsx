@@ -10,6 +10,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Printer, Clock, Wrench } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
@@ -51,12 +52,21 @@ export default function PrintersPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Printers</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Printers</h1>
         <Button onClick={() => setShowAdd(true)}><Plus className="h-4 w-4 mr-2" /> Add Printer</Button>
       </div>
 
       {printers.length === 0 ? (
-        <Card><CardContent className="py-12 text-center text-gray-500"><Printer className="h-12 w-12 mx-auto mb-3 text-gray-400" /><p>No printers configured</p></CardContent></Card>
+        <Card>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={<Printer className="h-12 w-12" />}
+              title="No printers configured"
+              description="Add your first printer to start tracking jobs and status"
+              action={<Button size="sm" onClick={() => setShowAdd(true)}><Plus className="h-4 w-4 mr-1" /> Add Printer</Button>}
+            />
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {printers.map(p => (
