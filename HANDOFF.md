@@ -1,6 +1,6 @@
 # PrintForge — Project Handoff Document
 
-> Last updated: 2026-04-18 | Current version: **v2.10.7**
+> Last updated: 2026-04-18 | Current version: **v2.10.8**
 
 ---
 
@@ -17,7 +17,7 @@ A Docker-based ERP system purpose-built for small B2C 3D print farms. Built by M
 | Backend API | NestJS (TypeScript), Prisma ORM, PostgreSQL |
 | Frontend | Next.js 14 (App Router), Tailwind CSS, shadcn/ui-style components |
 | Shared Types | `@printforge/types` monorepo package at `packages/types/` |
-| Auth | JWT dual-auth (staff + customer portal), role-based (ADMIN, OPERATOR, VIEWER) |
+| Auth | JWT dual-auth (staff + customer portal), role-based (ADMIN, ACCOUNTING, OPERATOR, VIEWER) |
 | Real-time | Socket.IO gateway at `/ws`, path `/api/socket.io/`, shared hook `useWebSocket()` |
 | Printer Bridge | Moonraker REST API polling every 10s, SSRF-protected (local IPs + Tailscale CGNAT) |
 | Deployment | Docker Compose (nginx reverse proxy + postgres + api + app), deployed on home Linux VPS |
@@ -105,11 +105,24 @@ packages/
 
 16. **Jobs service split** — `JobsService` delegates planning to `JobPlanningService` and scheduling to `JobSchedulingService`. `SPOOL_BUFFER_GRAMS = 50` lives in `job-planning.service.ts`. `JobsService` retains gateway injection for `completeJob`/`failJob` notifications. All four registered in `ProductionModule`.
 
+17. **Creality LAN WebSocket** — `CrealityWsService` opens a persistent `ws://IP:9999` per `CREALITY_WS` printer on module init. Protocol is push-based (no polling); service sends a heartbeat every 10s and parses the pushed JSON. Reconnects with exponential backoff (2s → 120s, 1.8×). The printer's IP is stored in the existing `moonrakerUrl` field. `MoonrakerScheduler` merges snapshots from both bridges every 10s before broadcasting. `controlPrint` routes `pause/resume/cancel` to the correct bridge via `connectionType`. Reference implementation: [`ha_creality_ws`](https://github.com/3dg1luk43/ha_creality_ws).
+
+18. **ACCOUNTING role** — Added to `Role` enum. Sidebar nav: Dashboard + Orders + Quotes + Customers + Accounting. No access to Quick Quote, Production, Design, Filaments, Products, Printers, Settings.
+
+19. **Currency context** — `LocaleProvider` wraps the entire `(dashboard)` layout. `useFormatCurrency()` from `locale-context.tsx` replaces hardcoded `formatCurrency(amount)` calls on the dashboard — currency setting now propagates live.
+
 ---
 
 ## Version History (Highlights)
 
-### v2.10.7 — God File Splits + Resilience (current)
+### v2.10.8 — Creality LAN + ACCOUNTING Role + Currency Fix (current)
+1. **Creality LAN WS bridge** — `CrealityWsService` with persistent WS, heartbeat, exponential backoff reconnect. Both printer types broadcast through the same scheduler. Control endpoint routes by `connectionType`.
+2. **`CREALITY_WS` enum value** — Printer form shows "Printer IP Address" field for this type. Live Status card works for both Moonraker and Creality.
+3. **`ACCOUNTING` role** — New schema role. Sidebar shows Quotes + Customers + Accounting only (no ops pages).
+4. **Currency context** — `LocaleProvider` in dashboard layout. Dashboard KPIs use `useFormatCurrency()` — no more hardcoded OMR.
+5. **404 fix** — `controlPrint` now throws proper `NotFoundException` for unknown printer IDs.
+
+### v2.10.7 — God File Splits + Resilience
 1. **Products service split** — `ProductCostingService` + `ProductOnboardingService` extracted. No circular deps. `ProductsService` now ~220 lines.
 2. **Jobs service split** — `JobPlanningService` + `JobSchedulingService` extracted. `JobsService` now delegates plan/schedule and retains gateway calls.
 3. **Staff notification on quote request** — WebSocket `info` push to staff when customer submits a quote request.
@@ -153,11 +166,12 @@ Dashboard, quotes, orders, inventory, printers (Moonraker), costing engine, quic
 
 ---
 
-## Known Gaps / Deferred (as of v2.10.7)
+## Known Gaps / Deferred (as of v2.10.8)
 
 | Area | Gap | Notes |
 |------|-----|-------|
 | UI audit | `Select` component still bypassed on some pages | `settings` page and customer quick-quote page still use native `<select>`. `orders/new` and `quotes/new` are resolved. |
+| Creality WS | `reconnectPrinter()` not called after IP edit | Saving a new IP in the printer form doesn't hot-reload the WS connection — requires API restart. Fix: call `POST /moonraker/reconnect/:id` (not yet wired) after save. |
 | Redesign trial | Not merged | `worktree-agent-add3e32e` branch has full Warm Precision theme. Merge when approved: `git merge worktree-agent-add3e32e`. |
 
 ---

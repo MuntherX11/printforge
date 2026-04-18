@@ -2,7 +2,21 @@
 
 All notable changes to PrintForge are documented here.
 
-## [v2.10.7] — 2026-04-18 (current)
+## [v2.10.8] — 2026-04-18 (current)
+
+### Added
+- **`CrealityWsService`** — Persistent `ws://IP:9999` WebSocket client per Creality printer. Push-based state (no polling), 10s heartbeat, exponential backoff reconnect (2s base → 120s cap, 1.8× multiplier). Maps `deviceState`, `printProgress`, temps, and `boxsInfo` to internal `PrinterStatus` shape. Auto-completes matching production jobs on print finish, deducts spool weight, fires notifications on error and completion.
+- **`CREALITY_WS` connection type** — Added to `PrinterConnectionType` enum. Printer detail form shows "Printer IP Address" field (instead of "Moonraker URL") when this type is selected. Live Status card and pause/resume/cancel controls now work for both Moonraker and Creality printers.
+- **Unified printer broadcast** — `MoonrakerScheduler` now merges Moonraker HTTP poll results with Creality WS cached snapshots every 10s. Creality snapshots are normalised to the same shape the frontend already expects (`progress` as 0.0–1.0, `printStats`, `heaterBed`, `extruder`).
+- **`ACCOUNTING` role** — Added to `Role` enum. Sidebar visibility: Accounting users see Dashboard, Orders, Quotes, Customers, Accounting — no Quick Quote, Production, Design, Filaments, Products, Printers, or Settings.
+- **Currency context** — `LocaleProvider` (already had `currency` + `useFormatCurrency()`) wired into `(dashboard)/layout.tsx`. Dashboard KPI cards now call `useFormatCurrency()` instead of hardcoding OMR — currency changes in Settings propagate immediately.
+
+### Fixed
+- **`controlPrint` missing 404** — `POST /moonraker/control/:printerId/:action` previously threw "No Moonraker URL" for unknown printer IDs. Now correctly throws `NotFoundException` before checking connection type.
+
+---
+
+## [v2.10.7] — 2026-04-18
 
 ### Added
 - **`ProductCostingService`** — Extracted `calculateCost()` and `recalculateAggregates()` from `ProductsService` into a dedicated service. Queries Prisma directly (no circular dependency). Registered in `ProductsModule`.
