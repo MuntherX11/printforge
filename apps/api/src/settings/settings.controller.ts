@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body, UseGuards, UseInterceptors, UploadedFile, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Body, UseGuards, UseInterceptors, UploadedFile, Res, BadRequestException, NotFoundException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { SettingsService } from './settings.service';
@@ -7,6 +7,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const BACKUP_DIR = process.env.BACKUP_DIR || '/backups';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -61,5 +63,49 @@ export class SettingsController {
       return;
     }
     res.sendFile(logoPath);
+  }
+
+  // ── Backup management ────────────────────────────────────────────────────────
+
+  @Get('backups')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  listBackups() {
+    if (!fs.existsSync(BACKUP_DIR)) return { backups: [], directory: BACKUP_DIR };
+
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.match(/^printforge_.*\.sql\.gz$/))
+      .map(f => {
+        const fullPath = path.join(BACKUP_DIR, f);
+        const stat = fs.statSync(fullPath);
+        return {
+          filename: f,
+          sizeBytes: stat.size,
+          createdAt: stat.mtime.toISOString(),
+        };
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    return { backups: files, directory: BACKUP_DIR };
+  }
+
+  @Get('backups/:filename')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
+    // Prevent path traversal
+    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      throw new BadRequestException('Invalid filename');
+    }
+    if (!filename.match(/^printforge_.*\.sql\.gz$/)) {
+      throw new BadRequestException('Invalid backup filename');
+    }
+
+    const fullPath = path.join(BACKUP_DIR, filename);
+    if (!fs.existsSync(fullPath)) throw new NotFoundException('Backup file not found');
+
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/gzip');
+    res.sendFile(fullPath);
   }
 }

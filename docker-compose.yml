@@ -65,6 +65,7 @@ services:
     volumes:
       - pf-uploads:/app/uploads
       - pf-watch:/app/uploads/watch
+      - pf-backups:/backups:ro
     networks:
       - printforge-net
     restart: unless-stopped

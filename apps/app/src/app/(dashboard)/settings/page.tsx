@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { Upload, Send } from 'lucide-react';
+import { Upload, Send, Database, Download, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function SettingsPage() {
@@ -23,6 +23,16 @@ export default function SettingsPage() {
   const [testingEmail, setTestingEmail] = useState(false);
   const [testWaTo, setTestWaTo] = useState('');
   const [testingWa, setTestingWa] = useState(false);
+  const [backups, setBackups] = useState<Array<{ filename: string; sizeBytes: number; createdAt: string }>>([]);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+
+  function loadBackups() {
+    setLoadingBackups(true);
+    api.get<{ backups: Array<{ filename: string; sizeBytes: number; createdAt: string }> }>('/settings/backups')
+      .then(r => setBackups(r.backups))
+      .catch(() => {})
+      .finally(() => setLoadingBackups(false));
+  }
 
   useEffect(() => {
     api.get<Record<string, string>>('/settings').then(setSettings).catch(console.error).finally(() => setLoading(false));
@@ -30,6 +40,7 @@ export default function SettingsPage() {
     fetch('/api/settings/logo', { credentials: 'include' }).then(r => {
       if (r.ok) setLogoUrl('/api/settings/logo');
     }).catch(() => {});
+    loadBackups();
   }, []);
 
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
@@ -294,6 +305,45 @@ export default function SettingsPage() {
 
         <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save Settings'}</Button>
       </form>
+
+      {/* Database Backups (outside the settings form — read-only panel) */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2"><Database className="h-4 w-4" /> Database Backups</CardTitle>
+            <Button variant="outline" size="sm" onClick={loadBackups} disabled={loadingBackups}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${loadingBackups ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {backups.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4 text-center">No backups found. Backups run automatically every 24 hours.</p>
+          ) : (
+            <div className="space-y-2">
+              {backups.map(b => (
+                <div key={b.filename} className="flex items-center justify-between py-2 border-b dark:border-gray-700 last:border-0">
+                  <div>
+                    <p className="text-sm font-medium">{b.filename}</p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(b.createdAt).toLocaleString()} &middot; {(b.sizeBytes / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/settings/backups/${b.filename}`}
+                    download={b.filename}
+                    className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Download
+                  </a>
+                </div>
+              ))}
+              <p className="text-xs text-gray-400 pt-2">Backups are retained for 7 days. Running automatically every 24 hours.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
