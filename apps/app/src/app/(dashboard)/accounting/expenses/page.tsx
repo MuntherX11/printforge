@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -11,11 +11,12 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+`nimport { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Tag, ArrowLeft, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function ExpensesPage() {
+  const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
   const [expenses, setExpenses] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);

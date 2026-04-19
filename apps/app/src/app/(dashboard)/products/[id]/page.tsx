@@ -11,12 +11,13 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { useToast } from '@/components/ui/toast';
 
 export default function ProductDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();

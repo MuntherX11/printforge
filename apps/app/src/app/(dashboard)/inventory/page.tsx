@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -11,12 +11,13 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function InventoryPage() {
+  const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

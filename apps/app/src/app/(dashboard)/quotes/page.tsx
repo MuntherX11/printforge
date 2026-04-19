@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -9,10 +9,11 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+`nimport { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, FileText } from 'lucide-react';
 
 export default function QuotesPage() {
+  const formatCurrency = useFormatCurrency();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -8,11 +8,12 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Box } from 'lucide-react';
 
 export default function ProductsPage() {
+  const formatCurrency = useFormatCurrency();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -9,12 +9,13 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+`nimport { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, ShoppingCart } from 'lucide-react';
 
 const statusFilters = ['ALL', 'PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
 export default function OrdersPage() {
+  const formatCurrency = useFormatCurrency();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
@@ -56,7 +57,7 @@ export default function OrdersPage() {
             <EmptyState
               icon={<ShoppingCart className="h-12 w-12" />}
               title="No orders yet"
-              description={filter === 'ALL' ? 'Create your first order to get started' : `No orders with status "${filter.replace(/_/g, ' ')}"`}
+              description={filter === 'ALL' ? 'Create your first order to get started' : `no orders with status "${filter.replace(/_/g, ' ')}"`}
               action={filter === 'ALL' ? <Link href="/orders/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Order</Button></Link> : undefined}
             />
           ) : (

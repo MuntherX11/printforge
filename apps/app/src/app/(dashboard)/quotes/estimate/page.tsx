@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -7,12 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useEffect } from 'react';
 import { Calculator } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function EstimatePage() {
+  const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
   const [materials, setMaterials] = useState<any[]>([]);
   const [printers, setPrinters] = useState<any[]>([]);

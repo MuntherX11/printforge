@@ -13,7 +13,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Mail, MessageCircle, AlertTriangle, CheckCircle, Factory } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
@@ -28,6 +29,7 @@ const orderStatuses = [
 ];
 
 export default function OrderDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const { toast } = useToast();
   const [order, setOrder] = useState<any>(null);

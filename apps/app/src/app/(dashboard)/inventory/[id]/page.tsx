@@ -10,13 +10,15 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
 import { SpoolLabelScanner } from '@/components/spool-label-scanner';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/toast';
 
 export default function MaterialDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const router = useRouter();
   const { user } = useAuth();

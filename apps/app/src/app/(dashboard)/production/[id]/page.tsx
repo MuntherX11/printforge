@@ -11,7 +11,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Calculator, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
@@ -25,6 +26,7 @@ const jobStatuses = [
 ];
 
 export default function JobDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const { toast } = useToast();
   const [job, setJob] = useState<any>(null);

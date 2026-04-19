@@ -12,12 +12,14 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Dialog } from '@/components/ui/dialog';
 import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2, Wrench, Clock } from 'lucide-react';
 
 export default function PrinterDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();

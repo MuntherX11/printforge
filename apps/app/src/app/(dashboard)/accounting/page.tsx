@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -10,12 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { TrendingUp, TrendingDown, DollarSign, BarChart2, Package, Percent } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 // ── Recharts custom tooltip ──────────────────────────────────────────────────
 function CurrencyTooltip({ active, payload, label }: any) {
+  const formatCurrency = useFormatCurrency();
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 text-sm">
@@ -51,6 +52,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
 }
 
 export default function AccountingPage() {
+  const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
   const [report, setReport] = useState<any>(null);
   const [trend, setTrend] = useState<any[]>([]);

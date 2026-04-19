@@ -9,7 +9,8 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 
 const quoteStatuses = [
@@ -21,6 +22,7 @@ const quoteStatuses = [
 ];
 
 export default function QuoteDetailPage() {
+  const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();

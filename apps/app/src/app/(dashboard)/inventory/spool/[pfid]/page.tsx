@@ -6,10 +6,12 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
+import { useFormatCurrency } from '@/lib/locale-context';
 import Link from 'next/link';
 
 export default function SpoolByPfidPage() {
+  const formatCurrency = useFormatCurrency();
   const { pfid } = useParams();
   const [spool, setSpool] = useState<any>(null);
   const [loading, setLoading] = useState(true);

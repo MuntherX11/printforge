@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -9,13 +9,14 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-import { formatDate, formatCurrency } from '@/lib/utils';
+`nimport { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
 
 const statusFilters = ['ALL', 'QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
 export default function ProductionPage() {
+  const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -124,7 +125,7 @@ export default function ProductionPage() {
                 <EmptyState
                   icon={<Hammer className="h-12 w-12" />}
                   title="No jobs found"
-                  description={filter === 'ALL' ? 'Create your first production job to get started' : `No jobs with status "${filter.replace(/_/g, ' ')}"`}
+                  description={filter === 'ALL' ? 'Create your first production job to get started' : `no jobs with status "${filter.replace(/_/g, ' ')}"`}
                   action={filter === 'ALL' ? <Link href="/production/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Job</Button></Link> : undefined}
                 />
               ) : (
