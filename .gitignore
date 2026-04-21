@@ -16,3 +16,5 @@ coverage/
 .claude/
 *.zip
 package_zip.py
+CHANGELOG.md
+HANDOFF.md
