@@ -192,6 +192,7 @@ model Printer {
   model           String?
   connectionType  PrinterConnectionType
   moonrakerUrl    String?
+  cameraUrl       String?             // MJPEG stream URL (e.g. http://192.168.x.x:8000)
   hourlyRate      Float               @default(0.40)
   wattage         Float               @default(200)
   markupMultiplier Float              @default(2.5)

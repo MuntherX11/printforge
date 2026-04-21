@@ -389,6 +389,7 @@ export interface CreatePrinterDto {
   model?: string;
   connectionType: PrinterConnectionType;
   moonrakerUrl?: string;
+  cameraUrl?: string;
   hourlyRate?: number;
   wattage?: number;
   markupMultiplier?: number;

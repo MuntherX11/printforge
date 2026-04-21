@@ -3,7 +3,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { CreatePrinterDto, UpdatePrinterDto } from '@printforge/types';
 
 // Whitelist of fields that can be set via API
-const ALLOWED_CREATE_FIELDS = ['name', 'model', 'connectionType', 'moonrakerUrl', 'hourlyRate', 'wattage', 'markupMultiplier'] as const;
+const ALLOWED_CREATE_FIELDS = ['name', 'model', 'connectionType', 'moonrakerUrl', 'cameraUrl', 'hourlyRate', 'wattage', 'markupMultiplier'] as const;
 const ALLOWED_UPDATE_FIELDS = [...ALLOWED_CREATE_FIELDS, 'isActive', 'status'] as const;
 
 function pickAllowed<T extends Record<string, any>>(dto: T, allowed: readonly string[]): Partial<T> {

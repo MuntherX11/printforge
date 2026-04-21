@@ -9,9 +9,10 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-`nimport { useFormatCurrency } from '@/lib/locale-context';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
+import { CameraViewer } from '@/components/camera-viewer';
 
 const statusFilters = ['ALL', 'QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -210,6 +211,12 @@ export default function ProductionPage() {
                   </div>
                 </CardTitle>
               </CardHeader>
+              {/* Camera thumbnail — only shown if printer has a cameraUrl */}
+              {p.cameraUrl && (
+                <CardContent className="pb-2 pt-0">
+                  <CameraViewer printerId={p.id} printerName={p.name} variant="compact" />
+                </CardContent>
+              )}
               {(p.productionJobs?.length ?? 0) > 0 ? (
                 <CardContent className="p-0">
                   <Table>

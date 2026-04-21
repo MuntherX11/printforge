@@ -16,7 +16,8 @@ import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Dialog } from '@/components/ui/dialog';
-import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2, Wrench, Clock } from 'lucide-react';
+import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2, Wrench, Clock, Camera } from 'lucide-react';
+import { CameraViewer } from '@/components/camera-viewer';
 
 export default function PrinterDetailPage() {
   const formatCurrency = useFormatCurrency();
@@ -185,6 +186,7 @@ export default function PrinterDetailPage() {
                 model: form.get('model') || undefined,
                 connectionType: form.get('connectionType'),
                 moonrakerUrl: form.get('moonrakerUrl') || undefined,
+                cameraUrl: form.get('cameraUrl') || undefined,
               });
               load();
               setFormKey(k => k + 1);
@@ -224,6 +226,10 @@ export default function PrinterDetailPage() {
                 )}
               </div>
             </div>
+            <div>
+              <Input name="cameraUrl" label="Camera Stream URL (optional)" placeholder="http://192.168.100.37:8000" defaultValue={printer.cameraUrl || ''} />
+              <p className="mt-1 text-xs text-gray-500">MJPEG stream URL (mjpg-streamer, ustreamer, OctoPrint webcam). Must be on your local network.</p>
+            </div>
             <div className="flex items-center justify-between">
               <Button type="submit" size="sm" disabled={savingDetails}>{savingDetails ? 'Saving...' : 'Save Details'}</Button>
               <Button type="button" variant="outline" size="sm" className="text-red-500 border-red-300 hover:bg-red-50" disabled={deleting} onClick={() => setShowDeletePrinter(true)}>
@@ -233,6 +239,18 @@ export default function PrinterDetailPage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Camera Feed */}
+      {printer.cameraUrl && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Camera className="h-5 w-5" /> Camera Feed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CameraViewer printerId={id as string} printerName={printer.name} variant="full" />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Live Status (Moonraker + Creality WS) */}
       {hasLiveStatus && liveStatus && (
