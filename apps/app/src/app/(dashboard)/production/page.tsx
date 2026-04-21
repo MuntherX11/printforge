@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
+import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
