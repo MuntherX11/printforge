@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const STATIC_CACHE = `printforge-static-${CACHE_VERSION}`;
 const FONT_CACHE = `printforge-fonts-${CACHE_VERSION}`;
 

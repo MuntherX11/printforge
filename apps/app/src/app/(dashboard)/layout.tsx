@@ -43,7 +43,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Sidebar />
           <div className="flex flex-1 flex-col overflow-hidden">
             <Topbar />
-            <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
+            <main className="pf-main-offset flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
               {children}
             </main>
           </div>

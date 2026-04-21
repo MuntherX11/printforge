@@ -28,7 +28,7 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-white dark:bg-gray-900 px-4 md:px-6">
+    <header className="pf-topbar flex h-16 items-center justify-between border-b bg-white dark:bg-gray-900 px-4 md:px-6">
       <button
         type="button"
         onClick={toggle}

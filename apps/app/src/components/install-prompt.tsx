@@ -19,7 +19,9 @@ export function InstallPrompt() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (localStorage.getItem('pwa-install-dismissed')) return;
+    // Respect a 30-day snooze, not a permanent dismiss
+    const snoozed = localStorage.getItem('pwa-install-dismissed');
+    if (snoozed && Date.now() < parseInt(snoozed, 10)) return;
 
     const handler = (e: Event) => {
       e.preventDefault();
@@ -50,14 +52,19 @@ export function InstallPrompt() {
   }
 
   function handleDismiss() {
-    localStorage.setItem('pwa-install-dismissed', '1');
+    // Snooze for 30 days
+    const snoozeUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    localStorage.setItem('pwa-install-dismissed', String(snoozeUntil));
     setVisible(false);
   }
 
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm max-w-sm w-full mx-4">
       <Download className="h-5 w-5 text-brand-600 shrink-0" />
-      <span className="flex-1 text-gray-700 dark:text-gray-200">Install PrintForge for quick access</span>
+      <div className="flex-1">
+        <p className="font-medium text-gray-800 dark:text-gray-100">Install PrintForge</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Runs as a native desktop app — no browser chrome</p>
+      </div>
       <Button size="sm" onClick={handleInstall}>Install</Button>
       <button
         onClick={handleDismiss}

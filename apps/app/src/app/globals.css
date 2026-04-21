@@ -71,3 +71,38 @@
 .animate-slide-up {
   animation: slide-up 0.2s ease-out;
 }
+
+/* ── Window Controls Overlay (desktop PWA titlebar) ──────────────────────── */
+@media (display-mode: window-controls-overlay) {
+  /*
+   * When installed as a desktop PWA with WCO, the browser draws its own
+   * close/minimise/maximise buttons and gives us the remaining titlebar area.
+   * We position our <header> into that area and make it draggable so the
+   * window can still be moved by dragging the header.
+   */
+  .pf-topbar {
+    position: fixed;
+    top: env(titlebar-area-y, 0px);
+    left: env(titlebar-area-x, 0px);
+    width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 4rem);
+    z-index: 999;
+    /* Make the whole header a drag handle */
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  /* Interactive children must opt out of the drag region */
+  .pf-topbar button,
+  .pf-topbar a,
+  .pf-topbar input,
+  .pf-topbar [role="button"] {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  /* Push main content down so it isn't hidden under the fixed topbar */
+  .pf-main-offset {
+    padding-top: env(titlebar-area-height, 4rem);
+  }
+}
