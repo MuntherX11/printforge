@@ -10,12 +10,13 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
-const ALLOWED_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 'image/svg+xml',
+// SVG excluded — can embed JavaScript and cause stored XSS when served back
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/gif',
   'application/pdf',
   'model/stl', 'application/sla', 'application/octet-stream', // STL
   'model/3mf', 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml', // 3MF
-];
+]);
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -92,10 +93,14 @@ export class DesignController {
   ) {
     if (!file) throw new Error('No file uploaded');
 
-    const ext = file.originalname.toLowerCase().split('.').pop();
-    const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'pdf', 'stl', '3mf'];
-    if (!allowedExtensions.includes(ext || '')) {
-      throw new Error(`File type .${ext} not allowed. Allowed: ${allowedExtensions.join(', ')}`);
+    // Validate by both MIME type (server-observed) and extension
+    const ext = (file.originalname.toLowerCase().split('.').pop() || '').replace(/[^a-z0-9]/g, '');
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'stl', '3mf'];
+    if (!allowedExtensions.includes(ext)) {
+      throw new Error(`File type .${ext} not allowed`);
+    }
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      throw new Error(`MIME type ${file.mimetype} not allowed`);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -104,7 +109,9 @@ export class DesignController {
     const uploadsDir = path.join(process.cwd(), 'uploads', 'design');
     fs.mkdirSync(uploadsDir, { recursive: true });
 
-    const filename = `${Date.now()}-${file.originalname}`;
+    // Use sanitized filename — never trust original name for path construction
+    const safeOriginal = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+    const filename = `${Date.now()}-${safeOriginal}`;
     fs.writeFileSync(path.join(uploadsDir, filename), file.buffer);
 
     return {

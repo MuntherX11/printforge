@@ -26,7 +26,7 @@ export class AuthController {
     res.cookie('token', result.token, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -68,7 +68,7 @@ export class AuthController {
     res.cookie('token', result.token, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 

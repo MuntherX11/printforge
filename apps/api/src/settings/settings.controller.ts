@@ -35,14 +35,14 @@ export class SettingsController {
   }
 
   @Put()
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   update(@Body() body: { settings: Array<{ key: string; value: string }> }) {
     return this.settingsService.setBulk(body.settings);
   }
 
   @Post('logo')
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async uploadLogo(@UploadedFile() file: any) {
@@ -68,7 +68,7 @@ export class SettingsController {
   // ── Backup management ────────────────────────────────────────────────────────
 
   @Get('backups')
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   listBackups() {
     if (!fs.existsSync(BACKUP_DIR)) return { backups: [], directory: BACKUP_DIR };
@@ -90,7 +90,7 @@ export class SettingsController {
   }
 
   @Get('backups/:filename')
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
     // Prevent path traversal
