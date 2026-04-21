@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-`nimport { useFormatCurrency } from '@/lib/locale-context';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, FileText } from 'lucide-react';
 
 export default function QuotesPage() {

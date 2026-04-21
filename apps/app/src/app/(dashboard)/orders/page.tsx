@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
-`nimport { useFormatCurrency } from '@/lib/locale-context';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, ShoppingCart } from 'lucide-react';
 
 const statusFilters = ['ALL', 'PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
