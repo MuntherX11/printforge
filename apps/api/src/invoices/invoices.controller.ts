@@ -45,6 +45,7 @@ export class InvoicesController {
   }
 
   @Get(':id/pdf')
+  @UseGuards(StaffGuard)
   async downloadPdf(@Param('id') id: string, @Res() res: Response) {
     const invoice = await this.invoicesService.findOne(id);
     const pdfBuffer = await this.pdfService.generateInvoicePdf(invoice);

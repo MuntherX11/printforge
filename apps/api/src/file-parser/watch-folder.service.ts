@@ -120,20 +120,22 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Get all pending imports.
+   * Get all pending imports (filePath omitted from public API response).
    */
-  getPending(): PendingImport[] {
+  getPending(): Omit<PendingImport, 'filePath'>[] {
     return Array.from(this.pendingImports.values())
       .filter(i => i.status === 'pending')
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map(({ filePath: _, ...safe }) => safe);
   }
 
   /**
-   * Get all imports (including imported/dismissed).
+   * Get all imports including imported/dismissed (filePath omitted from public API response).
    */
-  getAll(): PendingImport[] {
+  getAll(): Omit<PendingImport, 'filePath'>[] {
     return Array.from(this.pendingImports.values())
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map(({ filePath: _, ...safe }) => safe);
   }
 
   /**

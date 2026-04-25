@@ -30,11 +30,13 @@ export class JobsController {
   }
 
   @Get('stats/failures')
+  @UseGuards(StaffGuard)
   getFailureStats() {
     return this.jobsService.getFailureStats();
   }
 
   @Get('queue')
+  @UseGuards(StaffGuard)
   getQueue() {
     return this.jobsService.getQueue();
   }

@@ -3,6 +3,8 @@ import { MoonrakerService } from './moonraker.service';
 import { CrealityWsService } from './creality-ws.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('moonraker')
 @UseGuards(JwtAuthGuard)
@@ -43,6 +45,8 @@ export class MoonrakerController {
    * Send G-code to a printer.
    */
   @Post('gcode/:printerId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   async sendGcode(
     @Param('printerId') printerId: string,
     @Body('gcode') gcode: string,

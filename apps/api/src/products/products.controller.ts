@@ -5,6 +5,7 @@ import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -25,6 +26,7 @@ export class ProductsController {
   }
 
   @Get()
+  @UseGuards(StaffGuard)
   findAll() {
     return this.productsService.findAll();
   }
@@ -35,6 +37,7 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
   }

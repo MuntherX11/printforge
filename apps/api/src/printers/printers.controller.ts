@@ -10,9 +10,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreatePrinterDto, UpdatePrinterDto, CreateMaintenanceLogDto, CompleteMaintenanceDto } from '@printforge/types';
 import { isLocalUrl } from '../common/utils/is-local-url';
+import { StaffGuard } from '../auth/guards/staff.guard';
 
 @Controller('printers')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class PrintersController {
   constructor(
     private printersService: PrintersService,

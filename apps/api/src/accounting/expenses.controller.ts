@@ -3,6 +3,7 @@ import { ExpensesService } from './expenses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateExpenseDto, CreateExpenseCategoryDto } from '@printforge/types';
 
 @Controller('accounting')
@@ -11,6 +12,7 @@ export class ExpensesController {
   constructor(private expensesService: ExpensesService) {}
 
   @Get('categories')
+  @UseGuards(StaffGuard)
   getCategories() {
     return this.expensesService.getCategories();
   }
@@ -30,6 +32,7 @@ export class ExpensesController {
   }
 
   @Get('expenses')
+  @UseGuards(StaffGuard)
   findExpenses(@Query('startDate') startDate?: string, @Query('endDate') endDate?: string) {
     return this.expensesService.findAll(startDate, endDate);
   }

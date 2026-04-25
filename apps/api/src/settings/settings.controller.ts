@@ -74,7 +74,7 @@ export class SettingsController {
     // H-3: Restrict sendFile to uploads directory only (prevent path traversal)
     const uploadsDir = path.join(process.cwd(), 'uploads');
     const resolved = path.resolve(logoPath);
-    if (!resolved.startsWith(uploadsDir)) {
+    if (!resolved.startsWith(uploadsDir + path.sep)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     res.sendFile(resolved, { root: '/' });
