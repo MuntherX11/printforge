@@ -90,6 +90,10 @@ export class JobsService {
   }
 
   async update(id: string, dto: UpdateProductionJobDto) {
+    if (dto.status === 'COMPLETED' || dto.status === 'FAILED') {
+      throw new BadRequestException('Use /jobs/:id/complete or /jobs/:id/fail to transition to terminal states');
+    }
+
     const job = await this.findOne(id);
 
     const data: any = { ...dto };
@@ -151,6 +155,9 @@ export class JobsService {
       include: { materials: true },
     });
     if (!job) throw new NotFoundException('Production job not found');
+    if (job.status === 'COMPLETED') {
+      throw new BadRequestException('Job is already completed');
+    }
 
     if (job.componentId && job.quantityToProduce > 0) {
       await this.prisma.productComponent.update({
@@ -161,10 +168,9 @@ export class JobsService {
 
     for (const mat of job.materials) {
       if (mat.spoolId && mat.gramsUsed > 0) {
-        await this.prisma.spool.update({
-          where: { id: mat.spoolId },
-          data: { currentWeight: { decrement: mat.gramsUsed } },
-        });
+        const spool = await this.prisma.spool.findUnique({ where: { id: mat.spoolId }, select: { currentWeight: true } });
+        const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - mat.gramsUsed);
+        await this.prisma.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
       }
     }
 
@@ -179,7 +185,11 @@ export class JobsService {
       // Non-fatal: cost fields may already be populated or materials missing
     });
 
-    const completed = await this.update(id, { status: 'COMPLETED' } as any);
+    const completed = await this.prisma.productionJob.update({
+      where: { id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+      include: { printer: true, materials: { include: { material: true } } },
+    });
     this.gateway?.broadcastNotification({
       type: 'success',
       title: 'Job Completed',
@@ -232,8 +242,8 @@ export class JobsService {
       include: { materials: true },
     });
     if (!job) throw new NotFoundException('Production job not found');
-    if (job.status === 'COMPLETED') {
-      throw new BadRequestException('Cannot mark a completed job as failed');
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+      throw new BadRequestException('Cannot fail a job that is already in a terminal state');
     }
 
     const wasteGrams = dto.wasteGrams || 0;

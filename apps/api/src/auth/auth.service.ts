@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -7,6 +7,8 @@ import { JwtPayload, Role } from '@printforge/types';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -147,7 +149,8 @@ export class AuthService {
 
     // Notify customer
     if (updated.email) {
-      this.emailNotification.notifyCustomerApproved(updated.email, updated.name);
+      this.emailNotification.notifyCustomerApproved(updated.email, updated.name)
+        .catch(err => this.logger.warn('Failed to send approval email: ' + err.message));
     }
 
     return updated;

@@ -20,6 +20,7 @@ export enum MaterialType {
 export enum PrinterConnectionType {
   MOONRAKER = 'MOONRAKER',
   CREALITY_CLOUD = 'CREALITY_CLOUD',
+  CREALITY_WS = 'CREALITY_WS',
   MANUAL = 'MANUAL',
 }
 

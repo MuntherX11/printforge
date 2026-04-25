@@ -5,8 +5,11 @@ export async function generateNumber(
   prefix: string,
   model: 'quote' | 'order' | 'invoice' | 'designProject',
 ): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+  const now = new Date();
+  const omanOffset = 4 * 60; // UTC+4 in minutes
+  const localDate = new Date(now.getTime() + omanOffset * 60 * 1000);
+  const dateStr = localDate.toISOString().slice(0, 10).replace(/-/g, ''); // YYYY-MM-DD in Oman time (UTC+4)
+  // NOTE: catch P2002 (unique constraint violation) at call sites and retry with generateNumber to handle TOCTOU races
   const pattern = `${prefix}-${dateStr}-`;
 
   let count: number;

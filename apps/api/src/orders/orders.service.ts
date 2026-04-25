@@ -50,7 +50,7 @@ export class OrdersService {
   }
 
   async findAll(query: PaginationDto, status?: string) {
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_PICKUP', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
     const where = status && validStatuses.includes(status) ? { status: status as any } : {};
 
     const [data, total] = await Promise.all([
@@ -237,7 +237,7 @@ export class OrdersService {
 
   async update(id: string, dto: UpdateOrderDto) {
     const existing = await this.findOne(id);
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_PICKUP', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
 
     const updated = await this.prisma.order.update({
       where: { id },

@@ -16,6 +16,15 @@ export function isLocalUrl(rawUrl: string): boolean {
     const { hostname, protocol } = new URL(rawUrl);
     if (!['http:', 'https:'].includes(protocol)) return false;
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+    // IPv4-mapped IPv6: ::ffff:A.B.C.D — extract the IPv4 part and re-check
+    const ipv4mapped = hostname.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (ipv4mapped) {
+      return isLocalUrl(`http://${ipv4mapped[1]}/`);
+    }
+    // IPv6 link-local fe80::/10
+    if (/^fe[89ab][0-9a-f]:/i.test(hostname)) return true;
+    // IPv6 ULA fc00::/7
+    if (/^f[cd][0-9a-f]{2}:/i.test(hostname)) return true;
     if (hostname.startsWith('192.168.')) return true;
     if (hostname.startsWith('10.')) return true;
     if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;

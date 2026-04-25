@@ -94,6 +94,17 @@ export class SpoolsService {
 
   async remove(id: string) {
     await this.findOne(id);
+
+    const activeJobMaterials = await this.prisma.jobMaterial.findFirst({
+      where: {
+        spoolId: id,
+        job: { status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] } },
+      },
+    });
+    if (activeJobMaterials) {
+      throw new BadRequestException('Cannot delete spool assigned to an active production job');
+    }
+
     // Clear foreign key references first
     await this.prisma.jobMaterial.deleteMany({ where: { spoolId: id } });
     await this.prisma.spool.delete({ where: { id } });
@@ -176,7 +187,8 @@ export class SpoolsService {
         const y = row * cellH;
 
         // Generate QR code as PNG buffer
-        const qrUrl = `https://printforge.mctx.tech/inventory/spool/${spool.printforgeId}`;
+        const baseUrl = process.env.APP_BASE_URL || 'https://printforge.mctx.tech';
+        const qrUrl = `${baseUrl}/inventory/spool/${spool.printforgeId}`;
         const qrBuffer = await QRCode.toBuffer(qrUrl, {
           type: 'png',
           width: qrSize * 2,

@@ -91,7 +91,7 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
       const stat = fs.statSync(filePath);
       if (!stat.isFile() || stat.size === 0) return;
 
-      const buffer = fs.readFileSync(filePath);
+      const buffer = await fs.promises.readFile(filePath);
       let analysis: any;
 
       if (isGcode) {
