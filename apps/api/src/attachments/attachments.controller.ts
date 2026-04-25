@@ -33,9 +33,18 @@ export class AttachmentsController {
     const filePath = await this.attachmentsService.getFilePath(id);
 
     const fileBuffer = await fs.readFile(filePath);
+
+    // L-2: Sanitize filename to prevent header injection
+    const safeName = attachment.originalName.replace(/[^\w\s.\-]/g, '_').trim();
+
+    // H-1: Force octet-stream for SVG to prevent XSS via script execution
+    const contentType = attachment.mimeType.includes('svg')
+      ? 'application/octet-stream'
+      : attachment.mimeType;
+
     res.set({
-      'Content-Type': attachment.mimeType,
-      'Content-Disposition': `attachment; filename="${attachment.originalName}"`,
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${safeName}"`,
       'Content-Length': fileBuffer.length,
     });
     res.end(fileBuffer);

@@ -4,6 +4,7 @@ import { JobMaterialsService } from './job-materials.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateProductionJobDto, UpdateProductionJobDto, AddJobMaterialDto, FailJobDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -23,6 +24,7 @@ export class JobsController {
   }
 
   @Get()
+  @UseGuards(StaffGuard)
   findAll(@Query() query: PaginationDto, @Query('status') status?: string) {
     return this.jobsService.findAll(query, status);
   }
@@ -45,6 +47,7 @@ export class JobsController {
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.jobsService.findOne(id);
   }

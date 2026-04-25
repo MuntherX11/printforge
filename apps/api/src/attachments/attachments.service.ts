@@ -1,15 +1,40 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads';
 
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'application/pdf',
+  'model/stl',
+  'application/octet-stream',
+  'text/plain',
+  'application/zip',
+];
+
+const BLOCKED_EXTENSIONS = ['.html', '.htm', '.js', '.jsx', '.ts', '.tsx', '.php', '.exe', '.sh', '.bat'];
+
 @Injectable()
 export class AttachmentsService {
   constructor(private prisma: PrismaService) {}
 
   async upload(file: Express.Multer.File, entityType: string, entityId: string, uploadedById?: string) {
+    // MIME type allowlist check
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new BadRequestException('File type not allowed');
+    }
+    // Extension denylist check
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (BLOCKED_EXTENSIONS.includes(ext)) {
+      throw new BadRequestException('File type not allowed');
+    }
+
     const dateDir = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
     const storagePath = path.join(dateDir, `${Date.now()}-${file.originalname}`);
     const fullPath = path.join(UPLOAD_DIR, storagePath);

@@ -5,6 +5,7 @@ import { MaterialsService } from './materials.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateMaterialDto, UpdateMaterialDto } from '@printforge/types';
 import * as XLSX from 'xlsx';
 
@@ -56,6 +57,7 @@ export class MaterialsController {
   }
 
   @Get('low-stock')
+  @UseGuards(StaffGuard)
   getLowStock() {
     return this.materialsService.getLowStock();
   }

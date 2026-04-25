@@ -16,6 +16,7 @@ export class PaginationDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['createdAt', 'updatedAt', 'name', 'status', 'total', 'orderNumber', 'paidAt', 'completedAt', 'printDuration', 'totalCost'])
   sortBy?: string = 'createdAt';
 
   @IsOptional()

@@ -5,6 +5,7 @@ import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -29,7 +30,7 @@ export class SettingsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffGuard)
   getAll() {
     return this.settingsService.getAll();
   }
@@ -44,7 +45,15 @@ export class SettingsController {
   @Post('logo')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 2 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (!allowed.includes(ext)) return cb(new BadRequestException('Only JPG, PNG, WebP allowed'), false);
+      cb(null, true);
+    },
+  }))
   async uploadLogo(@UploadedFile() file: any) {
     if (!file) throw new BadRequestException('No file uploaded');
     if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -62,7 +71,13 @@ export class SettingsController {
       res.status(404).json({ error: 'No logo uploaded' });
       return;
     }
-    res.sendFile(logoPath);
+    // H-3: Restrict sendFile to uploads directory only (prevent path traversal)
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    const resolved = path.resolve(logoPath);
+    if (!resolved.startsWith(uploadsDir)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    res.sendFile(resolved, { root: '/' });
   }
 
   // ── Backup management ────────────────────────────────────────────────────────

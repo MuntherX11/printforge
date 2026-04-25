@@ -6,6 +6,7 @@ import { EmailService } from '../communications/email.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateInvoiceDto, UpdateInvoiceDto } from '@printforge/types';
 
 @Controller('invoices')
@@ -25,11 +26,13 @@ export class InvoicesController {
   }
 
   @Get()
+  @UseGuards(StaffGuard)
   findAll() {
     return this.invoicesService.findAll();
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.invoicesService.findOne(id);
   }
