@@ -40,7 +40,7 @@ export default function PrinterDetailPage() {
   const [formKey, setFormKey] = useState(0); // forces form re-render on save
 
   const load = useCallback(() => {
-    api.get(`/printers/${id}`).then(setPrinter).catch(console.error).finally(() => setLoading(false));
+    return api.get(`/printers/${id}`).then(setPrinter).catch(console.error).finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -188,7 +188,7 @@ export default function PrinterDetailPage() {
                 moonrakerUrl: form.get('moonrakerUrl') || undefined,
                 cameraUrl: form.get('cameraUrl') || undefined,
               });
-              load();
+              await load();
               setFormKey(k => k + 1);
               const savedConnectionType = form.get('connectionType') as string;
               if (savedConnectionType === 'CREALITY_WS') {
@@ -329,7 +329,7 @@ export default function PrinterDetailPage() {
                 wattage: parseFloat(form.get('wattage') as string) || 200,
                 markupMultiplier: parseFloat(form.get('markupMultiplier') as string) || 2.5,
               });
-              load();
+              await load();
               setFormKey(k => k + 1);
               toast('success', 'Costing settings saved');
             } catch (err: any) {
