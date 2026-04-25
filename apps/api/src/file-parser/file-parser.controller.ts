@@ -1,11 +1,19 @@
 import { Controller, Post, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query, Body } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsString, IsUrl } from 'class-validator';
 import { GcodeParserService } from './gcode-parser.service';
 import { StlEstimatorService } from './stl-estimator.service';
 import { UrlScraperService } from './url-scraper.service';
 import { CostingService } from '../costing/costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { ThreeMfParserService } from './threemf-parser.service';
+
+class ScrapeUrlDto {
+  @IsString()
+  @IsUrl()
+  url!: string;
+}
 
 @Controller('file-parser')
 @UseGuards(JwtAuthGuard)
@@ -98,6 +106,10 @@ export class FileParserController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
   async parseGcode(@UploadedFile() file: any) {
     if (!file) throw new BadRequestException('No file uploaded');
+    const name = (file?.originalname || '').toLowerCase();
+    if (!name.endsWith('.gcode') && !name.endsWith('.gco') && !name.endsWith('.g')) {
+      throw new BadRequestException('File must be a G-code file (.gcode, .gco, .g)');
+    }
     return this.gcodeParser.parseHeader(file.buffer);
   }
 
@@ -109,6 +121,10 @@ export class FileParserController {
     @Query('infill') infill?: string,
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
+    const name = (file?.originalname || '').toLowerCase();
+    if (!name.endsWith('.stl')) {
+      throw new BadRequestException('File must be an STL file');
+    }
     return this.stlEstimator.analyze(
       file.buffer,
       density ? parseFloat(density) : 1.24,
@@ -117,7 +133,8 @@ export class FileParserController {
   }
 
   @Post('scrape-url')
-  async scrapeUrl(@Body() body: { url: string }) {
+  @UseGuards(StaffGuard)
+  async scrapeUrl(@Body() body: ScrapeUrlDto) {
     if (!body.url) throw new BadRequestException('URL is required');
     return this.urlScraper.scrapeModelUrl(body.url);
   }

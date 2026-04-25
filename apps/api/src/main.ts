@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -48,6 +48,6 @@ async function bootstrap() {
 
   const port = process.env.API_PORT || 4000;
   await app.listen(port);
-  console.log(`PrintForge API running on port ${port}`);
+  new Logger('Bootstrap').log(`PrintForge API running on port ${port}`);
 }
 bootstrap();

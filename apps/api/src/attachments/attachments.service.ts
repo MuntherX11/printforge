@@ -35,8 +35,11 @@ export class AttachmentsService {
       throw new BadRequestException('File type not allowed');
     }
 
+    const safeOriginal = file.originalname
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 100);
     const dateDir = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    const storagePath = path.join(dateDir, `${Date.now()}-${file.originalname}`);
+    const storagePath = path.join(dateDir, `${Date.now()}-${safeOriginal}`);
     const fullPath = path.join(UPLOAD_DIR, storagePath);
 
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -44,7 +47,7 @@ export class AttachmentsService {
 
     return this.prisma.attachment.create({
       data: {
-        filename: `${Date.now()}-${file.originalname}`,
+        filename: `${Date.now()}-${safeOriginal}`,
         originalName: file.originalname,
         mimeType: file.mimetype,
         sizeBytes: file.size,
