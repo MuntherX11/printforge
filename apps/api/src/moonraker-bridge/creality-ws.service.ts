@@ -233,7 +233,7 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
     // Update DB status (avoid hammering if unchanged)
     const printer = await this.prisma.printer.findUnique({
       where: { id: printerId },
-      select: { status: true },
+      select: { status: true, lastSeen: true },
     }).catch(() => null);
 
     if (printer && printer.status !== newDbStatus) {
@@ -258,11 +258,14 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
         }).catch(() => {});
       }
     } else if (printer) {
-      // Still update lastSeen even if status unchanged
-      await this.prisma.printer.update({
-        where: { id: printerId },
-        data: { lastSeen: new Date() },
-      }).catch(() => {});
+      // WARN-03: throttle lastSeen writes — only update if >30s stale
+      const lastSeenStale = !printer.lastSeen || (Date.now() - new Date(printer.lastSeen).getTime()) > 30_000;
+      if (lastSeenStale) {
+        await this.prisma.printer.update({
+          where: { id: printerId },
+          data: { lastSeen: new Date() },
+        }).catch(() => {});
+      }
     }
   }
 
@@ -280,21 +283,32 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
 
     if (!job) return;
 
-    await this.prisma.productionJob.update({
-      where: { id: job.id },
+    // BUG-02: idempotency guard — only update when job is still active
+    const result = await this.prisma.productionJob.updateMany({
+      where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
         printDuration: snapshot.printJobTime,
       },
-    }).catch(() => {});
+    }).catch(() => ({ count: 0 }));
 
-    // Deduct spool weight
+    if (result.count === 0) {
+      this.logger.log(`Job ${job.id} already completed — skipping duplicate completion`);
+      return;
+    }
+
+    // BUG-04: fetch current spool weight before deducting to prevent negative values
     for (const jm of job.materials) {
       if (jm.spoolId && jm.gramsUsed > 0) {
+        const currentSpool = await this.prisma.spool.findUnique({
+          where: { id: jm.spoolId },
+          select: { currentWeight: true },
+        }).catch(() => null);
+        const newWeight = Math.max(0, (currentSpool?.currentWeight ?? 0) - jm.gramsUsed);
         await this.prisma.spool.update({
           where: { id: jm.spoolId },
-          data: { currentWeight: { decrement: jm.gramsUsed } },
+          data: { currentWeight: newWeight },
         }).catch(() => {});
       }
     }

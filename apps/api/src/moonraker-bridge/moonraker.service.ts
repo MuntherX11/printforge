@@ -34,6 +34,10 @@ export interface MoonrakerSnapshot {
 export class MoonrakerService {
   private readonly logger = new Logger(MoonrakerService.name);
 
+  // INF-03: per-printer failure tracking for exponential backoff
+  private readonly failureCounts = new Map<string, number>();
+  private readonly skipUntil = new Map<string, number>();
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -119,9 +123,19 @@ export class MoonrakerService {
 
     await Promise.all(
       printers.map(async (printer) => {
+        // INF-03: skip printers in backoff window
+        const skipTs = this.skipUntil.get(printer.id) ?? 0;
+        if (skipTs > Date.now()) return;
+
         const snapshot = await this.fetchStatus(printer.moonrakerUrl!);
 
         if (!snapshot) {
+          // INF-03: increment failure count and compute backoff
+          const failures = (this.failureCounts.get(printer.id) ?? 0) + 1;
+          this.failureCounts.set(printer.id, failures);
+          const backoffMs = Math.min(300_000, 10_000 * Math.pow(2, Math.floor(failures / 3)));
+          this.skipUntil.set(printer.id, Date.now() + backoffMs);
+
           // Mark offline if we can't reach it
           if (printer.status !== 'OFFLINE') {
             await this.prisma.printer.update({
@@ -132,17 +146,24 @@ export class MoonrakerService {
           return;
         }
 
+        // INF-03: reset failure tracking on success
+        this.failureCounts.set(printer.id, 0);
+        this.skipUntil.delete(printer.id);
+
         const newStatus = this.mapState(snapshot.printStats?.state || snapshot.printerState);
         const prevStatus = printer.status;
 
-        // Update printer status
-        await this.prisma.printer.update({
-          where: { id: printer.id },
-          data: {
-            status: newStatus as any,
-            lastSeen: new Date(),
-          },
-        });
+        // API-02: only write to DB when status changed or lastSeen is stale (>30s)
+        const lastSeenStale = !printer.lastSeen || (Date.now() - new Date(printer.lastSeen).getTime()) > 30_000;
+        if (newStatus !== prevStatus || lastSeenStale) {
+          await this.prisma.printer.update({
+            where: { id: printer.id },
+            data: {
+              status: newStatus as any,
+              lastSeen: new Date(),
+            },
+          });
+        }
 
         // Detect job completion: was PRINTING, now IDLE/complete
         if (prevStatus === 'PRINTING' && (newStatus === 'IDLE') && snapshot.printStats?.state === 'complete') {
@@ -178,13 +199,17 @@ export class MoonrakerService {
     if (!stats?.filename) return;
 
     // Find active job for this printer matching the filename
+    // WARN-22: include spool.material so we can read density
     const job = await this.prisma.productionJob.findFirst({
       where: {
         printerId,
         status: { in: ['IN_PROGRESS', 'QUEUED'] },
         gcodeFilename: stats.filename,
       },
-      include: { materials: { include: { spool: true } }, printer: true },
+      include: {
+        materials: { include: { spool: { include: { material: true } } } },
+        printer: true,
+      },
     });
 
     if (!job) {
@@ -192,15 +217,10 @@ export class MoonrakerService {
       return;
     }
 
-    // Calculate filament grams from mm (PLA 1.75mm default)
+    // BUG-02: idempotency guard — only update when job is still active
     const filamentMm = stats.filament_used || 0;
-    const filamentGrams = filamentMm > 0
-      ? (Math.PI * Math.pow(0.0875, 2) * filamentMm * 1.24) / 1000 // density 1.24 g/cm³
-      : 0;
-
-    // Update job with actual print data
-    await this.prisma.productionJob.update({
-      where: { id: job.id },
+    const result = await this.prisma.productionJob.updateMany({
+      where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
@@ -208,6 +228,21 @@ export class MoonrakerService {
         filamentUsedMm: filamentMm,
       },
     });
+
+    if (result.count === 0) {
+      this.logger.log(`Job ${job.id} already completed — skipping duplicate completion`);
+      return;
+    }
+
+    // WARN-22: use material density from spool if available, fall back to PLA
+    const density =
+      job.materials?.[0]?.spool?.material?.density ??
+      1.24; // fallback to PLA density g/cm³
+
+    // Calculate filament grams from mm (1.75mm filament diameter)
+    const filamentGrams = filamentMm > 0
+      ? (Math.PI * Math.pow(0.0875, 2) * filamentMm * density) / 1000
+      : 0;
 
     // Auto-deduct spool weight for each job material that has a spool assigned
     for (const jm of job.materials) {
