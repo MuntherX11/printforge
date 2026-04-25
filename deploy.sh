@@ -55,11 +55,11 @@ chmod +x docker/db-backup/backup.sh 2>/dev/null || true
 echo "[3/6] Building Docker images (this takes a few minutes)..."
 docker compose build --no-cache
 
-# ---- Step 4: Start containers ----
-echo "[4/6] Starting containers..."
-docker compose up -d
+# ---- Step 4: Start DB + Redis first ----
+echo "[4/6] Starting database and Redis..."
+docker compose up -d db redis
 
-# ---- Step 5: Wait for DB + API ----
+# ---- Step 5: Wait for DB, then push schema before API starts ----
 echo "[5/6] Waiting for database..."
 RETRIES=30
 until docker compose exec -T db pg_isready -U printforge > /dev/null 2>&1; do
@@ -73,7 +73,16 @@ until docker compose exec -T db pg_isready -U printforge > /dev/null 2>&1; do
 done
 echo "  Database ready."
 
-echo "  Waiting for API to start..."
+# Push schema NOW — before the API container starts — so it never boots against a stale schema
+echo "  Applying database schema..."
+docker compose run --rm api npx prisma db push --accept-data-loss
+echo "  Schema applied."
+
+# Bring up all remaining containers (API, app, nginx, workers, etc.)
+echo "  Starting all containers..."
+docker compose up -d
+
+echo "  Waiting for API to become ready..."
 RETRIES=30
 until docker compose exec -T api node -e "console.log('ok')" > /dev/null 2>&1; do
   RETRIES=$((RETRIES - 1))
@@ -86,11 +95,10 @@ until docker compose exec -T api node -e "console.log('ok')" > /dev/null 2>&1; d
 done
 echo "  API container ready."
 
-# ---- Step 6: Migrate and seed ----
+# ---- Step 6: Seed ----
 echo "[6/6] Setting up database..."
 
-# Push schema (creates all tables)
-docker compose exec -T api npx prisma db push --accept-data-loss
+# Schema already pushed above — go straight to seed
 
 # Write seed script to a temp file to avoid bash interpretation issues
 cat > /tmp/printforge_seed.js << 'SEEDEOF'
