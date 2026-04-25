@@ -13,8 +13,9 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Calculator, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { CameraViewer } from '@/components/camera-viewer';
 
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
@@ -39,9 +40,27 @@ export default function JobDetailPage() {
   const [submittingReprint, setSubmittingReprint] = useState(false);
   const [materials, setMaterials] = useState<any[]>([]);
   const [spools, setSpools] = useState<any[]>([]);
+  const [showCamera, setShowCamera] = useState(false);
+  const [gcodeCheck, setGcodeCheck] = useState<{ loading: boolean; match: boolean | null; printing: string | null }>({ loading: false, match: null, printing: null });
 
   const load = () => api.get(`/jobs/${id}`).then(setJob).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, [id]);
+
+  // GCode verification: compare what Moonraker is actually printing vs what the job expects
+  useEffect(() => {
+    if (!job) return;
+    if (job.status !== 'IN_PROGRESS') return;
+    if (!job.printer?.moonrakerUrl || !job.gcodeFilename) return;
+
+    setGcodeCheck({ loading: true, match: null, printing: null });
+    api.get<any>(`/moonraker/status/${job.printer.id}`)
+      .then(res => {
+        const printing = res?.snapshot?.printStats?.filename ?? null;
+        const match = printing ? printing === job.gcodeFilename : null;
+        setGcodeCheck({ loading: false, match, printing });
+      })
+      .catch(() => setGcodeCheck({ loading: false, match: null, printing: null }));
+  }, [job?.id, job?.status]);
 
   async function updateJob(data: any) {
     try {
@@ -147,7 +166,35 @@ export default function JobDetailPage() {
             {job.order && <> | <Link href={`/orders/${job.order.id}`} className="text-brand-600 hover:underline">{job.order.orderNumber}</Link></>}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* GCode match indicator — only for IN_PROGRESS Moonraker jobs with a gcodeFilename */}
+          {job.status === 'IN_PROGRESS' && job.gcodeFilename && job.printer?.moonrakerUrl && (
+            <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
+              gcodeCheck.loading ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' :
+              gcodeCheck.match === true ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+              gcodeCheck.match === false ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+              'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+            }`}
+              title={gcodeCheck.printing ? `Printing: ${gcodeCheck.printing}` : 'Could not read printer state'}
+            >
+              {gcodeCheck.loading ? <Loader2 className="h-3 w-3 animate-spin" /> :
+               gcodeCheck.match === true ? <CheckCircle className="h-3 w-3" /> :
+               gcodeCheck.match === false ? <XCircle className="h-3 w-3" /> :
+               <Camera className="h-3 w-3" />}
+              {gcodeCheck.loading ? 'Checking gcode…' :
+               gcodeCheck.match === true ? 'Correct gcode' :
+               gcodeCheck.match === false ? `Wrong gcode (${gcodeCheck.printing ?? 'unknown'})` :
+               'Gcode unknown'}
+            </span>
+          )}
+
+          {/* Camera button — only when IN_PROGRESS and printer has a camera */}
+          {job.status === 'IN_PROGRESS' && job.printer?.cameraUrl && (
+            <Button variant="outline" onClick={() => setShowCamera(true)}>
+              <Camera className="h-4 w-4 mr-2" /> View Camera
+            </Button>
+          )}
+
           <Select options={jobStatuses} value={job.status} onChange={e => updateJob({ status: e.target.value })} className="w-36" />
           <Button variant="outline" onClick={calculateCost}><Calculator className="h-4 w-4 mr-2" /> Calculate Cost</Button>
           {!['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
@@ -262,6 +309,22 @@ export default function JobDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Camera feed dialog */}
+      <Dialog open={showCamera} onClose={() => setShowCamera(false)} title={`${job.printer?.name ?? 'Printer'} — Camera`}>
+        {showCamera && job.printer?.cameraUrl && (
+          <div className="space-y-3">
+            <CameraViewer printerId={job.printer.id} printerName={job.printer.name} variant="full" />
+            {job.gcodeFilename && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                Expected gcode: <span className="font-mono">{job.gcodeFilename}</span>
+                {gcodeCheck.match === true && <span className="text-green-600 ml-1">✓ confirmed on printer</span>}
+                {gcodeCheck.match === false && <span className="text-red-600 ml-1">⚠ printer is running a different file</span>}
+              </p>
+            )}
+          </div>
+        )}
+      </Dialog>
 
       <Dialog open={showCancelDialog} onClose={() => setShowCancelDialog(false)} title="Cancel Job">
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Are you sure you want to cancel <strong>{job.name}</strong>? This cannot be undone.</p>
