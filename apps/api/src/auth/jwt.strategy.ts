@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { TokenBlocklistService } from './token-blocklist.service';
 
 function extractFromCookie(req: Request): string | null {
   if (req?.cookies?.token) {
@@ -17,6 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     private prisma: PrismaService,
+    private blocklist: TokenBlocklistService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
@@ -27,7 +29,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; email: string; role?: string; type?: string }) {
+  async validate(payload: { sub: string; email: string; role?: string; type?: string; jti?: string; exp?: number }) {
+    if (payload.jti) {
+      const blocked = await this.blocklist.isBlocked(payload.jti);
+      if (blocked) throw new UnauthorizedException('Token has been revoked');
+    }
+
     // Customer token
     if (payload.type === 'customer') {
       const customer = await this.prisma.customer.findUnique({

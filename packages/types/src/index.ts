@@ -255,6 +255,7 @@ export interface JwtPayload {
   email: string;
   role: Role;
   type: UserType;
+  jti?: string;
 }
 
 export interface CustomerSignupDto {

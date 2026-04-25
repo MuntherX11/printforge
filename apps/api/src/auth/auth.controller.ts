@@ -1,7 +1,9 @@
-import { Controller, Post, Body, Res, HttpCode, HttpStatus, Get, UseGuards, Param } from '@nestjs/common';
-import { Response } from 'express';
+import { Controller, Post, Body, Res, Req, HttpCode, HttpStatus, Get, UseGuards, Param } from '@nestjs/common';
+import { Response, Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
+import { TokenBlocklistService } from './token-blocklist.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { StaffGuard } from './guards/staff.guard';
 import { RolesGuard } from './guards/roles.guard';
@@ -10,7 +12,11 @@ import { CurrentUser } from './decorators/current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private jwtService: JwtService,
+    private blocklist: TokenBlocklistService,
+  ) {}
 
   // ============ STAFF AUTH ============
 
@@ -35,7 +41,20 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const raw: string | undefined = (req as any).cookies?.token;
+    if (raw) {
+      try {
+        const decoded = this.jwtService.decode(raw) as { jti?: string; exp?: number } | null;
+        if (decoded?.jti && decoded?.exp) {
+          const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+          await this.blocklist.block(decoded.jti, ttl);
+        }
+      } catch { /* ignore decode errors — cookie may be malformed */ }
+    }
     res.clearCookie('token');
     return { message: 'Logged out' };
   }

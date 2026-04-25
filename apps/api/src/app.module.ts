@@ -24,6 +24,7 @@ import { ExportModule } from './export/export.module';
 import { FileParserModule } from './file-parser/file-parser.module';
 import { BridgeModule } from './moonraker-bridge/bridge.module';
 import { WebSocketModule } from './websocket/websocket.module';
+import { RedisModule } from './common/redis/redis.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LowStockProcessor } from './worker/low-stock.processor';
 import { LowStockScheduler } from './worker/low-stock.scheduler';
@@ -60,6 +61,7 @@ import { HealthController } from './health/health.controller';
     FileParserModule,
     BridgeModule,
     WebSocketModule,
+    RedisModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [HealthController, LowStockController],

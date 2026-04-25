@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { JwtPayload, Role } from '@printforge/types';
@@ -39,6 +40,7 @@ export class AuthService {
       email: user.email,
       role: user.role as any,
       type: 'staff',
+      jti: randomUUID(),
     };
 
     const token = this.jwtService.sign(payload);
@@ -110,6 +112,7 @@ export class AuthService {
       email: customer.email!,
       role: 'VIEWER' as Role,
       type: 'customer',
+      jti: randomUUID(),
     };
 
     const token = this.jwtService.sign(payload);
