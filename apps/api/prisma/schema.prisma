@@ -42,6 +42,7 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([userId, createdAt])
 }
 
 // ============ CUSTOMERS ============
@@ -211,6 +212,8 @@ model Printer {
   productionJobs  ProductionJob[]
   defaultProducts Product[]
   maintenanceLogs MaintenanceLog[]
+
+  @@index([connectionType, isActive])
 }
 
 model MaintenanceLog {
@@ -307,6 +310,9 @@ model ProductionJob {
   @@index([status])
   @@index([orderId])
   @@index([reprintOfId])
+  @@index([printerId])
+  @@index([printerId, status])
+  @@index([completedAt])
 }
 
 enum JobStatus {
@@ -467,6 +473,8 @@ model Invoice {
   updatedAt       DateTime      @updatedAt
 
   attachments     Attachment[]
+
+  @@index([paidAt])
 }
 
 enum InvoiceStatus {
@@ -633,6 +641,9 @@ model Notification {
   isRead      Boolean          @default(false)
   userId      String?
   createdAt   DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
 }
 
 enum NotificationType {

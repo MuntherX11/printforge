@@ -4,6 +4,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { PrintersService } from './printers.service';
 import { MaintenanceService } from './maintenance.service';
+import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -16,6 +17,7 @@ export class PrintersController {
   constructor(
     private printersService: PrintersService,
     private maintenanceService: MaintenanceService,
+    private prismaService: PrismaService,
   ) {}
 
   @Post()
@@ -64,7 +66,11 @@ export class PrintersController {
    */
   @Get(':id/camera/stream')
   async cameraStream(@Param('id') id: string, @Res() res: Response) {
-    const printer = await this.printersService.findOne(id);
+    const printer = await this.prismaService.printer.findUnique({
+      where: { id },
+      select: { cameraUrl: true, name: true },
+    });
+    if (!printer) throw new NotFoundException('Printer not found');
     if (!printer.cameraUrl) throw new NotFoundException('No camera URL configured for this printer');
     if (!isLocalUrl(printer.cameraUrl)) throw new BadRequestException('Camera URL must be a local/private network address');
 

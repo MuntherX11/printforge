@@ -9,7 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { SpoolLabelScanner } from '@/components/spool-label-scanner';
+import dynamic from 'next/dynamic';
+const SpoolLabelScanner = dynamic(
+  () => import('@/components/spool-label-scanner').then(m => ({ default: m.SpoolLabelScanner })),
+  { ssr: false },
+);
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';

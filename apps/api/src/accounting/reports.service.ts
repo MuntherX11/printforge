@@ -161,9 +161,11 @@ export class ReportsService {
       this.prisma.order.count({ where: { status: { in: ['PENDING', 'CONFIRMED'] } } }),
       this.prisma.invoice.findMany({
         where: { status: 'PAID', paidAt: { gte: monthStart } },
+        select: { paidAmount: true },
       }),
       this.prisma.productionJob.findMany({
         where: { status: 'COMPLETED', completedAt: { gte: monthStart } },
+        select: { totalCost: true },
       }),
       this.prisma.printer.findMany({ where: { isActive: true } }),
     ]);
@@ -172,13 +174,16 @@ export class ReportsService {
     const monthlyCost = completedJobsThisMonth.reduce((sum, job) => sum + (job.totalCost || 0), 0);
 
     // Low stock check
-    const materials = await this.prisma.material.findMany({
-      include: { spools: { where: { isActive: true } } },
-    });
-    const lowStockMaterials = materials.filter(m => {
-      const totalWeight = m.spools.reduce((sum, s) => sum + s.currentWeight, 0);
-      return totalWeight < m.reorderPoint;
-    }).length;
+    const [materials, stockByMaterial] = await Promise.all([
+      this.prisma.material.findMany({ select: { id: true, reorderPoint: true } }),
+      this.prisma.spool.groupBy({
+        by: ['materialId'],
+        where: { isActive: true },
+        _sum: { currentWeight: true },
+      }),
+    ]);
+    const stockMap = new Map(stockByMaterial.map(s => [s.materialId, s._sum.currentWeight ?? 0]));
+    const lowStockMaterials = materials.filter(m => (stockMap.get(m.id) ?? 0) < m.reorderPoint).length;
 
     // Printer utilization: how many are currently printing
     const printingCount = printers.filter(p => p.status === 'PRINTING').length;

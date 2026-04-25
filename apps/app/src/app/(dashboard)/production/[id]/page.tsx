@@ -60,7 +60,7 @@ export default function JobDetailPage() {
         setGcodeCheck({ loading: false, match, printing });
       })
       .catch(() => setGcodeCheck({ loading: false, match: null, printing: null }));
-  }, [job?.id, job?.status]);
+  }, [id, job?.status]);
 
   async function updateJob(data: any) {
     try {

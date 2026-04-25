@@ -63,10 +63,15 @@ export function useWebSocket() {
 
   const updatePrinterStatus = useCallback((data: PrinterStatusEvent[]) => {
     setState(prev => {
+      let changed = false;
       const next = { ...prev.printerStatuses };
       for (const entry of data) {
-        next[entry.printerId] = entry;
+        if (JSON.stringify(prev.printerStatuses[entry.printerId]) !== JSON.stringify(entry)) {
+          next[entry.printerId] = entry;
+          changed = true;
+        }
       }
+      if (!changed) return { ...prev, connected: true };
       return { ...prev, printerStatuses: next, connected: true };
     });
   }, []);

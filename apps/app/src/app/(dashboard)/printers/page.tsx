@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,22 @@ import { api } from '@/lib/api';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Printer, Clock, Wrench, Camera } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { useWebSocket } from '@/lib/use-websocket';
 
 export default function PrintersPage() {
   const { toast } = useToast();
+  const { printerStatuses } = useWebSocket();
   const [printers, setPrinters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
   const [cameraTarget, setCameraTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const displayPrinters = useMemo(() =>
+    printers.map(p => ({
+      ...p,
+      status: (printerStatuses[p.id]?.printerState?.toUpperCase() as any) ?? p.status,
+    })), [printers, printerStatuses]);
 
   const load = () => api.get<any[]>('/printers').then(setPrinters).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -70,7 +78,7 @@ export default function PrintersPage() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {printers.map(p => (
+          {displayPrinters.map(p => (
             <Link key={p.id} href={`/printers/${p.id}`}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer">
                 <CardContent className="p-6">

@@ -20,6 +20,14 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
   const [loaded, setLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
+  const fullscreenImgRef = useRef<HTMLImageElement>(null);
+
+  // When fullscreen closes, clear the fullscreen img src to stop that stream
+  useEffect(() => {
+    if (!fullscreen && fullscreenImgRef.current) {
+      fullscreenImgRef.current.src = '';
+    }
+  }, [fullscreen]);
 
   const streamUrl = `/api/printers/${printerId}/camera/stream`;
 
@@ -60,7 +68,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
               />
               <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                 <button
-                  onClick={() => setFullscreen(true)}
+                  onClick={() => { if (imgRef.current) imgRef.current.src = ''; setFullscreen(true); }}
                   className="bg-black/60 text-white rounded p-1 hover:bg-black/80"
                   title="Fullscreen"
                 >
@@ -81,11 +89,11 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
         {fullscreen && (
           <div
             className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
-            onClick={() => setFullscreen(false)}
+            onClick={() => { if (imgRef.current) imgRef.current.src = streamUrl; setFullscreen(false); }}
           >
             <button
               className="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 hover:bg-black/70"
-              onClick={() => setFullscreen(false)}
+              onClick={() => { if (imgRef.current) imgRef.current.src = streamUrl; setFullscreen(false); }}
             >
               <X className="h-5 w-5" />
             </button>
@@ -93,6 +101,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
               <p className="absolute top-4 left-4 text-white font-semibold text-sm">{printerName}</p>
             )}
             <img
+              ref={fullscreenImgRef}
               src={streamUrl}
               alt={`${printerName ?? 'Printer'} camera`}
               className="max-w-full max-h-full object-contain"
