@@ -101,9 +101,6 @@ export class JobsService {
     if (dto.status === 'IN_PROGRESS' && job.status !== 'IN_PROGRESS') {
       data.startedAt = new Date();
     }
-    if (dto.status === 'COMPLETED' && job.status !== 'COMPLETED') {
-      data.completedAt = new Date();
-    }
 
     return this.prisma.productionJob.update({
       where: { id },
