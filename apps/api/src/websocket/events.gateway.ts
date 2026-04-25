@@ -13,7 +13,10 @@ import { MoonrakerService, MoonrakerSnapshot } from '../moonraker-bridge/moonrak
 import { PrismaService } from '../common/prisma/prisma.service';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+  },
   namespace: '/ws',
   path: '/api/socket.io/',
 })
@@ -34,7 +37,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     server.use((socket, next) => {
       try {
         const cookieHeader = socket.handshake.headers.cookie || '';
-        const match = cookieHeader.match(/(?:^|;\s*)access_token=([^;]+)/);
+        const match = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/);
         if (!match) {
           return next(new Error('Unauthorized'));
         }
