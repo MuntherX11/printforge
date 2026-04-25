@@ -8,22 +8,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreatePrinterDto, UpdatePrinterDto, CreateMaintenanceLogDto, CompleteMaintenanceDto } from '@printforge/types';
-
-/** Reusable SSRF guard — only allows private/Tailscale network addresses */
-function isLocalUrl(rawUrl: string): boolean {
-  try {
-    const { hostname, protocol } = new URL(rawUrl);
-    if (!['http:', 'https:'].includes(protocol)) return false;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
-    if (hostname.startsWith('192.168.')) return true;
-    if (hostname.startsWith('10.')) return true;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
-    if (hostname.endsWith('.local')) return true;
-    const o = hostname.split('.').map(Number);
-    if (o.length === 4 && o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;
-    return false;
-  } catch { return false; }
-}
+import { isLocalUrl } from '../common/utils/is-local-url';
 
 @Controller('printers')
 @UseGuards(JwtAuthGuard)

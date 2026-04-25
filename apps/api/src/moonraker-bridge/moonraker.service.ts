@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { isLocalUrl } from '../common/utils/is-local-url';
 
 interface MoonrakerPrinterStatus {
   state: string;                       // ready, printing, paused, error, shutdown, startup
@@ -39,40 +40,10 @@ export class MoonrakerService {
   ) {}
 
   /**
-   * Validate that a Moonraker URL points to a local/private network address.
-   * Prevents SSRF attacks via user-controlled URLs.
-   */
-  private validateMoonrakerUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      const hostname = parsed.hostname;
-      // Only allow private/local IPs and hostnames
-      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
-      // 192.168.x.x
-      if (hostname.startsWith('192.168.')) return true;
-      // 10.x.x.x
-      if (hostname.startsWith('10.')) return true;
-      // 172.16-31.x.x
-      if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
-      // .local mDNS hostnames
-      if (hostname.endsWith('.local')) return true;
-      // Tailscale CGNAT range: 100.64.0.0/10 (100.64.x.x – 100.127.x.x)
-      // Allows remote printers on the same Tailscale network
-      const octets = hostname.split('.').map(Number);
-      if (octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) return true;
-      // Only allow http for non-Tailscale (prevents redirects to external HTTPS services)
-      if (parsed.protocol !== 'http:') return false;
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Fetch printer status from a Moonraker instance.
    */
   async fetchStatus(moonrakerUrl: string): Promise<MoonrakerSnapshot | null> {
-    if (!this.validateMoonrakerUrl(moonrakerUrl)) {
+    if (!isLocalUrl(moonrakerUrl)) {
       this.logger.warn(`Blocked SSRF attempt to non-local URL: ${moonrakerUrl}`);
       return null;
     }
@@ -267,7 +238,7 @@ export class MoonrakerService {
    * Send a G-code command to a Moonraker instance.
    */
   async sendGcode(moonrakerUrl: string, gcode: string): Promise<boolean> {
-    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
+    if (!isLocalUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/gcode/script?script=${encodeURIComponent(gcode)}`, {
@@ -284,7 +255,7 @@ export class MoonrakerService {
    * Start a print job on a Moonraker printer.
    */
   async startPrint(moonrakerUrl: string, filename: string): Promise<boolean> {
-    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
+    if (!isLocalUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/print/start?filename=${encodeURIComponent(filename)}`, {
@@ -301,7 +272,7 @@ export class MoonrakerService {
    * Pause/resume/cancel current print.
    */
   async controlPrint(moonrakerUrl: string, action: 'pause' | 'resume' | 'cancel'): Promise<boolean> {
-    if (!this.validateMoonrakerUrl(moonrakerUrl)) return false;
+    if (!isLocalUrl(moonrakerUrl)) return false;
     const base = moonrakerUrl.replace(/\/+$/, '');
     try {
       const res = await fetch(`${base}/printer/print/${action}`, {
