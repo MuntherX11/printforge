@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
@@ -7,6 +7,8 @@ import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagina
 
 @Injectable()
 export class DesignService {
+  private readonly logger = new Logger(DesignService.name);
+
   constructor(
     private prisma: PrismaService,
     private emailNotification: EmailNotificationService,
@@ -27,7 +29,16 @@ export class DesignService {
   // ============ PROJECTS ============
 
   async create(dto: CreateDesignProjectDto, customerId: string) {
-    const projectNumber = await generateNumber(this.prisma, 'DS', 'designProject');
+    let projectNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        projectNumber = await generateNumber(this.prisma, 'DS', 'designProject');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!projectNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
     const project = await this.prisma.designProject.create({
       data: {
@@ -46,7 +57,7 @@ export class DesignService {
       projectNumber: project.projectNumber,
       title: project.title,
       customerName: project.customer.name,
-    });
+    }).catch(err => this.logger.warn('Admin design notification failed: ' + err.message));
 
     return project;
   }
@@ -216,7 +227,7 @@ export class DesignService {
         projectNumber: project.projectNumber,
         title: project.title,
         revisionNumber: versionNumber,
-      });
+      }).catch(err => this.logger.warn('Customer design uploaded notification failed: ' + err.message));
     }
 
     return revision;
@@ -267,7 +278,7 @@ export class DesignService {
       title: project.title,
       customerName: project.customer.name,
       feedback,
-    });
+    }).catch(err => this.logger.warn('Admin design feedback notification failed: ' + err.message));
 
     return updated;
   }

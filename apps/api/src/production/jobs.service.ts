@@ -96,6 +96,10 @@ export class JobsService {
 
     const job = await this.findOne(id);
 
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+      throw new BadRequestException(`Cannot modify a job in terminal state: ${job.status}`);
+    }
+
     const data: any = { ...dto };
 
     if (dto.status === 'IN_PROGRESS' && job.status !== 'IN_PROGRESS') {
@@ -250,9 +254,14 @@ export class JobsService {
         if (mat.spoolId && totalPlanned > 0) {
           const proportion = mat.gramsUsed / totalPlanned;
           const matWaste = wasteGrams * proportion;
+          const spool = await this.prisma.spool.findUnique({
+            where: { id: mat.spoolId },
+            select: { currentWeight: true },
+          });
+          const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - matWaste);
           await this.prisma.spool.update({
             where: { id: mat.spoolId },
-            data: { currentWeight: { decrement: matWaste } },
+            data: { currentWeight: newWeight },
           });
         }
       }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException } from '@nestjs/common';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
@@ -22,14 +22,26 @@ export class QuotesService {
   ) {}
 
   async createFromAnalysis(dto: SaveQuoteFromAnalysisDto, createdById?: string) {
-    const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+    let quoteNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
     const cost = dto.costEstimate;
     const suggestedPrice = cost?.suggestedPrice || 0;
 
-    // 3-day validity
+    const validityDays = parseInt(
+      (await this.prisma.systemSetting.findUnique({ where: { key: 'quote_validity_days' } }))?.value ?? '3',
+      10,
+    );
     const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + 3);
+    validUntil.setDate(validUntil.getDate() + validityDays);
 
     const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
     const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
@@ -71,9 +83,23 @@ export class QuotesService {
   }
 
   async customerRequestQuote(customerId: string, dto: CustomerQuoteRequestDto) {
-    const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+    let quoteNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
+
+    const validityDays = parseInt(
+      (await this.prisma.systemSetting.findUnique({ where: { key: 'quote_validity_days' } }))?.value ?? '3',
+      10,
+    );
     const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + 3);
+    validUntil.setDate(validUntil.getDate() + validityDays);
 
     let items: {
       description: string;
@@ -218,7 +244,16 @@ export class QuotesService {
   }
 
   async create(dto: CreateQuoteDto) {
-    const quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+    let quoteNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
     const items = dto.items.map(item => ({
       productId: item.productId,

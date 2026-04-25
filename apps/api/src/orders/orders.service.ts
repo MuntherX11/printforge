@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
@@ -17,7 +17,16 @@ export class OrdersService {
   ) {}
 
   async create(dto: CreateOrderDto) {
-    const orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
+    let orderNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
     const items = dto.items.map(item => ({
       productId: item.productId,
@@ -50,7 +59,7 @@ export class OrdersService {
   }
 
   async findAll(query: PaginationDto, status?: string) {
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
     const where = status && validStatuses.includes(status) ? { status: status as any } : {};
 
     const [data, total] = await Promise.all([
@@ -237,7 +246,7 @@ export class OrdersService {
 
   async update(id: string, dto: UpdateOrderDto) {
     const existing = await this.findOne(id);
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
     const updated = await this.prisma.order.update({
       where: { id },

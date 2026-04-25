@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto } from '@printforge/types';
 import { generateNumber } from '../common/utils/number-generator';
@@ -14,7 +14,28 @@ export class InvoicesService {
     });
     if (!order) throw new NotFoundException('Order not found');
 
-    const invoiceNumber = await generateNumber(this.prisma, 'INV', 'invoice');
+    if (dto.orderId) {
+      const existing = await this.prisma.invoice.findFirst({
+        where: { orderId: dto.orderId, status: { notIn: ['CANCELLED'] } },
+        select: { id: true, invoiceNumber: true },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `An active invoice (${existing.invoiceNumber}) already exists for this order`,
+        );
+      }
+    }
+
+    let invoiceNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        invoiceNumber = await generateNumber(this.prisma, 'INV', 'invoice');
+        break;
+      } catch (e: any) {
+        if (e.code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!invoiceNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
     return this.prisma.invoice.create({
       data: {
@@ -55,28 +76,34 @@ export class InvoicesService {
     // findOne throws NotFoundException if missing — reuse the result below
     const existing = await this.findOne(id);
 
+    if (existing.status === 'PAID' && dto.status === 'PAID') {
+      throw new BadRequestException('Invoice is already marked as paid');
+    }
+
     const data: any = {};
     if (dto.status) data.status = dto.status;
     if (dto.paidAmount !== undefined) data.paidAmount = dto.paidAmount;
     if (dto.paidAt) data.paidAt = new Date(dto.paidAt);
 
-    // If marking as paid, stamp paidAmount + paidAt and credit the order
+    // If marking as paid, stamp paidAmount + paidAt and credit the order atomically
     if (dto.status === 'PAID') {
       data.paidAmount = existing.total;
       data.paidAt = new Date();
-      // Only sync to the order if the invoice is actually linked to one
-      if (existing.orderId) {
-        await this.prisma.order.update({
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id },
+        data,
+        include: { order: { include: { customer: true, items: true } } },
+      });
+      if (dto.status === 'PAID' && existing.status !== 'PAID' && existing.orderId) {
+        await tx.order.update({
           where: { id: existing.orderId },
           data: { paidAmount: { increment: existing.total } },
         });
       }
-    }
-
-    return this.prisma.invoice.update({
-      where: { id },
-      data,
-      include: { order: { include: { customer: true, items: true } } },
+      return updated;
     });
   }
 }
