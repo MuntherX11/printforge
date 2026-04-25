@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { SidebarProvider } from '@/components/sidebar-provider';
 import { LocaleProvider } from '@/lib/locale-context';
+import { WsStatusBanner } from '@/components/ui/ws-status-banner';
 
 // Public pages that render inside the dashboard route group but without chrome
 const publicPathPatterns = [
@@ -43,6 +44,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Sidebar />
           <div className="flex flex-1 flex-col overflow-hidden">
             <Topbar />
+            <WsStatusBanner />
             <main className="pf-main-offset flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
               {children}
             </main>
