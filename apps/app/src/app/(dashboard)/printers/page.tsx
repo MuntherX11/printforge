@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Plus, Printer, Clock, Wrench } from 'lucide-react';
+import { Plus, Printer, Clock, Wrench, Camera } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function PrintersPage() {
@@ -20,6 +20,7 @@ export default function PrintersPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState<{ id: string; name: string } | null>(null);
 
   const load = () => api.get<any[]>('/printers').then(setPrinters).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -95,6 +96,16 @@ export default function PrintersPage() {
                     <div className="flex items-center gap-3">
                       {p.totalPrintHours > 0 && <span>{Math.round(p.totalPrintHours)}h printed</span>}
                       <span>{p._count?.productionJobs || 0} jobs</span>
+                      {p.cameraUrl && (
+                        <button
+                          type="button"
+                          title="View camera"
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); setCameraTarget({ id: p.id, name: p.name }); }}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-gray-100 hover:bg-blue-100 hover:text-blue-700 dark:bg-gray-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-400 transition-colors"
+                        >
+                          <Camera className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -103,6 +114,23 @@ export default function PrintersPage() {
           ))}
         </div>
       )}
+
+      {/* Camera feed popup */}
+      <Dialog open={!!cameraTarget} onClose={() => setCameraTarget(null)} title={cameraTarget ? `${cameraTarget.name} — Camera` : ''}>
+        {cameraTarget && (
+          <div className="flex flex-col items-center gap-3">
+            {/* img natively handles MJPEG multipart streams in all major browsers */}
+            <img
+              key={cameraTarget.id}
+              src={`/api/printers/${cameraTarget.id}/camera/stream`}
+              alt="Camera feed"
+              className="w-full rounded-lg bg-gray-900 object-contain max-h-[60vh]"
+              onError={e => { (e.currentTarget as HTMLImageElement).alt = 'Camera unavailable'; }}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400">Live feed · refresh if blank</p>
+          </div>
+        )}
+      </Dialog>
 
       <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add Printer">
         <form onSubmit={handleAdd} className="space-y-4">
