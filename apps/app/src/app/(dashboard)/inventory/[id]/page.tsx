@@ -13,7 +13,11 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
-import { SpoolLabelScanner } from '@/components/spool-label-scanner';
+import dynamic from 'next/dynamic';
+const SpoolLabelScanner = dynamic(
+  () => import('@/components/spool-label-scanner').then(m => ({ default: m.SpoolLabelScanner })),
+  { ssr: false }
+);
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/toast';
 

@@ -19,6 +19,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = () => api.get<any[]>('/users').then(setUsers).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -26,6 +27,7 @@ export default function UsersPage() {
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    setSaving(true);
     try {
       await api.post('/users', {
         name: form.get('name'),
@@ -37,6 +39,8 @@ export default function UsersPage() {
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -92,7 +96,7 @@ export default function UsersPage() {
           ]} />
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button type="submit">Create User</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Creating...' : 'Create User'}</Button>
           </div>
         </form>
       </Dialog>

@@ -7,11 +7,13 @@ import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Upload, Calculator, FileText, Box, Save, Link2, FileCode2, Layers } from 'lucide-react';
 import PlatePreviewCard from '../products/[id]/PlatePreviewCard';
 
 export default function QuickQuotePage() {
+  const formatCurrency = useFormatCurrency();
   const [materials, setMaterials] = useState<any[]>([]);
   const [printers, setPrinters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -588,13 +590,13 @@ export default function QuickQuotePage() {
                   <CardContent className="p-6">
                     <h3 className="font-semibold mb-3">Cost Estimate</h3>
                     <dl className="space-y-2 text-sm">
-                      <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{result.costEstimate.materialCost.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{result.costEstimate.machineCost.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{(result.costEstimate.electricityCost || 0).toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">Waste</dt><dd>{result.costEstimate.wasteCost.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{result.costEstimate.overheadCost.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{result.costEstimate.totalCost.toFixed(3)} OMR</dd></div>
-                      <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{result.costEstimate.suggestedPrice.toFixed(3)} OMR</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{formatCurrency(result.costEstimate.materialCost)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{formatCurrency(result.costEstimate.machineCost)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{formatCurrency(result.costEstimate.electricityCost || 0)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Waste</dt><dd>{formatCurrency(result.costEstimate.wasteCost)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{formatCurrency(result.costEstimate.overheadCost)}</dd></div>
+                      <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{formatCurrency(result.costEstimate.totalCost)}</dd></div>
+                      <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{formatCurrency(result.costEstimate.suggestedPrice)}</dd></div>
                       <div className="flex justify-between"><dt className="text-gray-500">Markup</dt><dd>{result.costEstimate.markupMultiplier}x</dd></div>
                     </dl>
 
@@ -636,20 +638,20 @@ export default function QuickQuotePage() {
                         {Math.round(plate.printSeconds / 60)} min · {Math.round(plate.weightGrams)}g
                       </div>
                       <dl className="space-y-1 text-xs">
-                        <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{plate.breakdown.materialCost.toFixed(3)} OMR</dd></div>
-                        <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{plate.breakdown.machineCost.toFixed(3)} OMR</dd></div>
-                        <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{(plate.breakdown.electricityCost || 0).toFixed(3)} OMR</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{formatCurrency(plate.breakdown.materialCost)}</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{formatCurrency(plate.breakdown.machineCost)}</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{formatCurrency(plate.breakdown.electricityCost || 0)}</dd></div>
                         {plate.breakdown.wasteCost > 0 && (
-                          <div className="flex justify-between"><dt className="text-gray-500">Waste</dt><dd>{plate.breakdown.wasteCost.toFixed(3)} OMR</dd></div>
+                          <div className="flex justify-between"><dt className="text-gray-500">Waste</dt><dd>{formatCurrency(plate.breakdown.wasteCost)}</dd></div>
                         )}
-                        <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{plate.breakdown.overheadCost.toFixed(3)} OMR</dd></div>
+                        <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{formatCurrency(plate.breakdown.overheadCost)}</dd></div>
                         <div className="flex justify-between border-t dark:border-gray-700 pt-1 mt-1 font-medium text-sm">
                           <dt className="dark:text-gray-200">Cost</dt>
-                          <dd>{plate.breakdown.totalCost.toFixed(3)} OMR</dd>
+                          <dd>{formatCurrency(plate.breakdown.totalCost)}</dd>
                         </div>
                         <div className="flex justify-between text-brand-600 dark:text-brand-400 font-semibold">
                           <dt>Price</dt>
-                          <dd>{plate.breakdown.suggestedPrice.toFixed(3)} OMR</dd>
+                          <dd>{formatCurrency(plate.breakdown.suggestedPrice)}</dd>
                         </div>
                       </dl>
                     </CardContent>
@@ -666,10 +668,10 @@ export default function QuickQuotePage() {
                     </h3>
                     <div className="text-right">
                       <div className="text-sm text-gray-500">
-                        Cost: {threeMfResult.grandTotalCost.toFixed(3)} OMR
+                        Cost: {formatCurrency(threeMfResult.grandTotalCost)}
                       </div>
                       <div className="text-2xl font-bold text-brand-600 dark:text-brand-400">
-                        {threeMfResult.grandSuggestedPrice.toFixed(3)} OMR
+                        {formatCurrency(threeMfResult.grandSuggestedPrice)}
                       </div>
                       <div className="text-xs text-gray-400">{threeMfResult.markupMultiplier}× markup</div>
                     </div>
@@ -773,7 +775,7 @@ export default function QuickQuotePage() {
                         </div>
                         <div className="text-right">
                           <span className="text-gray-500">{d.gramsUsed}g × {d.costPerGram.toFixed(3)}</span>
-                          <span className="ml-2 font-medium">{d.materialCost.toFixed(3)} OMR</span>
+                          <span className="ml-2 font-medium">{formatCurrency(d.materialCost)}</span>
                         </div>
                       </div>
                     ))}
@@ -786,7 +788,7 @@ export default function QuickQuotePage() {
                         {multiResult.purgeTransitions.map((t: any, i: number) => (
                           <div key={i} className="flex justify-between text-xs text-gray-500">
                             <span>Color {t.fromColorIndex} → {t.toColorIndex}</span>
-                            <span>{t.purgeGrams}g = {t.purgeCost.toFixed(3)} OMR</span>
+                            <span>{t.purgeGrams}g = {formatCurrency(t.purgeCost)}</span>
                           </div>
                         ))}
                       </div>
@@ -803,13 +805,13 @@ export default function QuickQuotePage() {
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-3">Cost Summary</h3>
                   <dl className="space-y-2 text-sm">
-                    <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{multiResult.materialCost.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{multiResult.machineCost.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{(multiResult.electricityCost || 0).toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between"><dt className="text-gray-500">Purge Waste</dt><dd>{multiResult.wasteCost.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{multiResult.overheadCost.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{multiResult.totalCost.toFixed(3)} OMR</dd></div>
-                    <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{multiResult.suggestedPrice.toFixed(3)} OMR</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Material</dt><dd>{formatCurrency(multiResult.materialCost)}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Machine</dt><dd>{formatCurrency(multiResult.machineCost)}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Electricity</dt><dd>{formatCurrency(multiResult.electricityCost || 0)}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Purge Waste</dt><dd>{formatCurrency(multiResult.wasteCost)}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Overhead</dt><dd>{formatCurrency(multiResult.overheadCost)}</dd></div>
+                    <div className="flex justify-between border-t pt-2 font-medium"><dt>Total Cost</dt><dd>{formatCurrency(multiResult.totalCost)}</dd></div>
+                    <div className="flex justify-between text-brand-600 font-semibold text-base"><dt>Suggested Price</dt><dd>{formatCurrency(multiResult.suggestedPrice)}</dd></div>
                     <div className="flex justify-between"><dt className="text-gray-500">Markup</dt><dd>{multiResult.markupMultiplier}x</dd></div>
                   </dl>
                 </CardContent>

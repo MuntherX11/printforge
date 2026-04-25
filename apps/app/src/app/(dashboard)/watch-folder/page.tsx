@@ -33,8 +33,19 @@ export default function WatchFolderPage() {
 
   // Auto-refresh every 15 seconds
   useEffect(() => {
-    const interval = setInterval(() => {
-      api.get<any[]>('/watch-folder/pending').then(setImports).catch(() => {});
+    let errorCount = 0;
+    const interval = setInterval(async () => {
+      try {
+        const data = await api.get<any[]>('/watch-folder/pending');
+        setImports(data as any[]);
+        errorCount = 0;
+      } catch (err: any) {
+        errorCount++;
+        if (errorCount >= 3) {
+          clearInterval(interval);
+          toast('error', 'Watch folder polling stopped after 3 failures. Reload to retry.');
+        }
+      }
     }, 15000);
     return () => clearInterval(interval);
   }, []);

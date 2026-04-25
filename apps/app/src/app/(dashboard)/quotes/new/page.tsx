@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { useLineItems } from '@/hooks/use-line-items';
 import { Plus, Trash2 } from 'lucide-react';
@@ -15,6 +16,7 @@ import { Plus, Trash2 } from 'lucide-react';
 export default function NewQuotePage() {
   const router = useRouter();
   const { toast } = useToast();
+  const formatCurrency = useFormatCurrency();
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,7 +59,7 @@ export default function NewQuotePage() {
 
   const productOptions = [
     { value: '', label: 'Custom item (no product)' },
-    ...products.map(p => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''} — OMR ${p.basePrice.toFixed(3)}` })),
+    ...products.map(p => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''} — ${formatCurrency(p.basePrice)}` })),
   ];
 
   return (
@@ -137,7 +139,7 @@ export default function NewQuotePage() {
               ))}
             </div>
             <div className="mt-4 text-right text-lg font-bold dark:text-gray-100">
-              Subtotal: OMR {subtotal.toFixed(3)}
+              Subtotal: {formatCurrency(subtotal)}
             </div>
           </CardContent>
         </Card>

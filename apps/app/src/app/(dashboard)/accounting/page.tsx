@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts';
+import dynamic from 'next/dynamic';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+
+const AccountingChart = dynamic(
+  () => import('./AccountingChart'),
+  { ssr: false, loading: () => <div className="h-60 animate-pulse bg-gray-100 dark:bg-gray-800 rounded" /> }
+);
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
@@ -13,23 +16,6 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { TrendingUp, TrendingDown, DollarSign, BarChart2, Package, Percent } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
-
-// ── Recharts custom tooltip ──────────────────────────────────────────────────
-function CurrencyTooltip({ active, payload, label }: any) {
-  const formatCurrency = useFormatCurrency();
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 text-sm">
-      <p className="font-semibold mb-2">{label}</p>
-      {payload.map((p: any) => (
-        <div key={p.name} className="flex justify-between gap-6">
-          <span style={{ color: p.color }}>{p.name}</span>
-          <span className="font-medium">{formatCurrency(p.value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ── KPI card ─────────────────────────────────────────────────────────────────
 function KpiCard({ label, value, sub, icon: Icon, color }: {
@@ -139,22 +125,7 @@ export default function AccountingPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {trend.length === 0 ? (
-                  <p className="text-sm text-gray-500 py-8 text-center">No data yet</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={trend} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${v.toFixed(0)}`} />
-                      <Tooltip content={<CurrencyTooltip />} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="revenue" name="Revenue" fill="#22c55e" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="cogs" name="COGS" fill="#f97316" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="grossProfit" name="Gross Profit" fill="#2563eb" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
+                <AccountingChart trend={trend} />
               </CardContent>
             </Card>
 

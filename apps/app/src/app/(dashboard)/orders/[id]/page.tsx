@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -40,18 +40,24 @@ export default function OrderDetailPage() {
   const [planLoading, setPlanLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [printers, setPrinters] = useState<any[]>([]);
 
-  const load = () => api.get(`/orders/${id}`).then(setOrder).catch(console.error).finally(() => setLoading(false));
-  useEffect(() => { load(); }, [id]);
+  const load = useCallback(() => {
+    api.get(`/orders/${id}`).then(setOrder).catch(console.error).finally(() => setLoading(false));
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   async function updateStatus(status: string) {
+    setUpdating(true);
     try {
       await api.patch(`/orders/${id}`, { status });
       toast('success', 'Order status updated');
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -156,6 +162,7 @@ export default function OrderDetailPage() {
             value={order.status}
             onChange={e => updateStatus(e.target.value)}
             className="w-40"
+            disabled={updating}
           />
           {['CONFIRMED', 'PENDING'].includes(order.status) && (
             <Button onClick={loadPlan} disabled={planLoading}>

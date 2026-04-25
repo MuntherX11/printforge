@@ -38,6 +38,8 @@ export default function JobDetailPage() {
   const [showReprintDialog, setShowReprintDialog] = useState(false);
   const [submittingFail, setSubmittingFail] = useState(false);
   const [submittingReprint, setSubmittingReprint] = useState(false);
+  const [savingMaterial, setSavingMaterial] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [materials, setMaterials] = useState<any[]>([]);
   const [spools, setSpools] = useState<any[]>([]);
   const [showCamera, setShowCamera] = useState(false);
@@ -91,6 +93,7 @@ export default function JobDetailPage() {
   async function handleAddMaterial(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    setSavingMaterial(true);
     try {
       await api.post(`/jobs/${id}/materials`, {
         materialId: form.get('materialId'),
@@ -102,6 +105,8 @@ export default function JobDetailPage() {
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setSavingMaterial(false);
     }
   }
 
@@ -129,6 +134,7 @@ export default function JobDetailPage() {
   }
 
   async function handleCancel() {
+    setCancelling(true);
     try {
       await api.patch(`/jobs/${id}`, { status: 'CANCELLED' });
       setShowCancelDialog(false);
@@ -136,6 +142,8 @@ export default function JobDetailPage() {
       load();
     } catch (err: any) {
       toast('error', err.message);
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -330,7 +338,7 @@ export default function JobDetailPage() {
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Are you sure you want to cancel <strong>{job.name}</strong>? This cannot be undone.</p>
         <div className="flex gap-3 justify-end">
           <Button variant="outline" onClick={() => setShowCancelDialog(false)}>Back</Button>
-          <Button className="bg-gray-700 hover:bg-gray-800 text-white" onClick={handleCancel}>Cancel Job</Button>
+          <Button className="bg-gray-700 hover:bg-gray-800 text-white" onClick={handleCancel} disabled={cancelling}>{cancelling ? 'Cancelling...' : 'Cancel Job'}</Button>
         </div>
       </Dialog>
 
@@ -350,7 +358,7 @@ export default function JobDetailPage() {
           <Input name="colorIndex" label="Color Index (T0, T1...)" type="number" defaultValue="0" min="0" />
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowAddMaterial(false)}>Cancel</Button>
-            <Button type="submit">Add</Button>
+            <Button type="submit" disabled={savingMaterial}>{savingMaterial ? 'Adding...' : 'Add'}</Button>
           </div>
         </form>
       </Dialog>

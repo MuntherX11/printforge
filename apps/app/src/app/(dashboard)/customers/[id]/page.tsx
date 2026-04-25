@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -28,9 +28,10 @@ export default function CustomerDetailPage() {
   const [showEmail, setShowEmail] = useState(false);
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.get(`/customers/${id}`).then(setCustomer).catch(console.error).finally(() => setLoading(false));
   }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   function openWhatsApp() {
     if (!customer.phone) { toast('error', 'Customer has no phone number'); return; }
@@ -69,8 +70,8 @@ export default function CustomerDetailPage() {
       notes: form.get('notes') as string || undefined,
     };
     try {
-      const updated = await api.patch(`/customers/${id}`, data);
-      setCustomer(updated);
+      const updated = await api.patch<any>(`/customers/${id}`, data);
+      setCustomer((prev: any) => ({ ...prev, ...(updated as any) }));
       setEditing(false);
     } catch (err: any) {
       toast('error', err.message);
