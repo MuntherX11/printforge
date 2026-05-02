@@ -252,12 +252,15 @@ export default function PrinterDetailPage() {
 
       {/* Camera Feed */}
       {printer.cameraUrl && (
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2"><Camera className="h-5 w-5" /> Camera Feed</CardTitle>
           </CardHeader>
-          <CardContent>
-            <CameraViewer printerId={id as string} printerName={printer.name} cameraUrl={printer.cameraUrl} variant="full" />
+          <CardContent className="p-0">
+            {/* min-h ensures the camera is usably tall even on narrow viewports */}
+            <div className="min-h-[420px]">
+              <CameraViewer printerId={id as string} printerName={printer.name} cameraUrl={printer.cameraUrl} variant="full" />
+            </div>
           </CardContent>
         </Card>
       )}

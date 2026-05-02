@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, CameraOff, Maximize2, X, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -39,9 +39,27 @@ export function CameraViewer({ printerId, printerName, variant = 'full', cameraU
   const [mode, setMode] = useState<StreamMode>('img');
   const [loaded, setLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [iframeScale, setIframeScale] = useState(1);
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fullscreenImgRef = useRef<HTMLImageElement>(null);
+  const iframeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Scale the iframe (fixed 1280×720 native) to fit whatever container it lands in.
+  const updateIframeScale = useCallback(() => {
+    if (!iframeContainerRef.current) return;
+    const { width, height } = iframeContainerRef.current.getBoundingClientRect();
+    if (width === 0 || height === 0) return;
+    setIframeScale(Math.min(width / 1280, height / 720));
+  }, []);
+
+  useEffect(() => {
+    if (mode !== 'iframe') return;
+    updateIframeScale();
+    const obs = new ResizeObserver(updateIframeScale);
+    if (iframeContainerRef.current) obs.observe(iframeContainerRef.current);
+    return () => obs.disconnect();
+  }, [mode, updateIframeScale]);
 
   const streamUrl = `/api/printers/${printerId}/camera/stream`;
 
@@ -99,20 +117,32 @@ export function CameraViewer({ printerId, printerName, variant = 'full', cameraU
       );
     }
     if (mode === 'iframe' && cameraUrl) {
-      // WebRTC-only camera (e.g. Creality Hi): embed the web UI directly.
-      // The WebRTC session runs browser ↔ printer with no server-side proxy needed.
-      // Note: object-contain/cover don't apply to iframes — use w-full h-full only.
+      // WebRTC-only camera (e.g. Creality Hi): the page renders a fixed 1280×720
+      // video element. We can't modify cross-origin content, so we render the
+      // iframe at native size and use CSS transform to scale it down to fit.
       return (
-        <iframe
-          src={normaliseUrl(cameraUrl)}
-          className="w-full h-full block"
-          allow="camera; microphone; autoplay"
-          scrolling="no"
-          onLoad={() => setLoaded(true)}
-          onError={() => { setLoaded(false); setMode('error'); }}
-          style={{ border: 'none', background: '#000' }}
-          title={`${printerName ?? 'Printer'} camera`}
-        />
+        <div
+          ref={iframeContainerRef}
+          className="w-full h-full overflow-hidden bg-black"
+          style={{ position: 'relative' }}
+        >
+          <iframe
+            src={normaliseUrl(cameraUrl)}
+            allow="camera; microphone; autoplay"
+            scrolling="no"
+            onLoad={() => { setLoaded(true); updateIframeScale(); }}
+            onError={() => { setLoaded(false); setMode('error'); }}
+            style={{
+              width: '1280px',
+              height: '720px',
+              border: 'none',
+              transformOrigin: 'top left',
+              transform: `scale(${iframeScale})`,
+              display: 'block',
+            }}
+            title={`${printerName ?? 'Printer'} camera`}
+          />
+        </div>
       );
     }
     return null;
@@ -193,7 +223,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full', cameraU
   // ─── Full variant ─────────────────────────────────────────────────────────
 
   return (
-    <div className="relative bg-black rounded-xl overflow-hidden w-full aspect-video">
+    <div className="relative bg-black rounded-xl overflow-hidden w-full" style={{ aspectRatio: '16/9', minHeight: '100%' }}>
       {mode !== 'error' ? (
         <>
           {!loaded && (
