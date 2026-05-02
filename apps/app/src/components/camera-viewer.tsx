@@ -12,92 +12,96 @@ interface CameraViewerProps {
 }
 
 /**
- * Displays a live MJPEG camera feed proxied through /api/printers/:id/camera/stream.
- * Uses a plain <img> tag — browsers handle MJPEG natively via multipart/x-mixed-replace.
+ * Displays a live camera feed proxied through /api/printers/:id/camera/stream.
+ *
+ * Auto-detects stream type:
+ *   1. Tries <img> first — handles MJPEG (multipart/x-mixed-replace).
+ *   2. On error, falls back to <video autoPlay> — handles MP4/HLS (Creality, etc.).
+ *   3. If both fail, shows "Camera unavailable".
  */
-const MAX_RETRIES = 3;
+type StreamMode = 'img' | 'video' | 'error';
 
 export function CameraViewer({ printerId, printerName, variant = 'full' }: CameraViewerProps) {
-  const [error, setError] = useState(false);
+  const [mode, setMode] = useState<StreamMode>('img');
   const [loaded, setLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const fullscreenImgRef = useRef<HTMLImageElement>(null);
 
-  // When fullscreen closes, clear the fullscreen img src to stop that stream
+  const streamUrl = `/api/printers/${printerId}/camera/stream`;
+
+  // Stop img stream on unmount
+  useEffect(() => {
+    return () => { if (imgRef.current) imgRef.current.src = ''; };
+  }, []);
+
+  // Stop fullscreen img stream when modal closes
   useEffect(() => {
     if (!fullscreen && fullscreenImgRef.current) {
       fullscreenImgRef.current.src = '';
     }
   }, [fullscreen]);
 
-  // Clean up any pending retry timer on unmount
-  useEffect(() => {
-    return () => { if (retryTimer.current) clearTimeout(retryTimer.current); };
-  }, []);
-
-  const streamUrl = `/api/printers/${printerId}/camera/stream`;
-
-  /**
-   * On stream error, auto-retry up to MAX_RETRIES times with exponential back-off
-   * (2 s → 4 s → 6 s) before showing the permanent "unavailable" state.
-   */
-  function handleStreamError() {
-    if (retryCount < MAX_RETRIES) {
-      const delay = (retryCount + 1) * 2000;
-      retryTimer.current = setTimeout(() => {
-        setRetryCount(n => n + 1);
-        if (imgRef.current) {
-          imgRef.current.src = '';
-          setTimeout(() => { if (imgRef.current) imgRef.current.src = streamUrl; }, 50);
-        }
-      }, delay);
-    } else {
-      setError(true);
-    }
-  }
-
-  // Manual reload — resets retry counter
+  /** Reset to img mode and try again */
   function reload() {
-    setError(false);
+    setMode('img');
     setLoaded(false);
-    setRetryCount(0);
-    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (imgRef.current) {
       imgRef.current.src = '';
       setTimeout(() => { if (imgRef.current) imgRef.current.src = streamUrl; }, 100);
     }
   }
 
-  // Stop stream when component unmounts or leaves viewport
-  useEffect(() => {
-    return () => { if (imgRef.current) imgRef.current.src = ''; };
-  }, []);
+  // ─── Shared stream element ────────────────────────────────────────────────
+
+  function StreamElement({ className }: { className: string }) {
+    if (mode === 'img') {
+      return (
+        <img
+          ref={imgRef}
+          src={streamUrl}
+          alt={`${printerName ?? 'Printer'} camera`}
+          className={className}
+          onLoad={() => setLoaded(true)}
+          onError={() => { setLoaded(false); setMode('video'); }}
+        />
+      );
+    }
+    if (mode === 'video') {
+      return (
+        <video
+          ref={videoRef}
+          src={streamUrl}
+          autoPlay
+          muted
+          playsInline
+          controls
+          className={className}
+          onPlay={() => setLoaded(true)}
+          onCanPlay={() => setLoaded(true)}
+          onError={() => { setLoaded(false); setMode('error'); }}
+        />
+      );
+    }
+    return null;
+  }
+
+  // ─── Compact variant ──────────────────────────────────────────────────────
 
   if (variant === 'compact') {
     return (
       <>
         <div className="relative bg-black rounded-lg overflow-hidden aspect-video group">
-          {!error ? (
+          {mode !== 'error' ? (
             <>
               {!loaded && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-gray-500">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-gray-500 pointer-events-none">
                   <Camera className="h-6 w-6 animate-pulse" />
-                  {retryCount > 0 && (
-                    <p className="text-xs">Reconnecting... ({retryCount}/{MAX_RETRIES})</p>
-                  )}
+                  {mode === 'video' && <p className="text-xs">Trying video stream...</p>}
                 </div>
               )}
-              <img
-                ref={imgRef}
-                src={streamUrl}
-                alt={`${printerName ?? 'Printer'} camera`}
-                className="w-full h-full object-contain"
-                onLoad={() => setLoaded(true)}
-                onError={handleStreamError}
-              />
+              <StreamElement className="w-full h-full object-contain" />
               <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                 <button
                   onClick={() => { if (imgRef.current) imgRef.current.src = ''; setFullscreen(true); }}
@@ -117,7 +121,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
           )}
         </div>
 
-        {/* Fullscreen modal */}
+        {/* Fullscreen modal — always uses img (MJPEG only in fullscreen) */}
         {fullscreen && (
           <div
             className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
@@ -132,55 +136,58 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
             {printerName && (
               <p className="absolute top-4 left-4 text-white font-semibold text-sm">{printerName}</p>
             )}
-            <img
-              ref={fullscreenImgRef}
-              src={streamUrl}
-              alt={`${printerName ?? 'Printer'} camera`}
-              className="max-w-full max-h-full object-contain"
-              onClick={(e) => e.stopPropagation()}
-            />
+            {mode === 'video' ? (
+              <video
+                src={streamUrl}
+                autoPlay muted playsInline controls
+                className="max-w-full max-h-full object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <img
+                ref={fullscreenImgRef}
+                src={streamUrl}
+                alt={`${printerName ?? 'Printer'} camera`}
+                className="max-w-full max-h-full object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
           </div>
         )}
       </>
     );
   }
 
-  // Full variant
+  // ─── Full variant ─────────────────────────────────────────────────────────
+
   return (
     <div className="relative bg-black rounded-xl overflow-hidden w-full aspect-video">
-      {!error ? (
+      {mode !== 'error' ? (
         <>
           {!loaded && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-600">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-600 pointer-events-none">
               <Camera className="h-8 w-8 animate-pulse" />
               <p className="text-sm">
-                {retryCount > 0 ? `Reconnecting... (${retryCount}/${MAX_RETRIES})` : 'Connecting to camera...'}
+                {mode === 'video' ? 'Trying video stream...' : 'Connecting to camera...'}
               </p>
             </div>
           )}
-          <img
-            ref={imgRef}
-            src={streamUrl}
-            alt={`${printerName ?? 'Printer'} camera feed`}
-            className="w-full h-full object-contain"
-            onLoad={() => setLoaded(true)}
-            onError={handleStreamError}
-          />
-          {loaded && (
-            <div className="absolute bottom-2 right-2">
-              <button
-                onClick={reload}
-                className="bg-black/50 text-white rounded p-1.5 hover:bg-black/70"
-                title="Reconnect stream"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-          {loaded && (
-            <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">
-              Live
-            </span>
+          <StreamElement className="w-full h-full object-contain" />
+          {loaded && mode === 'img' && (
+            <>
+              <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide pointer-events-none">
+                Live
+              </span>
+              <div className="absolute bottom-2 right-2">
+                <button
+                  onClick={reload}
+                  className="bg-black/50 text-white rounded p-1.5 hover:bg-black/70"
+                  title="Reconnect stream"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </>
           )}
         </>
       ) : (
