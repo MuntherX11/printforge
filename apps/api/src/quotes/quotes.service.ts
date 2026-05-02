@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException, ConflictException } from '@nestjs/common';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
@@ -368,7 +368,7 @@ export class QuotesService {
       include: { items: true, order: true, customer: true },
     });
     if (!quote) throw new NotFoundException('Quote not found');
-    if (quote.order) throw new BadRequestException('Quote already converted to order');
+    if (quote.order) throw new ConflictException('Quote already converted to order');
 
     // Allow conversion from ACCEPTED or SENT status (auto-accept if SENT)
     if (!['ACCEPTED', 'SENT'].includes(quote.status)) {
@@ -380,25 +380,40 @@ export class QuotesService {
       throw new BadRequestException('Quote has expired and can no longer be converted to an order');
     }
 
-    // Auto-mark as ACCEPTED if currently SENT
+    // Atomically flip status to ACCEPTED — guards against concurrent conversion attempts.
+    // updateMany only succeeds if status is still SENT/ACCEPTED and no order exists yet.
+    // If a concurrent request already created the order, the DB unique constraint on
+    // Order.quoteId will surface as a P2002 below; we convert it to a 409.
     if (quote.status === 'SENT') {
-      await this.prisma.quote.update({
-        where: { id },
+      const flipped = await this.prisma.quote.updateMany({
+        where: { id, status: 'SENT' },
         data: { status: 'ACCEPTED' },
       });
+      if (flipped.count === 0) {
+        throw new ConflictException('Quote status changed by a concurrent request — please retry');
+      }
     }
 
     // Create order carrying over productId
-    const order = await this.ordersService.create({
-      customerId: quote.customerId,
-      quoteId: quote.id,
-      items: quote.items.map(item => ({
-        productId: item.productId || undefined,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-      })),
-    });
+    let order: Awaited<ReturnType<typeof this.ordersService.create>>;
+    try {
+      order = await this.ordersService.create({
+        customerId: quote.customerId,
+        quoteId: quote.id,
+        items: quote.items.map(item => ({
+          productId: item.productId || undefined,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+      });
+    } catch (e: any) {
+      // P2002 on Order.quoteId unique constraint means a concurrent request beat us
+      if (e?.code === 'P2002') {
+        throw new ConflictException('Quote already converted to order by a concurrent request');
+      }
+      throw e;
+    }
 
     // Auto-create production jobs for each order item if requested
     if (options?.autoCreateJobs !== false) {

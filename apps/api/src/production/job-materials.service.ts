@@ -21,6 +21,11 @@ export class JobMaterialsService {
       if (spool.materialId !== dto.materialId) {
         throw new BadRequestException('Spool does not belong to the selected material');
       }
+      if (dto.gramsUsed > 0 && spool.currentWeight < dto.gramsUsed) {
+        throw new BadRequestException(
+          `Insufficient filament on spool: ${spool.currentWeight.toFixed(1)} g available, ${dto.gramsUsed} g required`,
+        );
+      }
     }
 
     return this.prisma.jobMaterial.create({

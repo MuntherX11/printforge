@@ -160,36 +160,41 @@ export class JobsService {
       throw new BadRequestException('Job is already completed');
     }
 
-    if (job.componentId && job.quantityToProduce > 0) {
-      await this.prisma.productComponent.update({
-        where: { id: job.componentId },
-        data: { stockOnHand: { increment: job.quantityToProduce } },
-      });
-    }
-
-    for (const mat of job.materials) {
-      if (mat.spoolId && mat.gramsUsed > 0) {
-        const spool = await this.prisma.spool.findUnique({ where: { id: mat.spoolId }, select: { currentWeight: true } });
-        const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - mat.gramsUsed);
-        await this.prisma.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
+    // Wrap all inventory mutations + job status update in a single transaction
+    // so a crash mid-way doesn't leave stock incremented but spool not decremented.
+    const completed = await this.prisma.$transaction(async (tx) => {
+      if (job.componentId && job.quantityToProduce > 0) {
+        await tx.productComponent.update({
+          where: { id: job.componentId },
+          data: { stockOnHand: { increment: job.quantityToProduce } },
+        });
       }
-    }
 
-    if (job.printerId && job.printDuration) {
-      await this.prisma.printer.update({
-        where: { id: job.printerId },
-        data: { totalPrintHours: { increment: job.printDuration / 3600 } },
+      for (const mat of job.materials) {
+        if (mat.spoolId && mat.gramsUsed > 0) {
+          const spool = await tx.spool.findUnique({ where: { id: mat.spoolId }, select: { currentWeight: true } });
+          const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - mat.gramsUsed);
+          await tx.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
+        }
+      }
+
+      if (job.printerId && job.printDuration) {
+        await tx.printer.update({
+          where: { id: job.printerId },
+          data: { totalPrintHours: { increment: job.printDuration / 3600 } },
+        });
+      }
+
+      return tx.productionJob.update({
+        where: { id },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+        include: { printer: true, materials: { include: { material: true } } },
       });
-    }
-
-    await this.calculateCost(id).catch(() => {
-      // Non-fatal: cost fields may already be populated or materials missing
     });
 
-    const completed = await this.prisma.productionJob.update({
-      where: { id },
-      data: { status: 'COMPLETED', completedAt: new Date() },
-      include: { printer: true, materials: { include: { material: true } } },
+    // Non-fatal: run after commit so it doesn't block the transaction
+    await this.calculateCost(id).catch(() => {
+      // Cost fields may already be populated or materials missing
     });
     this.gateway?.broadcastNotification({
       type: 'success',
