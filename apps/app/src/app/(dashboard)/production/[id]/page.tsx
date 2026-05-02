@@ -18,28 +18,11 @@ import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useWebSocket } from '@/lib/use-websocket';
 
-/**
- * Estimate remaining print time.
- * Prefers live-progress math when progress > 0; falls back to printDuration estimate.
- * Returns a short human-readable string like "1h 23m remaining" or "".
- */
-function formatRemaining(startedAt: string | null | undefined, printDurationSecs: number | null | undefined, progressPct?: number): string {
-  if (!startedAt) return '';
-  const elapsedSecs = (Date.now() - new Date(startedAt).getTime()) / 1000;
-  let remainingSecs: number;
-
-  if (progressPct && progressPct > 0 && progressPct < 100) {
-    // Extrapolate from elapsed time and % done
-    remainingSecs = (elapsedSecs * (100 - progressPct)) / progressPct;
-  } else if (printDurationSecs && printDurationSecs > 0) {
-    remainingSecs = printDurationSecs - elapsedSecs;
-  } else {
-    return '';
-  }
-
-  if (remainingSecs <= 60) return 'finishing up…';
-  const hrs = Math.floor(remainingSecs / 3600);
-  const mins = Math.floor((remainingSecs % 3600) / 60);
+/** Format seconds into "1h 23m remaining" */
+function fmtRemaining(secs: number): string {
+  if (secs <= 60) return 'finishing up…';
+  const hrs = Math.floor(secs / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
   return hrs > 0 ? `${hrs}h ${mins}m remaining` : `${mins}m remaining`;
 }
 
@@ -295,14 +278,11 @@ export default function JobDetailPage() {
               <p className="text-xs text-gray-400 dark:text-gray-500">
                 {liveProgress ? 'Updated live via WebSocket' : 'Waiting for printer telemetry…'}
               </p>
-              {(() => {
-                const remaining = formatRemaining(job.startedAt, job.printDuration, liveProgress?.progress);
-                return remaining ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
-                    <Clock className="h-3 w-3" /> {remaining}
-                  </span>
-                ) : null;
-              })()}
+              {liveProgress?.remainingSecs != null && liveProgress.remainingSecs > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+                  <Clock className="h-3 w-3" /> {fmtRemaining(liveProgress.remainingSecs)}
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -11,7 +11,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
  */
 export interface PrinterBroadcaster {
   broadcastPrinterStatus(data: any[]): void;
-  broadcastJobProgress(jobId: string, progress: number, status: string): void;
+  broadcastJobProgress(jobId: string, progress: number, status: string, remainingSecs?: number): void;
 }
 
 export const PRINTER_BROADCASTER = 'PRINTER_BROADCASTER';
@@ -57,8 +57,16 @@ export class MoonrakerScheduler {
       const pr = printingResults.find(p => p.printerId === job.printerId);
       if (!pr) continue;
       // progress is normalised 0–1 (Creality divided by 100 in the scheduler above)
-      const pct = Math.min(100, Math.max(0, Math.round((pr.snapshot.progress ?? 0) * 100)));
-      this.broadcaster!.broadcastJobProgress(job.id, pct, 'IN_PROGRESS');
+      const progress01 = pr.snapshot.progress ?? 0;
+      const pct = Math.min(100, Math.max(0, Math.round(progress01 * 100)));
+
+      // Remaining time: same formula Fluidd uses — elapsed / progress × (1 − progress)
+      const printDuration = (pr.snapshot as any).printStats?.print_duration ?? 0;
+      const remainingSecs = progress01 > 0 && printDuration > 0
+        ? Math.round(printDuration * (1 - progress01) / progress01)
+        : undefined;
+
+      this.broadcaster!.broadcastJobProgress(job.id, pct, 'IN_PROGRESS', remainingSecs);
     }
   }
 

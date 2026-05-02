@@ -17,6 +17,8 @@ export interface JobProgressEvent {
   jobId: string;
   progress: number;
   status: string;
+  /** Estimated seconds remaining — from Moonraker's print_duration / progress formula */
+  remainingSecs?: number;
 }
 
 export interface NotificationEvent {

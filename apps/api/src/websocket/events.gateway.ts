@@ -91,8 +91,8 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   /**
    * Broadcast a job progress update.
    */
-  broadcastJobProgress(jobId: string, progress: number, status: string) {
-    this.server?.emit('jobProgress', { jobId, progress, status });
+  broadcastJobProgress(jobId: string, progress: number, status: string, remainingSecs?: number) {
+    this.server?.emit('jobProgress', { jobId, progress, status, remainingSecs });
   }
 
   /**
