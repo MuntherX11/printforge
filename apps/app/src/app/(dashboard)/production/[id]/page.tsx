@@ -13,7 +13,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
+import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2, Clock, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useWebSocket } from '@/lib/use-websocket';
@@ -26,13 +26,12 @@ function fmtRemaining(secs: number): string {
   return hrs > 0 ? `${hrs}h ${mins}m remaining` : `${mins}m remaining`;
 }
 
+// COMPLETED and FAILED must be set via their dedicated endpoints (POST /jobs/:id/complete|fail)
+// because they trigger cost calculation, spool deductions and notifications.
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
   { value: 'IN_PROGRESS', label: 'In Progress' },
   { value: 'PAUSED', label: 'Paused' },
-  { value: 'COMPLETED', label: 'Completed' },
-  { value: 'FAILED', label: 'Failed' },
-  { value: 'CANCELLED', label: 'Cancelled' },
 ];
 
 export default function JobDetailPage() {
@@ -45,6 +44,7 @@ export default function JobDetailPage() {
   const [showFailDialog, setShowFailDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showReprintDialog, setShowReprintDialog] = useState(false);
+  const [submittingComplete, setSubmittingComplete] = useState(false);
   const [submittingFail, setSubmittingFail] = useState(false);
   const [submittingReprint, setSubmittingReprint] = useState(false);
   const [savingMaterial, setSavingMaterial] = useState(false);
@@ -91,6 +91,19 @@ export default function JobDetailPage() {
       })
       .catch(() => setGcodeCheck({ loading: false, match: null, printing: null }));
   }, [id, job?.status]);
+
+  async function handleComplete() {
+    setSubmittingComplete(true);
+    try {
+      await api.post(`/jobs/${id}/complete`);
+      toast('success', 'Job marked as completed');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setSubmittingComplete(false);
+    }
+  }
 
   async function updateJob(data: any) {
     try {
@@ -231,10 +244,30 @@ export default function JobDetailPage() {
             </Button>
           )}
 
-          <Select options={jobStatuses} value={job.status} onChange={e => updateJob({ status: e.target.value })} className="w-36" />
+          <Select
+            options={[
+              ...jobStatuses,
+              // Show the terminal status label if the job is already in one
+              ...(['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)
+                ? [{ value: job.status, label: job.status.charAt(0) + job.status.slice(1).toLowerCase() }]
+                : []),
+            ]}
+            value={job.status}
+            onChange={e => updateJob({ status: e.target.value })}
+            className="w-36"
+            disabled={['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)}
+          />
           <Button variant="outline" onClick={calculateCost}><Calculator className="h-4 w-4 mr-2" /> Calculate Cost</Button>
           {!['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
             <>
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={submittingComplete}
+                onClick={handleComplete}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                {submittingComplete ? 'Completing…' : 'Mark Complete'}
+              </Button>
               <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowFailDialog(true)}>
                 <AlertTriangle className="h-4 w-4 mr-2" /> Mark Failed
               </Button>
