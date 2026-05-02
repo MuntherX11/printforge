@@ -5,6 +5,9 @@ import { RedisCacheService } from '../common/redis/redis-cache.service';
 // ARCH-08: cache TTL for settings — 5 minutes balances freshness vs DB load
 const SETTINGS_TTL_S = 300;
 
+/** Keys whose values must never be returned to clients via getAll(). */
+const REDACTED_KEYS = new Set(['smtp_pass']);
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -13,10 +16,16 @@ export class SettingsService {
   ) {}
 
   async getAll() {
-    return this.cache.getOrSet<Record<string, string>>('settings:all', SETTINGS_TTL_S, async () => {
+    const all = await this.cache.getOrSet<Record<string, string>>('settings:all', SETTINGS_TTL_S, async () => {
       const settings = await this.prisma.systemSetting.findMany();
       return Object.fromEntries(settings.map(s => [s.key, s.value]));
     });
+    // Redact sensitive keys before returning to any caller (including staff)
+    const redacted = { ...all };
+    for (const key of REDACTED_KEYS) {
+      if (key in redacted) redacted[key] = '••••••••';
+    }
+    return redacted;
   }
 
   async get(key: string, defaultValue?: string): Promise<string> {

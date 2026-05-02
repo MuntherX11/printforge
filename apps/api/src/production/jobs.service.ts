@@ -277,36 +277,41 @@ export class JobsService {
     }
 
     const wasteGrams = dto.wasteGrams || 0;
-    if (wasteGrams > 0 && job.materials.length > 0) {
-      const totalPlanned = job.materials.reduce((s, m) => s + m.gramsUsed, 0);
-      if (totalPlanned > 0) {
-        // ARCH-01: batch spool reads — one findMany instead of N findUnique calls
-        const failSpoolIds = job.materials.filter(m => m.spoolId).map(m => m.spoolId!);
-        const failSpools = failSpoolIds.length > 0
-          ? await this.prisma.spool.findMany({ where: { id: { in: failSpoolIds } }, select: { id: true, currentWeight: true } })
-          : [];
-        const failSpoolWeights = new Map(failSpools.map(s => [s.id, s.currentWeight]));
 
-        for (const mat of job.materials) {
-          if (mat.spoolId) {
-            const proportion = mat.gramsUsed / totalPlanned;
-            const matWaste = wasteGrams * proportion;
-            const newWeight = Math.max(0, (failSpoolWeights.get(mat.spoolId) ?? 0) - matWaste);
-            await this.prisma.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
+    // Wrap spool deductions + status update in a single transaction so a mid-loop
+    // crash doesn't leave stock partially decremented while the job stays non-FAILED.
+    const failed = await this.prisma.$transaction(async (tx) => {
+      if (wasteGrams > 0 && job.materials.length > 0) {
+        const totalPlanned = job.materials.reduce((s, m) => s + m.gramsUsed, 0);
+        if (totalPlanned > 0) {
+          // ARCH-01: batch spool reads — one findMany instead of N findUnique calls
+          const failSpoolIds = job.materials.filter(m => m.spoolId).map(m => m.spoolId!);
+          const failSpools = failSpoolIds.length > 0
+            ? await tx.spool.findMany({ where: { id: { in: failSpoolIds } }, select: { id: true, currentWeight: true } })
+            : [];
+          const failSpoolWeights = new Map(failSpools.map(s => [s.id, s.currentWeight]));
+
+          for (const mat of job.materials) {
+            if (mat.spoolId) {
+              const proportion = mat.gramsUsed / totalPlanned;
+              const matWaste = wasteGrams * proportion;
+              const newWeight = Math.max(0, (failSpoolWeights.get(mat.spoolId) ?? 0) - matWaste);
+              await tx.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
+            }
           }
         }
       }
-    }
 
-    const failed = await this.prisma.productionJob.update({
-      where: { id },
-      data: {
-        status: 'FAILED',
-        failureReason: dto.failureReason,
-        failedAt: new Date(),
-        wasteGrams,
-      },
-      include: { printer: true, materials: { include: { material: true } } },
+      return tx.productionJob.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          failureReason: dto.failureReason,
+          failedAt: new Date(),
+          wasteGrams,
+        },
+        include: { printer: true, materials: { include: { material: true } } },
+      });
     });
     this.gateway?.broadcastNotification({
       type: 'error',

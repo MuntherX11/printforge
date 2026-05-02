@@ -284,48 +284,51 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
 
     if (!job) return;
 
-    // BUG-02: idempotency guard — only update when job is still active
-    const result = await this.prisma.productionJob.updateMany({
-      where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        printDuration: snapshot.printJobTime,
-      },
-    }).catch(() => ({ count: 0 }));
-
-    if (result.count === 0) {
-      this.logger.log(`Job ${job.id} already completed — skipping duplicate completion`);
-      return;
-    }
-
-    // BIZ-13: machine cost = print hours × hourly rate; increment printer total hours
+    // Wrap idempotency guard + all writes in a single transaction so a crash
+    // between status update and spool deductions doesn't leave stock inconsistent.
     const printHours = (snapshot.printJobTime || 0) / 3600;
-    const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
-    await Promise.all([
-      this.prisma.productionJob.update({
-        where: { id: job.id },
-        data: { machineCost },
-      }),
-      this.prisma.printer.update({
-        where: { id: printerId },
-        data: { totalPrintHours: { increment: printHours } },
-      }),
-    ]).catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
+    const committed = await this.prisma.$transaction(async (tx) => {
+      // BUG-02: idempotency guard inside tx — only update when job is still active
+      const result = await tx.productionJob.updateMany({
+        where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+          printDuration: snapshot.printJobTime,
+        },
+      });
+      if (result.count === 0) return false; // already completed — skip
 
-    // BUG-04: fetch current spool weight before deducting to prevent negative values
-    for (const jm of job.materials) {
-      if (jm.spoolId && jm.gramsUsed > 0) {
-        const currentSpool = await this.prisma.spool.findUnique({
-          where: { id: jm.spoolId },
-          select: { currentWeight: true },
-        }).catch(() => null);
-        const newWeight = Math.max(0, (currentSpool?.currentWeight ?? 0) - jm.gramsUsed);
-        await this.prisma.spool.update({
-          where: { id: jm.spoolId },
-          data: { currentWeight: newWeight },
-        }).catch(() => {});
+      // BIZ-13: machine cost = print hours × hourly rate; increment printer total hours
+      const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
+      await Promise.all([
+        tx.productionJob.update({ where: { id: job.id }, data: { machineCost } }),
+        tx.printer.update({ where: { id: printerId }, data: { totalPrintHours: { increment: printHours } } }),
+      ]);
+
+      // ARCH-01 + BUG-04: batch spool reads, deduct atomically within tx
+      const spoolIds = job.materials.filter(m => m.spoolId && m.gramsUsed > 0).map(m => m.spoolId!);
+      const spoolRows = spoolIds.length > 0
+        ? await tx.spool.findMany({ where: { id: { in: spoolIds } }, select: { id: true, currentWeight: true } })
+        : [];
+      const spoolWeights = new Map(spoolRows.map(s => [s.id, s.currentWeight]));
+
+      for (const jm of job.materials) {
+        if (jm.spoolId && jm.gramsUsed > 0) {
+          const newWeight = Math.max(0, (spoolWeights.get(jm.spoolId) ?? 0) - jm.gramsUsed);
+          await tx.spool.update({ where: { id: jm.spoolId }, data: { currentWeight: newWeight } });
+        }
       }
+
+      return true;
+    }).catch((err) => {
+      this.logger.warn(`handleJobCompleted tx failed for job ${job.id}: ${err.message}`);
+      return false;
+    });
+
+    if (!committed) {
+      this.logger.log(`Job ${job.id} already completed or tx failed — skipping notification`);
+      return;
     }
 
     await this.notifications.create({

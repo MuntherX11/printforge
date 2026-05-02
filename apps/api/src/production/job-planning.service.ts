@@ -33,6 +33,35 @@ export class JobPlanningService {
     });
     const productMap = new Map(products.map(p => [p.id, p]));
 
+    // ARCH-01: collect all materialIds needed across all components so we can
+    // batch-fetch every active spool in a single query instead of N selectSpool calls.
+    const neededMaterialIds = new Set<string>();
+    for (const item of order.items) {
+      const product = item.productId ? productMap.get(item.productId) : undefined;
+      if (!product) continue;
+      for (const comp of product.components) {
+        if (comp.isMultiColor && comp.materials.length > 0) {
+          comp.materials.forEach(cm => neededMaterialIds.add(cm.materialId));
+        } else if (comp.materialId) {
+          neededMaterialIds.add(comp.materialId);
+        }
+      }
+    }
+
+    const allSpools = neededMaterialIds.size > 0
+      ? await this.prisma.spool.findMany({
+          where: { materialId: { in: [...neededMaterialIds] }, isActive: true },
+          orderBy: { currentWeight: 'desc' },
+        })
+      : [];
+
+    // Group by materialId for O(1) lookup
+    const spoolsByMaterial = new Map<string, typeof allSpools>();
+    for (const s of allSpools) {
+      if (!spoolsByMaterial.has(s.materialId)) spoolsByMaterial.set(s.materialId, []);
+      spoolsByMaterial.get(s.materialId)!.push(s);
+    }
+
     const plan: any[] = [];
 
     for (const item of order.items) {
@@ -50,7 +79,7 @@ export class JobPlanningService {
           for (const cm of comp.materials) {
             const cmGrams = cm.gramsUsed * deficit;
             const cmBuffer = cmGrams + SPOOL_BUFFER_GRAMS;
-            const spool = await this.selectSpool(cm.materialId, cmBuffer);
+            const spool = this.selectSpoolFromCache(spoolsByMaterial, cm.materialId, cmBuffer);
             subMaterials.push({
               componentMaterialId: cm.id,
               materialId: cm.materialId,
@@ -70,7 +99,7 @@ export class JobPlanningService {
         } else if (comp.materialId) {
           const totalGrams = comp.gramsUsed * deficit;
           const requiredWithBuffer = totalGrams + SPOOL_BUFFER_GRAMS;
-          const spool = await this.selectSpool(comp.materialId, requiredWithBuffer);
+          const spool = this.selectSpoolFromCache(spoolsByMaterial, comp.materialId, requiredWithBuffer);
           subMaterials.push({
             componentMaterialId: null,
             materialId: comp.materialId,
@@ -111,16 +140,22 @@ export class JobPlanningService {
     return { order, plan };
   }
 
-  private async selectSpool(materialId: string, requiredWithBuffer: number) {
-    const best = await this.prisma.spool.findFirst({
-      where: { materialId, isActive: true, currentWeight: { gte: requiredWithBuffer } },
-      orderBy: { currentWeight: 'asc' },
-    });
-    if (best) return best;
-    return this.prisma.spool.findFirst({
-      where: { materialId, isActive: true },
-      orderBy: { currentWeight: 'desc' },
-    });
+  /**
+   * Select the best spool from an already-fetched in-memory cache:
+   * prefer the smallest spool that still has enough (best-fit), fall back to
+   * the heaviest active spool when none is sufficient.
+   */
+  private selectSpoolFromCache(
+    spoolsByMaterial: Map<string, Array<{ id: string; materialId: string; currentWeight: number }>>,
+    materialId: string,
+    requiredWithBuffer: number,
+  ) {
+    const spools = spoolsByMaterial.get(materialId) ?? [];
+    if (spools.length === 0) return null;
+    // smallest that fits (already sorted desc — scan from end)
+    const fitting = spools.filter(s => s.currentWeight >= requiredWithBuffer);
+    if (fitting.length > 0) return fitting[fitting.length - 1]; // smallest fitting
+    return spools[0]; // fallback: heaviest available
   }
 
   async createFromPlan(orderId: string, planOverrides?: Array<{

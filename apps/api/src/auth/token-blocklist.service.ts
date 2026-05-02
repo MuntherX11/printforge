@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type Redis from 'ioredis';
-import { REDIS_CLIENT } from '../common/redis/redis.module';
+import { REDIS_CLIENT } from '../common/redis/redis.constants';
 
 @Injectable()
 export class TokenBlocklistService {
