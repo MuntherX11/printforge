@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow } from '@printforge/types';
+import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
 
 @Injectable()
 export class MaterialsService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateMaterialDto) {
-    return this.prisma.material.create({ data: dto as any });
+    return this.prisma.material.create({ data: dto });
   }
 
   async findAll() {
@@ -34,7 +34,7 @@ export class MaterialsService {
 
   async update(id: string, dto: UpdateMaterialDto) {
     await this.findOne(id);
-    return this.prisma.material.update({ where: { id }, data: dto as any });
+    return this.prisma.material.update({ where: { id }, data: dto });
   }
 
   async bulkImport(rows: BulkMaterialUploadRow[]) {
@@ -59,7 +59,7 @@ export class MaterialsService {
         await this.prisma.material.create({
           data: {
             name: row.name,
-            type: type as any,
+            type: type as MaterialType,
             color: row.color || null,
             brand: row.brand || null,
             costPerGram: Number(row.costPerGram),

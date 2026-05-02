@@ -8,6 +8,6 @@ import { CommunicationsModule } from '../communications/communications.module';
   imports: [CommunicationsModule],
   controllers: [InvoicesController],
   providers: [InvoicesService, PdfService],
-  exports: [InvoicesService],
+  exports: [InvoicesService, PdfService],
 })
 export class InvoicesModule {}

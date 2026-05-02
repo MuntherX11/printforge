@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException, ConflictException } from '@nestjs/common';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
+import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto, QuoteStatus, QuoteSource } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
 import { OrdersService } from '../orders/orders.service';
@@ -9,6 +9,13 @@ import { EventsGateway } from '../websocket/events.gateway';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+
+/** Minimal shape of a customer row returned via Prisma include. */
+interface CustomerRecord {
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
 
 @Injectable()
 export class QuotesService {
@@ -27,8 +34,8 @@ export class QuotesService {
       try {
         quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
         break;
-      } catch (e: any) {
-        if (e.code !== 'P2002' || attempt === 4) throw e;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
     if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
@@ -53,7 +60,7 @@ export class QuotesService {
       data: {
         quoteNumber,
         customerId: dto.customerId,
-        source: (dto.source as any) || 'QUICK_QUOTE',
+        source: (dto.source as QuoteSource) || QuoteSource.QUICK_QUOTE,
         notes: dto.notes || null,
         validUntil,
         subtotal: suggestedPrice,
@@ -88,8 +95,8 @@ export class QuotesService {
       try {
         quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
         break;
-      } catch (e: any) {
-        if (e.code !== 'P2002' || attempt === 4) throw e;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
     if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
@@ -154,8 +161,9 @@ export class QuotesService {
         subtotal: total,
         tax,
         total: total + tax,
-        gcodeMetadata: dto.analysis?.slicer ? (dto.analysis as any) : undefined,
-        stlMetadata: dto.analysis && !dto.analysis.slicer ? (dto.analysis as any) : undefined,
+        // JSON round-trip produces a plain object Prisma's InputJsonValue accepts
+        gcodeMetadata: dto.analysis?.slicer ? JSON.parse(JSON.stringify(dto.analysis)) : undefined,
+        stlMetadata: dto.analysis && !dto.analysis.slicer ? JSON.parse(JSON.stringify(dto.analysis)) : undefined,
         items: { create: items },
       },
       include: { customer: true, items: true },
@@ -249,8 +257,8 @@ export class QuotesService {
       try {
         quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
         break;
-      } catch (e: any) {
-        if (e.code !== 'P2002' || attempt === 4) throw e;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
     if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
@@ -291,7 +299,7 @@ export class QuotesService {
 
   async findAll(query: PaginationDto, status?: string) {
     const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
-    const where = status && validStatuses.includes(status) ? { status: status as any } : {};
+    const where = status && validStatuses.includes(status) ? { status: status as QuoteStatus } : {};
     
     const [data, total] = await Promise.all([
       this.prisma.quote.findMany({
@@ -323,7 +331,7 @@ export class QuotesService {
     const updated = await this.prisma.quote.update({
       where: { id },
       data: {
-        status: (dto.status && validStatuses.includes(dto.status)) ? (dto.status as any) : undefined,
+        status: dto.status ?? undefined,
         notes: dto.notes,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
       },
@@ -334,7 +342,7 @@ export class QuotesService {
     if (dto.status === 'SENT' && existing.status !== 'SENT') {
       const notifyEnabled = await this.settingsService?.get('notify_quote_sent', 'true') ?? 'true';
       if (notifyEnabled !== 'false') {
-        const customer = updated.customer as any;
+        const customer = updated.customer as CustomerRecord | null;
         const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
         const currency = await this.settingsService?.get('currency', 'OMR') ?? 'OMR';
         const decimals = parseInt(await this.settingsService?.get('currency_decimals', '3') ?? '3');
@@ -407,9 +415,9 @@ export class QuotesService {
           unitPrice: item.unitPrice,
         })),
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       // P2002 on Order.quoteId unique constraint means a concurrent request beat us
-      if (e?.code === 'P2002') {
+      if ((e as { code?: string })?.code === 'P2002') {
         throw new ConflictException('Quote already converted to order by a concurrent request');
       }
       throw e;

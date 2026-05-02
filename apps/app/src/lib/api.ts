@@ -27,6 +27,19 @@ export const api = {
   patch: <T>(path: string, data?: any) => request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   put: <T>(path: string, data?: any) => request<T>(path, { method: 'PUT', body: JSON.stringify(data) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  postForm: async <T>(path: string, formData: FormData): Promise<T> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || error.message || `HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    return (json.data !== undefined ? json.data : json) as T;
+  },
   upload: async (path: string, file: File, params: Record<string, string>) => {
     const formData = new FormData();
     formData.append('file', file);

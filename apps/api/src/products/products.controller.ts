@@ -36,6 +36,17 @@ export class ProductsController {
     return this.productsService.findAllActive();
   }
 
+  @Post('upload-bom')
+  @UseGuards(StaffGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  async uploadBom(@UploadedFile() file: any) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!file.originalname?.toLowerCase().endsWith('.xlsx')) {
+      throw new BadRequestException('File must be a .xlsx Excel file');
+    }
+    return this.productsService.uploadBom(file.buffer);
+  }
+
   @Get(':id')
   @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {

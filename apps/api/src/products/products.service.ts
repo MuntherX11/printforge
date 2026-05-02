@@ -12,6 +12,7 @@ import {
 } from '@printforge/types';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class ProductsService {
@@ -280,6 +281,109 @@ export class ProductsService {
     }
 
     return attachments;
+  }
+
+  async uploadBom(fileBuffer: Buffer): Promise<{ created: number; updated: number; errors: string[] }> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(fileBuffer as any);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new BadRequestException('Excel file has no worksheets');
+
+    // Build header map from row 1
+    const headerRow = sheet.getRow(1);
+    const headers: Record<string, number> = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const val = String(cell.value ?? '').trim().toLowerCase();
+      if (val) headers[val] = colNumber;
+    });
+
+    const required = ['name'];
+    for (const col of required) {
+      if (!headers[col]) throw new BadRequestException(`Missing required column: "${col}"`);
+    }
+
+    const col = (name: string) => headers[name];
+    const cellStr = (row: ExcelJS.Row, name: string): string | null => {
+      const c = col(name);
+      if (!c) return null;
+      const v = row.getCell(c).value;
+      return v != null ? String(v).trim() : null;
+    };
+    const cellNum = (row: ExcelJS.Row, name: string): number | null => {
+      const c = col(name);
+      if (!c) return null;
+      const v = row.getCell(c).value;
+      if (v == null || v === '') return null;
+      const n = Number(v);
+      return isNaN(n) ? null : n;
+    };
+
+    let created = 0;
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (let rowNum = 2; rowNum <= sheet.rowCount; rowNum++) {
+      const row = sheet.getRow(rowNum);
+      // Skip entirely blank rows
+      let hasContent = false;
+      row.eachCell(() => { hasContent = true; });
+      if (!hasContent) continue;
+
+      const name = cellStr(row, 'name');
+      if (!name) {
+        errors.push(`Row ${rowNum}: "name" is required`);
+        continue;
+      }
+
+      const sku = cellStr(row, 'sku') || null;
+      const description = cellStr(row, 'description') || null;
+      const basePrice = cellNum(row, 'baseprice') ?? cellNum(row, 'base_price') ?? cellNum(row, 'price') ?? null;
+      const estimatedMinutes = cellNum(row, 'estimatedminutes') ?? cellNum(row, 'estimated_minutes') ?? null;
+      const estimatedGrams = cellNum(row, 'estimatedgrams') ?? cellNum(row, 'estimated_grams') ?? null;
+
+      try {
+        if (sku) {
+          const existing = await this.prisma.product.findFirst({ where: { sku } });
+          if (existing) {
+            const data: any = { name };
+            if (description !== null) data.description = description;
+            if (basePrice !== null) data.basePrice = basePrice;
+            if (estimatedMinutes !== null) data.estimatedMinutes = estimatedMinutes;
+            if (estimatedGrams !== null) data.estimatedGrams = estimatedGrams;
+            await this.prisma.product.update({ where: { id: existing.id }, data });
+            updated++;
+          } else {
+            await this.prisma.product.create({
+              data: {
+                name,
+                sku,
+                description,
+                basePrice: basePrice ?? 0,
+                estimatedMinutes: estimatedMinutes ?? 0,
+                estimatedGrams: estimatedGrams ?? 0,
+              },
+            });
+            created++;
+          }
+        } else {
+          await this.prisma.product.create({
+            data: {
+              name,
+              sku: null,
+              description,
+              basePrice: basePrice ?? 0,
+              estimatedMinutes: estimatedMinutes ?? 0,
+              estimatedGrams: estimatedGrams ?? 0,
+            },
+          });
+          created++;
+        }
+      } catch (err: any) {
+        errors.push(`Row ${rowNum} ("${name}"): ${err?.message ?? 'Unknown error'}`);
+      }
+    }
+
+    return { created, updated, errors };
   }
 
   async removeImage(productId: string, attachmentId: string) {

@@ -6,9 +6,10 @@ import { OrdersModule } from '../orders/orders.module';
 import { WebSocketModule } from '../websocket/websocket.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { SettingsModule } from '../settings/settings.module';
+import { InvoicesModule } from '../invoices/invoices.module';
 
 @Module({
-  imports: [OrdersModule, WebSocketModule, CommunicationsModule, SettingsModule],
+  imports: [OrdersModule, WebSocketModule, CommunicationsModule, SettingsModule, InvoicesModule],
   controllers: [QuotesController],
   providers: [QuotesService, QuotesScheduler],
   exports: [QuotesService],

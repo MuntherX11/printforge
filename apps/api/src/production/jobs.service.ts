@@ -4,11 +4,18 @@ import { CostingService } from '../costing/costing.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { JobPlanningService } from './job-planning.service';
 import { JobSchedulingService } from './job-scheduling.service';
-import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto } from '@printforge/types';
+import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto, JobStatus } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+
+/** Minimal shape of a customer row returned via Prisma include. */
+interface CustomerRecord {
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
 
 @Injectable()
 export class JobsService {
@@ -65,7 +72,7 @@ export class JobsService {
 
   async findAll(query: PaginationDto, status?: string) {
     const validStatuses = ['QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
-    const where = status && validStatuses.includes(status) ? { status: status as any } : {};
+    const where = status && validStatuses.includes(status) ? { status: status as JobStatus } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.productionJob.findMany({
@@ -111,9 +118,9 @@ export class JobsService {
       throw new BadRequestException(`Cannot modify a job in terminal state: ${job.status}`);
     }
 
-    const data: any = { ...dto };
+    const data: UpdateProductionJobDto & { startedAt?: Date } = { ...dto };
 
-    if (dto.status === 'IN_PROGRESS' && job.status !== 'IN_PROGRESS') {
+    if (dto.status === JobStatus.IN_PROGRESS && job.status !== JobStatus.IN_PROGRESS) {
       data.startedAt = new Date();
     }
 
@@ -249,7 +256,7 @@ export class JobsService {
     if (notifyEnabled === 'false') return;
 
     const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
-    const customer = order.customer as any;
+    const customer = order.customer as CustomerRecord | null;
 
     if (customer?.email) {
       this.emailNotifications?.notifyCustomerOrderCompleted(customer.email, { orderNumber: order.orderNumber }).catch(() => {});

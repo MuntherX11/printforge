@@ -1,11 +1,18 @@
 import { Injectable, NotFoundException, Optional, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateOrderDto, UpdateOrderDto } from '@printforge/types';
+import { CreateOrderDto, UpdateOrderDto, OrderStatus } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+
+/** Minimal shape of a customer row returned via Prisma include. */
+interface CustomerRecord {
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
 
 @Injectable()
 export class OrdersService {
@@ -22,8 +29,8 @@ export class OrdersService {
       try {
         orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
         break;
-      } catch (e: any) {
-        if (e.code !== 'P2002' || attempt === 4) throw e;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
     if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
@@ -60,7 +67,7 @@ export class OrdersService {
 
   async findAll(query: PaginationDto, status?: string) {
     const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
-    const where = status && validStatuses.includes(status) ? { status: status as any } : {};
+    const where = status && validStatuses.includes(status) ? { status: status as OrderStatus } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -94,8 +101,8 @@ export class OrdersService {
 
     // Aggregate material requirements across all order items via their products' BOM
     const productIds = order.items
-      .map((item: any) => item.productId)
-      .filter((pid: any): pid is string => !!pid);
+      .map((item) => item.productId)
+      .filter((pid): pid is string => !!pid);
 
     const materialNeeds = new Map<string, { materialId: string; name: string; type: string; color: string | null; gramsNeeded: number }>();
 
@@ -106,7 +113,7 @@ export class OrdersService {
       });
       const productMap = new Map(products.map(p => [p.id, p]));
 
-      for (const item of order.items as any[]) {
+      for (const item of order.items) {
         if (!item.productId) continue;
         const product = productMap.get(item.productId);
         if (!product?.components) continue;
@@ -132,7 +139,12 @@ export class OrdersService {
 
     // Fetch active stock for all needed materials in one query
     const materialIds = Array.from(materialNeeds.keys());
-    let materialAvailability: any[] = [];
+    type MaterialAvailability = {
+      materialId: string; name: string; type: string; color: string | null;
+      gramsNeeded: number; totalStock: number; reservedStock: number;
+      freeStock: number; hasEnoughStock: boolean;
+    };
+    let materialAvailability: MaterialAvailability[] = [];
     if (materialIds.length > 0) {
       // 1. Get total available stock
       const stockData = await this.prisma.spool.groupBy({
@@ -251,7 +263,7 @@ export class OrdersService {
     const updated = await this.prisma.order.update({
       where: { id },
       data: {
-        status: (dto.status && validStatuses.includes(dto.status)) ? (dto.status as any) : undefined,
+        status: dto.status ?? undefined,
         notes: dto.notes,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
@@ -259,10 +271,10 @@ export class OrdersService {
     });
 
     // Fire customer notifications on status transitions
-    const prevStatus = (existing as any).status;
+    const prevStatus = existing.status;
     const newStatus = updated.status;
     if (dto.status && newStatus !== prevStatus) {
-      const customer = updated.customer as any;
+      const customer = updated.customer as CustomerRecord | null;
       const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
 
       if (newStatus === 'CONFIRMED') {

@@ -74,6 +74,9 @@ export default function QuoteDetailPage() {
           <p className="text-sm text-gray-500">{quote.customer?.name} | {formatDate(quote.createdAt)}</p>
         </div>
         <div className="flex gap-2 items-center">
+          <Button variant="outline" onClick={() => window.open(`/api/quotes/${id}/pdf`, '_blank')}>
+            Download PDF
+          </Button>
           <Select options={quoteStatuses} value={quote.status} onChange={e => updateStatus(e.target.value)} className="w-36" disabled={updating} />
           {['ACCEPTED', 'SENT'].includes(quote.status) && !quote.order && (
             <Button onClick={() => convertToOrder(true)} disabled={converting}>

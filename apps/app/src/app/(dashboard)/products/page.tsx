@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,19 +11,59 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
-import { Plus, Box } from 'lucide-react';
+import { Plus, Box, Upload } from 'lucide-react';
 
 export default function ProductsPage() {
   const formatCurrency = useFormatCurrency();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; updated: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const fetchProducts = useCallback(() => {
     setLoading(true);
     setData(null);
     api.get<any>(`/products?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
   }, [page]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  const handleImportClick = () => {
+    setImportResult(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!e.target.files) return;
+    // Reset so the same file can be re-selected after an error
+    e.target.value = '';
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await api.postForm<{ created: number; updated: number; errors: string[] }>(
+        '/products/upload-bom',
+        formData,
+      );
+      setImportResult(result);
+      if (result.created > 0 || result.updated > 0) {
+        fetchProducts();
+      }
+    } catch (err: any) {
+      setImportResult({ created: 0, updated: 0, errors: [err?.message ?? 'Import failed'] });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   if (loading) return <Loading />;
 
@@ -33,10 +73,39 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Products</h1>
-        <Link href="/products/new">
-          <Button><Plus className="h-4 w-4 mr-2" /> Add Product</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <Button variant="outline" onClick={handleImportClick} disabled={importing}>
+            <Upload className="h-4 w-4 mr-2" />
+            {importing ? 'Importing...' : 'Import Excel'}
+          </Button>
+          <Link href="/products/new">
+            <Button><Plus className="h-4 w-4 mr-2" /> Add Product</Button>
+          </Link>
+        </div>
       </div>
+
+      {importResult && (
+        <div className={`rounded-md px-4 py-3 text-sm ${importResult.errors.length > 0 ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400' : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'}`}>
+          {importResult.errors.length === 0 || importResult.created > 0 || importResult.updated > 0 ? (
+            <p className="font-medium">
+              Imported: {importResult.created} created, {importResult.updated} updated
+              {importResult.errors.length > 0 ? ` (${importResult.errors.length} row error${importResult.errors.length > 1 ? 's' : ''})` : ''}
+            </p>
+          ) : null}
+          {importResult.errors.length > 0 && (
+            <ul className="mt-1 list-disc list-inside space-y-0.5">
+              {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardContent className="p-0">

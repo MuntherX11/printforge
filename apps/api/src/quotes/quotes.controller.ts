@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { QuotesService } from './quotes.service';
+import { PdfService } from '../invoices/pdf.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
@@ -13,7 +15,10 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 @Controller('quotes')
 @UseGuards(JwtAuthGuard)
 export class QuotesController {
-  constructor(private quotesService: QuotesService) {}
+  constructor(
+    private quotesService: QuotesService,
+    private pdfService: PdfService,
+  ) {}
 
   @Post()
   @UseGuards(StaffGuard, RolesGuard)
@@ -53,6 +58,20 @@ export class QuotesController {
   @Roles('ADMIN', 'OPERATOR')
   convertToOrder(@Param('id') id: string, @Body() body?: { autoCreateJobs?: boolean }) {
     return this.quotesService.convertToOrder(id, body);
+  }
+
+  @Get(':id/pdf')
+  @UseGuards(StaffGuard)
+  async downloadPdf(@Param('id') id: string, @Res() res: Response) {
+    const quote = await this.quotesService.findOne(id);
+    const pdfBuffer = await this.pdfService.generateQuotePdf(quote);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=quote-${quote.quoteNumber}.pdf`,
+      'Content-Length': pdfBuffer.length,
+    });
+    res.end(pdfBuffer);
   }
 
   // ============ CUSTOMER ENDPOINTS ============

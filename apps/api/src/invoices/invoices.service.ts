@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateInvoiceDto, UpdateInvoiceDto } from '@printforge/types';
+import { CreateInvoiceDto, UpdateInvoiceDto, InvoiceStatus } from '@printforge/types';
 import { generateNumber } from '../common/utils/number-generator';
 
 @Injectable()
@@ -31,8 +31,8 @@ export class InvoicesService {
       try {
         invoiceNumber = await generateNumber(this.prisma, 'INV', 'invoice');
         break;
-      } catch (e: any) {
-        if (e.code !== 'P2002' || attempt === 4) throw e;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
     if (!invoiceNumber) throw new InternalServerErrorException('Failed to generate unique document number');
@@ -80,7 +80,7 @@ export class InvoicesService {
       throw new BadRequestException('Invoice is already marked as paid');
     }
 
-    const data: any = {};
+    const data: { status?: InvoiceStatus; paidAmount?: number; paidAt?: Date } = {};
     if (dto.status) data.status = dto.status;
     if (dto.paidAmount !== undefined) data.paidAmount = dto.paidAmount;
     if (dto.paidAt) data.paidAt = new Date(dto.paidAt);
