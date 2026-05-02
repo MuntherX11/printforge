@@ -181,10 +181,16 @@ export class JobsService {
         });
       }
 
+      // ARCH-01: batch spool reads into one query instead of N findUnique calls
+      const spoolIds = job.materials.filter(m => m.spoolId && m.gramsUsed > 0).map(m => m.spoolId!);
+      const spoolRows = spoolIds.length > 0
+        ? await tx.spool.findMany({ where: { id: { in: spoolIds } }, select: { id: true, currentWeight: true } })
+        : [];
+      const spoolWeights = new Map(spoolRows.map(s => [s.id, s.currentWeight]));
+
       for (const mat of job.materials) {
         if (mat.spoolId && mat.gramsUsed > 0) {
-          const spool = await tx.spool.findUnique({ where: { id: mat.spoolId }, select: { currentWeight: true } });
-          const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - mat.gramsUsed);
+          const newWeight = Math.max(0, (spoolWeights.get(mat.spoolId) ?? 0) - mat.gramsUsed);
           await tx.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
         }
       }
@@ -266,19 +272,21 @@ export class JobsService {
     const wasteGrams = dto.wasteGrams || 0;
     if (wasteGrams > 0 && job.materials.length > 0) {
       const totalPlanned = job.materials.reduce((s, m) => s + m.gramsUsed, 0);
-      for (const mat of job.materials) {
-        if (mat.spoolId && totalPlanned > 0) {
-          const proportion = mat.gramsUsed / totalPlanned;
-          const matWaste = wasteGrams * proportion;
-          const spool = await this.prisma.spool.findUnique({
-            where: { id: mat.spoolId },
-            select: { currentWeight: true },
-          });
-          const newWeight = Math.max(0, (spool?.currentWeight ?? 0) - matWaste);
-          await this.prisma.spool.update({
-            where: { id: mat.spoolId },
-            data: { currentWeight: newWeight },
-          });
+      if (totalPlanned > 0) {
+        // ARCH-01: batch spool reads — one findMany instead of N findUnique calls
+        const failSpoolIds = job.materials.filter(m => m.spoolId).map(m => m.spoolId!);
+        const failSpools = failSpoolIds.length > 0
+          ? await this.prisma.spool.findMany({ where: { id: { in: failSpoolIds } }, select: { id: true, currentWeight: true } })
+          : [];
+        const failSpoolWeights = new Map(failSpools.map(s => [s.id, s.currentWeight]));
+
+        for (const mat of job.materials) {
+          if (mat.spoolId) {
+            const proportion = mat.gramsUsed / totalPlanned;
+            const matWaste = wasteGrams * proportion;
+            const newWeight = Math.max(0, (failSpoolWeights.get(mat.spoolId) ?? 0) - matWaste);
+            await this.prisma.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
+          }
         }
       }
     }
@@ -328,16 +336,17 @@ export class JobsService {
       include: { printer: true },
     });
 
-    for (const mat of original.materials) {
-      await this.prisma.jobMaterial.create({
-        data: {
+    // ARCH-01: createMany instead of N sequential create calls
+    if (original.materials.length > 0) {
+      await this.prisma.jobMaterial.createMany({
+        data: original.materials.map(mat => ({
           jobId: newJob.id,
           materialId: mat.materialId,
           spoolId: mat.spoolId,
           gramsUsed: mat.gramsUsed,
           costPerGram: mat.costPerGram,
           colorIndex: mat.colorIndex,
-        },
+        })),
       });
     }
 
