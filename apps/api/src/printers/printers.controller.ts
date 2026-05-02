@@ -84,14 +84,29 @@ export class PrintersController {
 
     const lib = cameraUrl.startsWith('https') ? https : http;
 
-    const upstream = lib.get(cameraUrl, { timeout: 60_000 }, (upstream) => {
-      const contentType = upstream.headers['content-type'] || 'image/jpeg';
+    const upstream = lib.get(cameraUrl, { timeout: 60_000 }, (upstreamRes) => {
+      const contentType = upstreamRes.headers['content-type'] || 'image/jpeg';
+
+      // If the upstream returns an HTML page it's a web-UI URL, not a stream URL.
+      // Abort and tell the caller so the camera viewer can show a useful error.
+      if (contentType.startsWith('text/html')) {
+        upstreamRes.destroy();
+        if (!res.headersSent) {
+          res.status(502).json({
+            error: 'Camera URL returned an HTML page, not a video stream. '
+              + 'Set the URL to the direct MJPEG stream path '
+              + '(e.g. http://<ip>:<port>/?action=stream for mjpg-streamer).',
+          });
+        }
+        return;
+      }
+
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'no-cache, no-store');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering for streams
-      upstream.pipe(res);
-      res.on('close', () => upstream.destroy());
+      upstreamRes.pipe(res);
+      res.on('close', () => upstreamRes.destroy());
     });
 
     upstream.on('error', () => {

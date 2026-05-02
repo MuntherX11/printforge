@@ -13,10 +13,35 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useWebSocket } from '@/lib/use-websocket';
+
+/**
+ * Estimate remaining print time.
+ * Prefers live-progress math when progress > 0; falls back to printDuration estimate.
+ * Returns a short human-readable string like "1h 23m remaining" or "".
+ */
+function formatRemaining(startedAt: string | null | undefined, printDurationSecs: number | null | undefined, progressPct?: number): string {
+  if (!startedAt) return '';
+  const elapsedSecs = (Date.now() - new Date(startedAt).getTime()) / 1000;
+  let remainingSecs: number;
+
+  if (progressPct && progressPct > 0 && progressPct < 100) {
+    // Extrapolate from elapsed time and % done
+    remainingSecs = (elapsedSecs * (100 - progressPct)) / progressPct;
+  } else if (printDurationSecs && printDurationSecs > 0) {
+    remainingSecs = printDurationSecs - elapsedSecs;
+  } else {
+    return '';
+  }
+
+  if (remainingSecs <= 60) return 'finishing up…';
+  const hrs = Math.floor(remainingSecs / 3600);
+  const mins = Math.floor((remainingSecs % 3600) / 60);
+  return hrs > 0 ? `${hrs}h ${mins}m remaining` : `${mins}m remaining`;
+}
 
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
@@ -256,7 +281,7 @@ export default function JobDetailPage() {
                 )}
               </p>
               <span className="text-sm font-bold text-brand-600 dark:text-brand-400 tabular-nums">
-                {liveProgress ? `${liveProgress.progress}%` : job.printDuration ? `${Math.round(job.printDuration / 60)} min elapsed` : '—'}
+                {liveProgress ? `${liveProgress.progress}%` : '—'}
               </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
@@ -265,11 +290,20 @@ export default function JobDetailPage() {
                 style={{ width: `${liveProgress?.progress ?? 0}%` }}
               />
             </div>
-            {liveProgress && (
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
-                Updated live via WebSocket
+            {/* Remaining / elapsed time row */}
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {liveProgress ? 'Updated live via WebSocket' : 'Waiting for printer telemetry…'}
               </p>
-            )}
+              {(() => {
+                const remaining = formatRemaining(job.startedAt, job.printDuration, liveProgress?.progress);
+                return remaining ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+                    <Clock className="h-3 w-3" /> {remaining}
+                  </span>
+                ) : null;
+              })()}
+            </div>
           </CardContent>
         </Card>
       )}

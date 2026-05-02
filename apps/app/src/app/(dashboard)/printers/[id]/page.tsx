@@ -232,8 +232,13 @@ export default function PrinterDetailPage() {
               </div>
             </div>
             <div>
-              <Input name="cameraUrl" label="Camera Stream URL (optional)" placeholder="http://192.168.100.37:8000" defaultValue={printer.cameraUrl || ''} />
-              <p className="mt-1 text-xs text-gray-500">MJPEG stream URL (mjpg-streamer, ustreamer, OctoPrint webcam). Must be on your local network.</p>
+              <Input name="cameraUrl" label="Camera Stream URL (optional)" placeholder="http://192.168.1.x:8080/?action=stream" defaultValue={printer.cameraUrl || ''} />
+              <p className="mt-1 text-xs text-gray-500">
+                Must be the <strong>direct stream path</strong>, not the web UI.
+                Examples: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded text-[11px]">/?action=stream</code> (mjpg-streamer / Mainsail),{' '}
+                <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded text-[11px]">/webcam/?action=stream</code> (Klipper/Fluidd),{' '}
+                <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded text-[11px]">/video</code> (ustreamer).
+              </p>
             </div>
             <div className="flex items-center justify-between">
               <Button type="submit" size="sm" disabled={savingDetails}>{savingDetails ? 'Saving...' : 'Save Details'}</Button>
