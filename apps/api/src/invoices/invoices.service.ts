@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, InternalServerError
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto, InvoiceStatus } from '@printforge/types';
 import { generateNumber } from '../common/utils/number-generator';
+import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class InvoicesService {
@@ -52,13 +53,18 @@ export class InvoicesService {
     });
   }
 
-  async findAll() {
-    return this.prisma.invoice.findMany({
-      include: {
-        order: { include: { customer: { select: { id: true, name: true } } } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query: PaginationDto) {
+    const [data, total] = await Promise.all([
+      this.prisma.invoice.findMany({
+        ...paginate(query),
+        include: {
+          order: { include: { customer: { select: { id: true, name: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.invoice.count(),
+    ]);
+    return paginatedResponse(data, total, query);
   }
 
   async findOne(id: string) {
@@ -76,6 +82,9 @@ export class InvoicesService {
     // findOne throws NotFoundException if missing — reuse the result below
     const existing = await this.findOne(id);
 
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('Cannot modify a cancelled invoice');
+    }
     if (existing.status === 'PAID' && dto.status === 'PAID') {
       throw new BadRequestException('Invoice is already marked as paid');
     }

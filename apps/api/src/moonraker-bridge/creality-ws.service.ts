@@ -242,6 +242,11 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
         data: { status: newDbStatus as any, lastSeen: new Date() },
       }).catch(() => {});
 
+      // Detect job start: printer transitions into 'printing' with a matching QUEUED job
+      if (rawState === 'printing' && prevStatus !== 'printing') {
+        await this.handleJobStarted(printerId, conn.snapshot);
+      }
+
       // Detect job completion
       if (rawState === 'completed' && prevStatus !== 'completed') {
         await this.handleJobCompleted(printerId, conn.snapshot);
@@ -266,6 +271,19 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
           data: { lastSeen: new Date() },
         }).catch(() => {});
       }
+    }
+  }
+
+  private async handleJobStarted(printerId: string, snapshot: CrealitySnapshot) {
+    if (!snapshot.fileName) return;
+
+    const updated = await this.prisma.productionJob.updateMany({
+      where: { printerId, status: 'QUEUED', gcodeFilename: snapshot.fileName },
+      data: { status: 'IN_PROGRESS', startedAt: new Date() },
+    }).catch(() => ({ count: 0 }));
+
+    if (updated.count > 0) {
+      this.logger.log(`Job auto-started for printer ${printerId}: gcode "${snapshot.fileName}"`);
     }
   }
 

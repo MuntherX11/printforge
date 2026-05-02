@@ -12,6 +12,9 @@ export class ReportsService {
   async getProfitAndLoss(startDate: string, endDate: string) {
     const start = new Date(startDate);
     const end = new Date(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new Error('Invalid date format — expected ISO 8601 (e.g. 2026-01-01)');
+    }
 
     // Revenue: sum of paid invoices in period
     const invoices = await this.prisma.invoice.findMany({

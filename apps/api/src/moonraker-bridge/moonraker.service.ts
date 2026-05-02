@@ -165,6 +165,11 @@ export class MoonrakerService {
           });
         }
 
+        // Detect job start: printer transitions into PRINTING with a matching QUEUED job
+        if (prevStatus !== 'PRINTING' && newStatus === 'PRINTING') {
+          await this.handleJobStarted(printer.id, snapshot);
+        }
+
         // Detect job completion: was PRINTING, now IDLE/complete
         if (prevStatus === 'PRINTING' && (newStatus === 'IDLE') && snapshot.printStats?.state === 'complete') {
           await this.handleJobCompleted(printer.id, snapshot);
@@ -186,6 +191,24 @@ export class MoonrakerService {
     );
 
     return results;
+  }
+
+  /**
+   * When a Moonraker printer starts printing, find a matching QUEUED production
+   * job by gcodeFilename and auto-transition it to IN_PROGRESS.
+   */
+  private async handleJobStarted(printerId: string, snapshot: MoonrakerSnapshot) {
+    const filename = snapshot.printStats?.filename;
+    if (!filename) return;
+
+    const updated = await this.prisma.productionJob.updateMany({
+      where: { printerId, status: 'QUEUED', gcodeFilename: filename },
+      data: { status: 'IN_PROGRESS', startedAt: new Date() },
+    }).catch(() => ({ count: 0 }));
+
+    if (updated.count > 0) {
+      this.logger.log(`Job auto-started for printer ${printerId}: gcode "${filename}"`);
+    }
   }
 
   /**

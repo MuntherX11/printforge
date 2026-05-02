@@ -1,9 +1,10 @@
 import { Controller, Get, Post, Param, Body, UseGuards, NotFoundException } from '@nestjs/common';
 import { WatchFolderService } from './watch-folder.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 
 @Controller('watch-folder')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class WatchFolderController {
   constructor(private watchFolder: WatchFolderService) {}
 

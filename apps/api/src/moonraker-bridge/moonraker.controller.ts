@@ -3,11 +3,12 @@ import { MoonrakerService } from './moonraker.service';
 import { CrealityWsService } from './creality-ws.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('moonraker')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class MoonrakerController {
   constructor(
     private moonraker: MoonrakerService,

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Res, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Res, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
 import { InvoicesService } from './invoices.service';
 import { PdfService } from './pdf.service';
@@ -8,6 +8,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateInvoiceDto, UpdateInvoiceDto } from '@printforge/types';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @Controller('invoices')
 @UseGuards(JwtAuthGuard)
@@ -27,8 +28,8 @@ export class InvoicesController {
 
   @Get()
   @UseGuards(StaffGuard)
-  findAll() {
-    return this.invoicesService.findAll();
+  findAll(@Query() query: PaginationDto) {
+    return this.invoicesService.findAll(query);
   }
 
   @Get(':id')

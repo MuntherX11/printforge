@@ -16,7 +16,7 @@ class ScrapeUrlDto {
 }
 
 @Controller('file-parser')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class FileParserController {
   constructor(
     private gcodeParser: GcodeParserService,

@@ -16,6 +16,7 @@ import { useFormatCurrency } from '@/lib/locale-context';
 import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
+import { useWebSocket } from '@/lib/use-websocket';
 
 const jobStatuses = [
   { value: 'QUEUED', label: 'Queued' },
@@ -45,8 +46,27 @@ export default function JobDetailPage() {
   const [showCamera, setShowCamera] = useState(false);
   const [gcodeCheck, setGcodeCheck] = useState<{ loading: boolean; match: boolean | null; printing: string | null }>({ loading: false, match: null, printing: null });
 
+  const ws = useWebSocket();
+  const liveProgress = ws.jobProgress[id as string];
+
   const load = () => api.get(`/jobs/${id}`).then(setJob).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, [id]);
+
+  // Auto-reload when the job completes/fails via WebSocket
+  useEffect(() => {
+    if (!liveProgress) return;
+    if (liveProgress.status === 'COMPLETED' || liveProgress.status === 'FAILED') {
+      load();
+    }
+  }, [liveProgress?.status]);
+
+  // Auto-reload when the job auto-starts (QUEUED → IN_PROGRESS detected by printer bridge)
+  useEffect(() => {
+    if (!liveProgress) return;
+    if (liveProgress.status === 'IN_PROGRESS' && job?.status === 'QUEUED') {
+      load();
+    }
+  }, [liveProgress?.status, job?.status]);
 
   // GCode verification: compare what Moonraker is actually printing vs what the job expects
   useEffect(() => {
@@ -222,6 +242,37 @@ export default function JobDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Live progress bar — visible only when printer is actively printing this job */}
+      {(job.status === 'IN_PROGRESS' || liveProgress) && (
+        <Card className={liveProgress ? 'border-brand-300 dark:border-brand-700' : ''}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                {liveProgress ? (
+                  <><span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Printing — live progress</>
+                ) : (
+                  <><span className="inline-block w-2 h-2 rounded-full bg-amber-400" /> In progress</>
+                )}
+              </p>
+              <span className="text-sm font-bold text-brand-600 dark:text-brand-400 tabular-nums">
+                {liveProgress ? `${liveProgress.progress}%` : job.printDuration ? `${Math.round(job.printDuration / 60)} min elapsed` : '—'}
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+              <div
+                className="bg-brand-500 h-2.5 rounded-full transition-all duration-1000 ease-linear"
+                style={{ width: `${liveProgress?.progress ?? 0}%` }}
+              />
+            </div>
+            {liveProgress && (
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                Updated live via WebSocket
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>

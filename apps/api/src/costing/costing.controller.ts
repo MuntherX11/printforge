@@ -1,10 +1,11 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { CostingService } from './costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { MultiColorEstimateInput, EstimatePlatesDto } from '@printforge/types';
 
 @Controller('costing')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class CostingController {
   constructor(private costingService: CostingService) {}
 
