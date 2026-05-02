@@ -47,7 +47,10 @@ async function bootstrap() {
   app.useGlobalInterceptors(new TransformInterceptor());
 
   const port = process.env.API_PORT || 4000;
-  await app.listen(port);
-  new Logger('Bootstrap').log(`PrintForge API running on port ${port}`);
+  // API_HOST defaults to 127.0.0.1 so nginx is the only entry point in production.
+  // Set API_HOST=0.0.0.0 in .env for Docker or direct-access dev setups.
+  const host = process.env.API_HOST || '127.0.0.1';
+  await app.listen(port, host);
+  new Logger('Bootstrap').log(`PrintForge API running on ${host}:${port}`);
 }
 bootstrap();

@@ -12,6 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
+import { Pagination } from '@/components/ui/pagination';
 import { Plus, Users, UserCheck, UserX } from 'lucide-react';
 
 export default function CustomersPage() {
@@ -21,11 +22,12 @@ export default function CustomersPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  const [page, setPage] = useState(1);
   const { toast } = useToast();
 
-  function loadData() {
+  function loadData(p = page) {
     Promise.all([
-      api.get('/customers'),
+      api.get(`/customers?page=${p}&limit=25`),
       api.get('/auth/customers/pending').catch(() => []),
     ]).then(([customers, pendingList]) => {
       setData(customers);
@@ -33,7 +35,7 @@ export default function CustomersPage() {
     }).catch(console.error).finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(page); }, [page]);
 
   async function handleApprove(id: string) {
     setApprovingId(id);
@@ -161,6 +163,7 @@ export default function CustomersPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />
       <Dialog open={!!rejectTarget} onClose={() => setRejectTarget(null)} title="Reject Customer">
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Reject signup from <strong>{rejectTarget?.name}</strong>? They will not be able to log in.

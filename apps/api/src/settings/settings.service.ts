@@ -1,26 +1,48 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RedisCacheService } from '../common/redis/redis-cache.service';
+
+// ARCH-08: cache TTL for settings — 5 minutes balances freshness vs DB load
+const SETTINGS_TTL_S = 300;
 
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: RedisCacheService,
+  ) {}
 
   async getAll() {
-    const settings = await this.prisma.systemSetting.findMany();
-    return Object.fromEntries(settings.map(s => [s.key, s.value]));
+    return this.cache.getOrSet<Record<string, string>>('settings:all', SETTINGS_TTL_S, async () => {
+      const settings = await this.prisma.systemSetting.findMany();
+      return Object.fromEntries(settings.map(s => [s.key, s.value]));
+    });
   }
 
   async get(key: string, defaultValue?: string): Promise<string> {
-    const setting = await this.prisma.systemSetting.findUnique({ where: { key } });
-    return setting?.value ?? defaultValue ?? '';
+    const value = await this.cache.getOrSet<string | null>(
+      `settings:${key}`,
+      SETTINGS_TTL_S,
+      async () => {
+        const setting = await this.prisma.systemSetting.findUnique({ where: { key } });
+        return setting?.value ?? null; // null = "key absent" — distinguishable from ''
+      },
+    );
+    return value ?? defaultValue ?? '';
   }
 
   async set(key: string, value: string) {
-    return this.prisma.systemSetting.upsert({
+    const result = await this.prisma.systemSetting.upsert({
       where: { key },
       update: { value },
       create: { key, value },
     });
+    // Invalidate both the per-key entry and the full-map cache
+    await Promise.all([
+      this.cache.invalidate(`settings:${key}`),
+      this.cache.invalidate('settings:all'),
+    ]);
+    return result;
   }
 
   async setBulk(settings: Array<{ key: string; value: string }>) {

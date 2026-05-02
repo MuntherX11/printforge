@@ -10,18 +10,24 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Pagination } from '@/components/ui/pagination';
 import { Plus, Box } from 'lucide-react';
 
 export default function ProductsPage() {
   const formatCurrency = useFormatCurrency();
-  const [products, setProducts] = useState<any[]>([]);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    api.get<any[]>('/products').then(setProducts).catch(console.error).finally(() => setLoading(false));
-  }, []);
+    setLoading(true);
+    setData(null);
+    api.get<any>(`/products?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
+  }, [page]);
 
   if (loading) return <Loading />;
+
+  const products: any[] = data?.data || data || [];
 
   return (
     <div className="space-y-6">
@@ -90,6 +96,7 @@ export default function ProductsPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />
     </div>
   );
 }

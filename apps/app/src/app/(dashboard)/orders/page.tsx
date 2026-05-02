@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Pagination } from '@/components/ui/pagination';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
@@ -20,13 +21,15 @@ export default function OrdersPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     setLoading(true);
     setData(null);
-    const params = filter !== 'ALL' ? `?status=${filter}` : '';
-    api.get(`/orders${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
-  }, [filter]);
+    const params = new URLSearchParams({ page: String(page), limit: '25' });
+    if (filter !== 'ALL') params.set('status', filter);
+    api.get(`/orders?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+  }, [filter, page]);
 
   if (loading) return <Loading />;
   const orders = data?.data || data || [];
@@ -42,7 +45,7 @@ export default function OrdersPage() {
         {statusFilters.map(s => (
           <button
             key={s}
-            onClick={() => setFilter(s)}
+            onClick={() => { setFilter(s); setPage(1); }}
             className={`px-3 py-1 text-xs rounded-full border transition-colors ${
               filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
             }`}
@@ -93,6 +96,7 @@ export default function OrdersPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />
     </div>
   );
 }

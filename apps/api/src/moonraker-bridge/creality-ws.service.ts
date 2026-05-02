@@ -278,7 +278,8 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
         status: { in: ['IN_PROGRESS', 'QUEUED'] },
         gcodeFilename: snapshot.fileName,
       },
-      include: { materials: { include: { spool: true } }, printer: true },
+      // BIZ-13: include hourlyRate + totalPrintHours from printer for cost calculation
+      include: { materials: { include: { spool: true } }, printer: { select: { hourlyRate: true, totalPrintHours: true, name: true } } },
     }).catch(() => null);
 
     if (!job) return;
@@ -297,6 +298,20 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Job ${job.id} already completed — skipping duplicate completion`);
       return;
     }
+
+    // BIZ-13: machine cost = print hours × hourly rate; increment printer total hours
+    const printHours = (snapshot.printJobTime || 0) / 3600;
+    const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
+    await Promise.all([
+      this.prisma.productionJob.update({
+        where: { id: job.id },
+        data: { machineCost },
+      }),
+      this.prisma.printer.update({
+        where: { id: printerId },
+        data: { totalPrintHours: { increment: printHours } },
+      }),
+    ]).catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
 
     // BUG-04: fetch current spool weight before deducting to prevent negative values
     for (const jm of job.materials) {

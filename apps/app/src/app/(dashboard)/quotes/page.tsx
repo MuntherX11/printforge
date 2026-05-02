@@ -11,16 +11,20 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
+import { Pagination } from '@/components/ui/pagination';
 import { Plus, FileText } from 'lucide-react';
 
 export default function QuotesPage() {
   const formatCurrency = useFormatCurrency();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    api.get('/quotes').then(setData).catch(console.error).finally(() => setLoading(false));
-  }, []);
+    setLoading(true);
+    setData(null);
+    api.get(`/quotes?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
+  }, [page]);
 
   if (loading) return <Loading />;
   const quotes = data?.data || data || [];
@@ -71,6 +75,7 @@ export default function QuotesPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />
     </div>
   );
 }

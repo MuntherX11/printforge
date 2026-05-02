@@ -17,13 +17,14 @@ const SpoolLabelScanner = dynamic(
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Pagination } from '@/components/ui/pagination';
 import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function InventoryPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
-  const [materials, setMaterials] = useState<any[]>([]);
+  const [materialsData, setMaterialsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
@@ -31,10 +32,14 @@ export default function InventoryPage() {
   const [scannedFields, setScannedFields] = useState<any>(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(1);
 
-  const loadMaterials = () => api.get<any[]>('/materials').then(setMaterials).catch(console.error).finally(() => setLoading(false));
+  const loadMaterials = (p = page) => {
+    setLoading(true);
+    api.get<any>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch(console.error).finally(() => setLoading(false));
+  };
 
-  useEffect(() => { loadMaterials(); }, []);
+  useEffect(() => { loadMaterials(page); }, [page]);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -73,7 +78,8 @@ export default function InventoryPage() {
       const matColor = scannedFields.color || '';
 
       // Check if a matching material already exists
-      let material = materials.find(
+      const materialsList: any[] = materialsData?.data || materialsData || [];
+      let material = materialsList.find(
         (m) =>
           m.type?.toUpperCase() === matType.toUpperCase() &&
           m.color?.toLowerCase() === matColor.toLowerCase() &&
@@ -109,6 +115,8 @@ export default function InventoryPage() {
   }
 
   if (loading) return <Loading />;
+
+  const materials: any[] = materialsData?.data || materialsData || [];
 
   return (
     <div className="space-y-6">
@@ -209,6 +217,7 @@ export default function InventoryPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={materialsData?.totalPages ?? 1} onPageChange={setPage} />
 
       <SpoolLabelScanner
         open={showScanner}

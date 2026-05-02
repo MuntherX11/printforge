@@ -12,6 +12,7 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
+import { Pagination } from '@/components/ui/pagination';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
 
@@ -27,6 +28,7 @@ export default function ProductionPage() {
   const [view, setView] = useState<'list' | 'queue'>('list');
   const [queue, setQueue] = useState<any>(null);
   const [assigning, setAssigning] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.get('/jobs/stats/failures').then(setFailStats).catch(() => {});
@@ -36,14 +38,15 @@ export default function ProductionPage() {
     if (view === 'list') {
       setLoading(true);
       setData(null);
-      const params = filter !== 'ALL' ? `?status=${filter}` : '';
-      api.get(`/jobs${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+      const params = new URLSearchParams({ page: String(page), limit: '25' });
+      if (filter !== 'ALL') params.set('status', filter);
+      api.get(`/jobs?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
     } else {
       setLoading(true);
       setQueue(null);
       api.get('/jobs/queue').then(setQueue).catch(console.error).finally(() => setLoading(false));
     }
-  }, [filter, view]);
+  }, [filter, view, page]);
 
   async function handleAutoAssign() {
     setAssigning(true);
@@ -56,8 +59,9 @@ export default function ProductionPage() {
       }
       // Refresh current view
       if (view === 'list') {
-        const params = filter !== 'ALL' ? `?status=${filter}` : '';
-        api.get(`/jobs${params}`).then(setData);
+        const params = new URLSearchParams({ page: String(page), limit: '25' });
+        if (filter !== 'ALL') params.set('status', filter);
+        api.get(`/jobs?${params}`).then(setData);
       } else {
         api.get('/jobs/queue').then(setQueue);
       }
@@ -101,14 +105,14 @@ export default function ProductionPage() {
       <div className="flex items-center justify-between">
         <div className="flex gap-2 flex-wrap">
           {view === 'list' && statusFilters.map(s => (
-            <button key={s} onClick={() => setFilter(s)}
+            <button key={s} onClick={() => { setFilter(s); setPage(1); }}
               className={`px-3 py-1 text-xs rounded-full border transition-colors ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
               {s.replace(/_/g, ' ')}
             </button>
           ))}
         </div>
         <div className="flex gap-1 border rounded-lg p-0.5 dark:border-gray-600">
-          <button onClick={() => { setView('list'); setFilter('ALL'); }} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <button onClick={() => { setView('list'); setFilter('ALL'); setPage(1); }} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             <LayoutList className="h-3.5 w-3.5" /> List
           </button>
           <button onClick={() => setView('queue')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
@@ -164,6 +168,7 @@ export default function ProductionPage() {
           </Card>
         );
       })()}
+      {view === 'list' && <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />}
 
       {/* Queue View */}
       {view === 'queue' && queue && (

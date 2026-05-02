@@ -14,7 +14,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN || 'https://printforge.mctx.tech',
     credentials: true,
   },
   namespace: '/ws',

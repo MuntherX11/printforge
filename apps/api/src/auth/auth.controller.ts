@@ -13,6 +13,12 @@ import { CurrentUser } from './decorators/current-user.decorator';
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// COOKIE_SECURE explicitly overrides; NODE_ENV=production is the fallback.
+// Using || would make COOKIE_SECURE=false a no-op when NODE_ENV=production.
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
+  ? process.env.COOKIE_SECURE === 'true'
+  : process.env.NODE_ENV === 'production';
+
 class LoginDto {
   @IsEmail()
   email!: string;
@@ -75,7 +81,7 @@ export class AuthController {
     res.cookie('token', result.token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
+      secure: COOKIE_SECURE,
       maxAge: SESSION_MAX_AGE_MS,
     });
 
@@ -130,7 +136,7 @@ export class AuthController {
     res.cookie('token', result.token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
+      secure: COOKIE_SECURE,
       maxAge: SESSION_MAX_AGE_MS,
     });
 

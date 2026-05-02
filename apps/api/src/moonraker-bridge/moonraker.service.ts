@@ -234,6 +234,20 @@ export class MoonrakerService {
       return;
     }
 
+    // BIZ-13: machine cost = print hours × printer hourly rate; also increment printer total hours
+    const printHours = (stats.print_duration || 0) / 3600;
+    const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
+    await Promise.all([
+      this.prisma.productionJob.update({
+        where: { id: job.id },
+        data: { machineCost },
+      }),
+      this.prisma.printer.update({
+        where: { id: printerId },
+        data: { totalPrintHours: { increment: printHours } },
+      }),
+    ]).catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
+
     // WARN-22: use material density from spool if available, fall back to PLA
     const density =
       job.materials?.[0]?.spool?.material?.density ??

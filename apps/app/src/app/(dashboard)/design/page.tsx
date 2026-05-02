@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
+import { Pagination } from '@/components/ui/pagination';
 import { Palette } from 'lucide-react';
 
 const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
@@ -30,15 +31,18 @@ export default function DesignPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    const params = new URLSearchParams();
+    setLoading(true);
+    setData(null);
+    const params = new URLSearchParams({ page: String(page), limit: '25' });
     if (statusFilter) params.set('status', statusFilter);
     api.get<any>(`/design-projects?${params}`)
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   if (loading) return <Loading />;
 
@@ -50,7 +54,7 @@ export default function DesignPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Design Projects</h1>
         <Select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
           options={[
             { value: '', label: 'All Statuses' },
             { value: 'REQUESTED', label: 'Requested' },
@@ -108,6 +112,7 @@ export default function DesignPage() {
           )}
         </CardContent>
       </Card>
+      <Pagination page={page} totalPages={data?.totalPages ?? 1} onPageChange={setPage} />
     </div>
   );
 }
