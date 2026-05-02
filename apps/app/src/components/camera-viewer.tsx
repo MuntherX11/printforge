@@ -9,6 +9,17 @@ interface CameraViewerProps {
   printerName?: string;
   /** compact = small card with expand button; full = full-size feed */
   variant?: 'compact' | 'full';
+  /**
+   * Raw camera URL stored on the printer (e.g. "http://192.168.1.5:8000").
+   * Used as iframe fallback for WebRTC-only cameras that can't be proxied
+   * server-side but have no X-Frame-Options restrictions.
+   */
+  cameraUrl?: string;
+}
+
+/** Normalise a stored URL — prepend http:// when the scheme is missing. */
+function normaliseUrl(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `http://${url}`;
 }
 
 /**
@@ -16,12 +27,15 @@ interface CameraViewerProps {
  *
  * Auto-detects stream type:
  *   1. Tries <img> first — handles MJPEG (multipart/x-mixed-replace).
- *   2. On error, falls back to <video autoPlay> — handles MP4/HLS (Creality, etc.).
- *   3. If both fail, shows "Camera unavailable".
+ *   2. On error, falls back to <video autoPlay> — handles MP4/HLS.
+ *   3. On error, falls back to <iframe> using the raw cameraUrl — handles
+ *      WebRTC-only cameras (e.g. Creality Hi) that serve no MJPEG but allow
+ *      browser-level embedding (no X-Frame-Options / CSP).
+ *   4. If all fail, shows "Camera unavailable".
  */
-type StreamMode = 'img' | 'video' | 'error';
+type StreamMode = 'img' | 'video' | 'iframe' | 'error';
 
-export function CameraViewer({ printerId, printerName, variant = 'full' }: CameraViewerProps) {
+export function CameraViewer({ printerId, printerName, variant = 'full', cameraUrl }: CameraViewerProps) {
   const [mode, setMode] = useState<StreamMode>('img');
   const [loaded, setLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -80,7 +94,22 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
           className={className}
           onPlay={() => setLoaded(true)}
           onCanPlay={() => setLoaded(true)}
+          onError={() => { setLoaded(false); setMode(cameraUrl ? 'iframe' : 'error'); }}
+        />
+      );
+    }
+    if (mode === 'iframe' && cameraUrl) {
+      // WebRTC-only camera (e.g. Creality Hi): embed the web UI directly.
+      // The WebRTC session runs browser ↔ printer with no server-side proxy needed.
+      return (
+        <iframe
+          src={normaliseUrl(cameraUrl)}
+          className={className}
+          allow="camera; microphone; autoplay"
+          onLoad={() => setLoaded(true)}
           onError={() => { setLoaded(false); setMode('error'); }}
+          style={{ border: 'none', background: '#000' }}
+          title={`${printerName ?? 'Printer'} camera`}
         />
       );
     }
@@ -98,7 +127,8 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
               {!loaded && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-gray-500 pointer-events-none">
                   <Camera className="h-6 w-6 animate-pulse" />
-                  {mode === 'video' && <p className="text-xs">Trying video stream...</p>}
+                  {mode === 'video' && <p className="text-xs">Trying video stream…</p>}
+                {mode === 'iframe' && <p className="text-xs">Loading camera…</p>}
                 </div>
               )}
               <StreamElement className="w-full h-full object-contain" />
@@ -168,7 +198,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-600 pointer-events-none">
               <Camera className="h-8 w-8 animate-pulse" />
               <p className="text-sm">
-                {mode === 'video' ? 'Trying video stream...' : 'Connecting to camera...'}
+                {mode === 'video' ? 'Trying video stream…' : mode === 'iframe' ? 'Loading camera…' : 'Connecting to camera…'}
               </p>
             </div>
           )}

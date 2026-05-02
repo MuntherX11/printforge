@@ -257,7 +257,7 @@ export default function PrinterDetailPage() {
             <CardTitle className="flex items-center gap-2"><Camera className="h-5 w-5" /> Camera Feed</CardTitle>
           </CardHeader>
           <CardContent>
-            <CameraViewer printerId={id as string} printerName={printer.name} variant="full" />
+            <CameraViewer printerId={id as string} printerName={printer.name} cameraUrl={printer.cameraUrl} variant="full" />
           </CardContent>
         </Card>
       )}

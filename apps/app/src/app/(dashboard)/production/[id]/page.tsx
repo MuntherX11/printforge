@@ -387,7 +387,7 @@ export default function JobDetailPage() {
       <Dialog open={showCamera} onClose={() => setShowCamera(false)} title={`${job.printer?.name ?? 'Printer'} — Camera`}>
         {showCamera && job.printer?.cameraUrl && (
           <div className="space-y-3">
-            <CameraViewer printerId={job.printer.id} printerName={job.printer.name} variant="full" />
+            <CameraViewer printerId={job.printer.id} printerName={job.printer.name} cameraUrl={job.printer.cameraUrl} variant="full" />
             {job.gcodeFilename && (
               <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
                 Expected gcode: <span className="font-mono">{job.gcodeFilename}</span>
