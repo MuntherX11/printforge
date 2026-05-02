@@ -68,8 +68,8 @@ export class MaterialsService {
           },
         });
         results.created++;
-      } catch (err: any) {
-        results.errors.push(`Row ${rowNum}: ${err.message}`);
+      } catch (err: unknown) {
+        results.errors.push(`Row ${rowNum}: ${(err as Error).message}`);
         results.skipped++;
       }
     }
