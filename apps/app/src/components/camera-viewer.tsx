@@ -101,11 +101,13 @@ export function CameraViewer({ printerId, printerName, variant = 'full', cameraU
     if (mode === 'iframe' && cameraUrl) {
       // WebRTC-only camera (e.g. Creality Hi): embed the web UI directly.
       // The WebRTC session runs browser ↔ printer with no server-side proxy needed.
+      // Note: object-contain/cover don't apply to iframes — use w-full h-full only.
       return (
         <iframe
           src={normaliseUrl(cameraUrl)}
-          className={className}
+          className="w-full h-full block"
           allow="camera; microphone; autoplay"
+          scrolling="no"
           onLoad={() => setLoaded(true)}
           onError={() => { setLoaded(false); setMode('error'); }}
           style={{ border: 'none', background: '#000' }}

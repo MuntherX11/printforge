@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Plus, Printer, Clock, Wrench, Camera } from 'lucide-react';
+import { CameraViewer } from '@/components/camera-viewer';
 import { useToast } from '@/components/ui/toast';
 import { useWebSocket } from '@/lib/use-websocket';
 
@@ -22,7 +23,7 @@ export default function PrintersPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [cameraTarget, setCameraTarget] = useState<{ id: string; name: string } | null>(null);
+  const [cameraTarget, setCameraTarget] = useState<{ id: string; name: string; cameraUrl?: string } | null>(null);
 
   const displayPrinters = useMemo(() =>
     printers.map(p => ({
@@ -110,7 +111,7 @@ export default function PrintersPage() {
                         <button
                           type="button"
                           title="View camera"
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); setCameraTarget({ id: p.id, name: p.name }); }}
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); setCameraTarget({ id: p.id, name: p.name, cameraUrl: p.cameraUrl }); }}
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-gray-100 hover:bg-blue-100 hover:text-blue-700 dark:bg-gray-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-400 transition-colors"
                         >
                           <Camera className="h-3 w-3" />
@@ -128,17 +129,13 @@ export default function PrintersPage() {
       {/* Camera feed popup */}
       <Dialog open={!!cameraTarget} onClose={() => setCameraTarget(null)} title={cameraTarget ? `${cameraTarget.name} — Camera` : ''}>
         {cameraTarget && (
-          <div className="flex flex-col items-center gap-3">
-            {/* img natively handles MJPEG multipart streams in all major browsers */}
-            <img
-              key={cameraTarget.id}
-              src={`/api/printers/${cameraTarget.id}/camera/stream`}
-              alt="Camera feed"
-              className="w-full rounded-lg bg-gray-900 object-contain max-h-[60vh]"
-              onError={e => { (e.currentTarget as HTMLImageElement).alt = 'Camera unavailable'; }}
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400">Live feed · refresh if blank</p>
-          </div>
+          <CameraViewer
+            key={cameraTarget.id}
+            printerId={cameraTarget.id}
+            printerName={cameraTarget.name}
+            cameraUrl={cameraTarget.cameraUrl}
+            variant="full"
+          />
         )}
       </Dialog>
 

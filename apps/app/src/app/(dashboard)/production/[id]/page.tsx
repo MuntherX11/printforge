@@ -279,8 +279,8 @@ export default function JobDetailPage() {
                 {liveProgress ? 'Updated live via WebSocket' : 'Waiting for printer telemetry…'}
               </p>
               {liveProgress?.remainingSecs != null && liveProgress.remainingSecs > 0 && (
-                <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
-                  <Clock className="h-3 w-3" /> {fmtRemaining(liveProgress.remainingSecs)}
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400">
+                  <Clock className="h-4 w-4" /> {fmtRemaining(liveProgress.remainingSecs)}
                 </span>
               )}
             </div>
