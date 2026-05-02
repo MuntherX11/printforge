@@ -119,7 +119,11 @@ export default function PrinterDetailPage() {
   const isMoonraker = printer.connectionType === 'MOONRAKER' && printer.moonrakerUrl;
   const hasLiveStatus = ['MOONRAKER', 'CREALITY_WS'].includes(printer.connectionType) && printer.moonrakerUrl;
   const progress = liveStatus?.progress ? Math.round(liveStatus.progress * 100) : 0;
-  const isMaintenanceDue = printer.nextMaintenanceDue && new Date(printer.nextMaintenanceDue) <= new Date();
+  // Overdue when print hours since last maintenance >= configured interval.
+  // Wall-clock nextMaintenanceDue is no longer used (cleared on every save/complete).
+  const hoursSinceLastMaintenance = (printer.totalPrintHours ?? 0) - (printer.lastMaintenancePrintHours ?? 0);
+  const isMaintenanceDue = printer.maintenanceIntervalHours > 0 &&
+    hoursSinceLastMaintenance >= printer.maintenanceIntervalHours;
   const activeMaintenance = maintenanceLogs.find((l: any) => !l.completedDate);
 
   return (
@@ -156,8 +160,9 @@ export default function PrinterDetailPage() {
           <div>
             <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Maintenance Overdue</p>
             <p className="text-xs text-amber-600 dark:text-amber-300">
-              Due since {formatDate(printer.nextMaintenanceDue)} | {Math.round(printer.totalPrintHours || 0)} hours printed
+              {Math.round(hoursSinceLastMaintenance)}h printed since last maintenance
               {printer.maintenanceIntervalHours && <> | Interval: every {printer.maintenanceIntervalHours}h</>}
+              {' '}| {Math.round(printer.totalPrintHours || 0)}h total
             </p>
           </div>
         </div>
@@ -375,7 +380,11 @@ export default function PrinterDetailPage() {
           }} className="flex items-end gap-4">
             <Input name="intervalHours" label="Maintenance Interval (hours)" type="number" step="1" min="0" defaultValue={printer.maintenanceIntervalHours || ''} placeholder="e.g. 500" className="w-48" />
             <Button type="submit" size="sm" variant="outline">Save</Button>
-            {printer.nextMaintenanceDue && <span className="text-xs text-gray-500 pb-2">Next due: {formatDate(printer.nextMaintenanceDue)}</span>}
+            {printer.maintenanceIntervalHours > 0 && (
+              <span className="text-xs text-gray-500 pb-2">
+                {hoursSinceLastMaintenance.toFixed(0)}h / {printer.maintenanceIntervalHours}h since last service
+              </span>
+            )}
           </form>
 
           {maintenanceLogs.length > 0 ? (

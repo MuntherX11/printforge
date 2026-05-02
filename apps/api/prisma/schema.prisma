@@ -202,9 +202,10 @@ model Printer {
   lastSeen        DateTime?
 
   // Maintenance tracking
-  totalPrintHours       Float         @default(0)
-  maintenanceIntervalHours Float?
-  nextMaintenanceDue    DateTime?
+  totalPrintHours            Float    @default(0)
+  maintenanceIntervalHours   Float?
+  nextMaintenanceDue         DateTime? // kept for calendar-based reminders; overdue uses print-hour delta
+  lastMaintenancePrintHours  Float    @default(0) // totalPrintHours at time of last completed maintenance
 
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt

@@ -28,18 +28,29 @@ export class JobsService {
       throw new BadRequestException('A production job must be linked to an order or a product');
     }
 
+    let autoName = dto.name?.trim() || '';
+
     if (dto.orderId) {
-      const order = await this.prisma.order.findUnique({ where: { id: dto.orderId } });
+      const order = await this.prisma.order.findUnique({
+        where: { id: dto.orderId },
+        include: { customer: { select: { name: true } } },
+      });
       if (!order) throw new NotFoundException('Linked order not found');
+      if (!autoName) {
+        autoName = order.customer?.name
+          ? `${order.orderNumber} — ${order.customer.name}`
+          : order.orderNumber;
+      }
     }
     if (dto.productId) {
       const product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
       if (!product) throw new NotFoundException('Linked product not found');
+      if (!autoName) autoName = product.name;
     }
 
     return this.prisma.productionJob.create({
       data: {
-        name: dto.name,
+        name: autoName || 'Untitled Job',
         productId: dto.productId,
         printerId: dto.printerId,
         assignedToId: dto.assignedToId,

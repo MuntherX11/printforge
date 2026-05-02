@@ -90,7 +90,9 @@ export default function PrintersPage() {
                           <Wrench className="h-3 w-3" /> In Maintenance
                         </span>
                       )}
-                      {p.nextMaintenanceDue && new Date(p.nextMaintenanceDue) <= new Date() && p.status !== 'MAINTENANCE' && (
+                      {p.maintenanceIntervalHours > 0 &&
+                        ((p.totalPrintHours ?? 0) - (p.lastMaintenancePrintHours ?? 0)) >= p.maintenanceIntervalHours &&
+                        p.status !== 'MAINTENANCE' && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                           <Clock className="h-3 w-3" /> Overdue
                         </span>

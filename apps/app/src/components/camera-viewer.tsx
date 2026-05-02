@@ -15,10 +15,14 @@ interface CameraViewerProps {
  * Displays a live MJPEG camera feed proxied through /api/printers/:id/camera/stream.
  * Uses a plain <img> tag — browsers handle MJPEG natively via multipart/x-mixed-replace.
  */
+const MAX_RETRIES = 3;
+
 export function CameraViewer({ printerId, printerName, variant = 'full' }: CameraViewerProps) {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const fullscreenImgRef = useRef<HTMLImageElement>(null);
 
@@ -29,15 +33,40 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
     }
   }, [fullscreen]);
 
+  // Clean up any pending retry timer on unmount
+  useEffect(() => {
+    return () => { if (retryTimer.current) clearTimeout(retryTimer.current); };
+  }, []);
+
   const streamUrl = `/api/printers/${printerId}/camera/stream`;
 
-  // Reload the stream (reconnect)
+  /**
+   * On stream error, auto-retry up to MAX_RETRIES times with exponential back-off
+   * (2 s → 4 s → 6 s) before showing the permanent "unavailable" state.
+   */
+  function handleStreamError() {
+    if (retryCount < MAX_RETRIES) {
+      const delay = (retryCount + 1) * 2000;
+      retryTimer.current = setTimeout(() => {
+        setRetryCount(n => n + 1);
+        if (imgRef.current) {
+          imgRef.current.src = '';
+          setTimeout(() => { if (imgRef.current) imgRef.current.src = streamUrl; }, 50);
+        }
+      }, delay);
+    } else {
+      setError(true);
+    }
+  }
+
+  // Manual reload — resets retry counter
   function reload() {
     setError(false);
     setLoaded(false);
+    setRetryCount(0);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (imgRef.current) {
       imgRef.current.src = '';
-      // Small delay so the browser actually resets
       setTimeout(() => { if (imgRef.current) imgRef.current.src = streamUrl; }, 100);
     }
   }
@@ -54,8 +83,11 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
           {!error ? (
             <>
               {!loaded && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-gray-500">
                   <Camera className="h-6 w-6 animate-pulse" />
+                  {retryCount > 0 && (
+                    <p className="text-xs">Reconnecting... ({retryCount}/{MAX_RETRIES})</p>
+                  )}
                 </div>
               )}
               <img
@@ -64,7 +96,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
                 alt={`${printerName ?? 'Printer'} camera`}
                 className="w-full h-full object-contain"
                 onLoad={() => setLoaded(true)}
-                onError={() => setError(true)}
+                onError={handleStreamError}
               />
               <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                 <button
@@ -121,7 +153,9 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
           {!loaded && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-600">
               <Camera className="h-8 w-8 animate-pulse" />
-              <p className="text-sm">Connecting to camera…</p>
+              <p className="text-sm">
+                {retryCount > 0 ? `Reconnecting... (${retryCount}/${MAX_RETRIES})` : 'Connecting to camera...'}
+              </p>
             </div>
           )}
           <img
@@ -130,7 +164,7 @@ export function CameraViewer({ printerId, printerName, variant = 'full' }: Camer
             alt={`${printerName ?? 'Printer'} camera feed`}
             className="w-full h-full object-contain"
             onLoad={() => setLoaded(true)}
-            onError={() => setError(true)}
+            onError={handleStreamError}
           />
           {loaded && (
             <div className="absolute bottom-2 right-2">

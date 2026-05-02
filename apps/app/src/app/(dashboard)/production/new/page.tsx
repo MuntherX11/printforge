@@ -18,6 +18,7 @@ export default function NewJobPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [jobName, setJobName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -29,6 +30,7 @@ export default function NewJobPage() {
   }, []);
 
   useEffect(() => {
+    setJobName(''); // reset name when switching modes
     if (mode === 'order') {
       api.get<any>('/orders?status=CONFIRMED&status=IN_PRODUCTION&limit=100')
         .then(r => setOrders(r?.data || r || []))
@@ -38,6 +40,21 @@ export default function NewJobPage() {
       api.get<any[]>('/products/active').then(setProducts).catch(console.error);
     }
   }, [mode]);
+
+  function handleOrderChange(orderId: string) {
+    const order = orders.find((o: any) => o.id === orderId);
+    if (order) {
+      const customerPart = order.customer?.name ? ` — ${order.customer.name}` : '';
+      setJobName(`${order.orderNumber}${customerPart}`);
+    } else {
+      setJobName('');
+    }
+  }
+
+  function handleProductChange(productId: string) {
+    const product = products.find((p: any) => p.id === productId);
+    setJobName(product?.name ?? '');
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -128,6 +145,7 @@ export default function NewJobPage() {
                   { value: '', label: 'Select an order...' },
                   ...orders.map((o: any) => ({ value: o.id, label: `${o.orderNumber} — ${o.customer?.name || ''}` })),
                 ]}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleOrderChange(e.target.value)}
               />
             ) : (
               <Select
@@ -138,10 +156,17 @@ export default function NewJobPage() {
                   { value: '', label: 'Select a product...' },
                   ...products.map((p: any) => ({ value: p.id, label: p.name })),
                 ]}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProductChange(e.target.value)}
               />
             )}
 
-            <Input name="name" label="Job Name" required placeholder={mode === 'order' ? 'e.g. Order #1042 — Vase' : 'e.g. Stock run — Phone Stand'} />
+            <Input
+              name="name"
+              label="Job Name"
+              value={jobName}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobName(e.target.value)}
+              placeholder={mode === 'order' ? 'Auto-filled from order — you can edit' : 'Auto-filled from product — you can edit'}
+            />
             <Input name="gcodeFilename" label="G-code Filename" />
             <Select
               name="printerId"

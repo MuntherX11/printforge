@@ -55,18 +55,18 @@ export class MaintenanceService {
       },
     });
 
-    // Calculate next maintenance due based on interval
+    // Record the print-hour baseline at completion — overdue is now driven by
+    // (totalPrintHours - lastMaintenancePrintHours) >= maintenanceIntervalHours,
+    // not by a wall-clock timestamp.
     const printer = await this.prisma.printer.findUnique({ where: { id: printerId } });
-    const nextDue = printer?.maintenanceIntervalHours
-      ? new Date(Date.now() + printer.maintenanceIntervalHours * 3600 * 1000)
-      : null;
 
-    // Restore printer to IDLE
+    // Restore printer to IDLE and snapshot current print hours
     await this.prisma.printer.update({
       where: { id: printerId },
       data: {
         status: 'IDLE',
-        nextMaintenanceDue: nextDue,
+        nextMaintenanceDue: null, // cleared; overdue is print-hour based
+        lastMaintenancePrintHours: printer?.totalPrintHours ?? 0,
       },
     });
 
@@ -88,36 +88,42 @@ export class MaintenanceService {
     const printer = await this.prisma.printer.findUnique({ where: { id: printerId } });
     if (!printer) throw new NotFoundException('Printer not found');
 
-    const nextDue = intervalHours
-      ? new Date(Date.now() + intervalHours * 3600 * 1000)
-      : null;
-
     return this.prisma.printer.update({
       where: { id: printerId },
       data: {
         maintenanceIntervalHours: intervalHours,
-        nextMaintenanceDue: nextDue,
+        // Clear any stale wall-clock due date — overdue is now print-hour based
+        nextMaintenanceDue: null,
       },
     });
   }
 
   /**
-   * Check all printers for overdue maintenance and return the list.
+   * Return printers where print hours since last maintenance >= interval.
+   * Overdue is driven by actual print time, not wall-clock time, so a printer
+   * that has never printed is never overdue regardless of how long ago the
+   * interval was configured.
    */
   async getOverduePrinters() {
-    return this.prisma.printer.findMany({
+    const printers = await this.prisma.printer.findMany({
       where: {
         isActive: true,
-        nextMaintenanceDue: { lte: new Date() },
+        maintenanceIntervalHours: { not: null },
         status: { not: 'MAINTENANCE' },
       },
       select: {
         id: true,
         name: true,
         totalPrintHours: true,
+        lastMaintenancePrintHours: true,
         maintenanceIntervalHours: true,
         nextMaintenanceDue: true,
       },
     });
+
+    return printers.filter(p =>
+      p.maintenanceIntervalHours !== null &&
+      (p.totalPrintHours - (p.lastMaintenancePrintHours ?? 0)) >= p.maintenanceIntervalHours,
+    );
   }
 }
