@@ -2,8 +2,9 @@ import { Module, Global, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { RedisCacheService } from './redis-cache.service';
+import { REDIS_CLIENT } from './redis.constants';
 
-export const REDIS_CLIENT = 'REDIS_CLIENT';
+export { REDIS_CLIENT } from './redis.constants';
 
 @Global()
 @Module({
