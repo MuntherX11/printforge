@@ -73,11 +73,18 @@ export class PrintersController {
     });
     if (!printer) throw new NotFoundException('Printer not found');
     if (!printer.cameraUrl) throw new NotFoundException('No camera URL configured for this printer');
-    if (!isLocalUrl(printer.cameraUrl)) throw new BadRequestException('Camera URL must be a local/private network address');
 
-    const lib = printer.cameraUrl.startsWith('https') ? https : http;
+    // Normalise: prepend http:// if no scheme is stored (common when users save
+    // bare IPs like "192.168.1.5:4408/webcam/?action=stream").
+    const cameraUrl = /^https?:\/\//i.test(printer.cameraUrl)
+      ? printer.cameraUrl
+      : `http://${printer.cameraUrl}`;
 
-    const upstream = lib.get(printer.cameraUrl, { timeout: 10000 }, (upstream) => {
+    if (!isLocalUrl(cameraUrl)) throw new BadRequestException('Camera URL must be a local/private network address');
+
+    const lib = cameraUrl.startsWith('https') ? https : http;
+
+    const upstream = lib.get(cameraUrl, { timeout: 60_000 }, (upstream) => {
       const contentType = upstream.headers['content-type'] || 'image/jpeg';
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'no-cache, no-store');
