@@ -49,7 +49,9 @@ async function bootstrap() {
   const port = process.env.API_PORT || 4000;
   // API_HOST defaults to 127.0.0.1 so nginx is the only entry point in production.
   // Set API_HOST=0.0.0.0 in .env for Docker or direct-access dev setups.
-  const host = process.env.API_HOST || '127.0.0.1';
+  // 0.0.0.0 is the correct default for Docker Compose (nginx is a separate container).
+  // Set API_HOST=127.0.0.1 only when nginx and the API share a network namespace (same host, no Docker).
+  const host = process.env.API_HOST || '0.0.0.0';
   await app.listen(port, host);
   new Logger('Bootstrap').log(`PrintForge API running on ${host}:${port}`);
 }
