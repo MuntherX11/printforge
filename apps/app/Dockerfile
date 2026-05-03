@@ -16,7 +16,8 @@ COPY apps/app/postcss.config.js ./apps/app/
 COPY apps/app/tailwind.config.ts ./apps/app/
 
 # Install ONLY app + types workspace deps (skips all NestJS/Prisma deps — much faster)
-RUN npm ci \
+# npm install (not ci) because ci is strict about missing workspace dirs in the build context
+RUN npm install \
       --workspace=packages/types \
       --workspace=apps/app \
       --include-workspace-root \

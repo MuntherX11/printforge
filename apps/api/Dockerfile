@@ -17,7 +17,8 @@ COPY apps/api/tsconfig.json ./apps/api/
 COPY apps/api/nest-cli.json ./apps/api/
 
 # Install ONLY api + types workspace deps (skips all Next.js/React deps — much faster)
-RUN npm ci \
+# npm install (not ci) because ci is strict about missing workspace dirs in the build context
+RUN npm install \
       --workspace=packages/types \
       --workspace=apps/api \
       --include-workspace-root \
@@ -37,11 +38,7 @@ RUN cd apps/api && npx prisma generate
 RUN cd apps/api && npx nest build
 
 # Prune devDependencies for the runner stage
-RUN npm prune --omit=dev \
-      --workspace=packages/types \
-      --workspace=apps/api \
-      --include-workspace-root \
-      --legacy-peer-deps
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # ---------- runner ----------
 FROM node:20-slim AS runner
