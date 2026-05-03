@@ -6,38 +6,42 @@ WORKDIR /app
 # Install OpenSSL (needed by Prisma)
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-# Copy root workspace files
-COPY package.json ./
-COPY tsconfig.base.json ./
+# Copy root workspace manifests (lockfile = fast deterministic install)
+COPY package.json package-lock.json tsconfig.base.json ./
 
-# Copy shared types package
+# Copy only the manifests for the packages we need — changes here bust the install cache
 COPY packages/types/package.json ./packages/types/
 COPY packages/types/tsconfig.json ./packages/types/
-COPY packages/types/src/ ./packages/types/src/
-
-# Copy API package
 COPY apps/api/package.json ./apps/api/
 COPY apps/api/tsconfig.json ./apps/api/
 COPY apps/api/nest-cli.json ./apps/api/
 
-# Install all workspace dependencies
-RUN npm install --workspaces --include-workspace-root --ignore-scripts --legacy-peer-deps
+# Install ONLY api + types workspace deps (skips all Next.js/React deps — much faster)
+RUN npm ci \
+      --workspace=packages/types \
+      --workspace=apps/api \
+      --include-workspace-root \
+      --ignore-scripts \
+      --legacy-peer-deps
 
 # Build shared types first
+COPY packages/types/src/ ./packages/types/src/
 RUN cd packages/types && npx tsc
 
 # Copy API source and Prisma schema
 COPY apps/api/src/ ./apps/api/src/
 COPY apps/api/prisma/ ./apps/api/prisma/
 
-# Generate Prisma client
+# Generate Prisma client + build API
 RUN cd apps/api && npx prisma generate
-
-# Build API
 RUN cd apps/api && npx nest build
 
-# Remove devDependencies to slim down the runner image
-RUN npm prune --omit=dev --workspaces
+# Prune devDependencies for the runner stage
+RUN npm prune --omit=dev \
+      --workspace=packages/types \
+      --workspace=apps/api \
+      --include-workspace-root \
+      --legacy-peer-deps
 
 # ---------- runner ----------
 FROM node:20-slim AS runner

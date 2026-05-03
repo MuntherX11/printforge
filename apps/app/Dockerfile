@@ -3,26 +3,28 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Copy root workspace files
-COPY package.json ./
-COPY tsconfig.base.json ./
+# Copy root workspace manifests (lockfile = fast deterministic install)
+COPY package.json package-lock.json tsconfig.base.json ./
 
-# Copy shared types package
+# Copy only the manifests for the packages we need — changes here bust the install cache
 COPY packages/types/package.json ./packages/types/
 COPY packages/types/tsconfig.json ./packages/types/
-COPY packages/types/src/ ./packages/types/src/
-
-# Copy app package
 COPY apps/app/package.json ./apps/app/
 COPY apps/app/tsconfig.json ./apps/app/
 COPY apps/app/next.config.js ./apps/app/
 COPY apps/app/postcss.config.js ./apps/app/
 COPY apps/app/tailwind.config.ts ./apps/app/
 
-# Install all workspace dependencies
-RUN npm install --workspaces --include-workspace-root --ignore-scripts --legacy-peer-deps
+# Install ONLY app + types workspace deps (skips all NestJS/Prisma deps — much faster)
+RUN npm ci \
+      --workspace=packages/types \
+      --workspace=apps/app \
+      --include-workspace-root \
+      --ignore-scripts \
+      --legacy-peer-deps
 
 # Build shared types first
+COPY packages/types/src/ ./packages/types/src/
 RUN cd packages/types && npx tsc
 
 # Copy app source
