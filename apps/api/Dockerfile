@@ -3,6 +3,10 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+# Force IPv4-first DNS — host systemd-resolved returns IPv6 for npm registry but
+# Docker bridge networks have no outbound IPv6, causing Node.js to hang on connect.
+ENV NODE_OPTIONS="--dns-result-order=ipv4first"
+
 # Install OpenSSL (needed by Prisma)
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
