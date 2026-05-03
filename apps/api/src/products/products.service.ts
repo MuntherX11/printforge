@@ -9,6 +9,8 @@ import {
   UpdateProductComponentDto,
   ProductCostResult,
   OnboardThreeMfDto,
+  CreateProductVariantDto,
+  UpdateProductVariantDto,
 } from '@printforge/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,6 +58,11 @@ export class ProductsService {
         estimatedMinutes: true,
         colorChanges: true,
         basePrice: true,
+        variants: {
+          where: { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, name: true, sku: true, basePrice: true, estimatedMinutes: true, estimatedGrams: true },
+        },
       },
     });
   }
@@ -65,6 +72,7 @@ export class ProductsService {
       where: { id },
       include: {
         defaultPrinter: true,
+        variants: { orderBy: { sortOrder: 'asc' } },
         components: {
           include: {
             material: {
@@ -384,6 +392,36 @@ export class ProductsService {
     }
 
     return { created, updated, errors };
+  }
+
+  // ── Variants ────────────────────────────────────────────────────────────────
+
+  async addVariant(productId: string, dto: CreateProductVariantDto) {
+    await this.findOne(productId); // throws 404 if missing
+    return this.prisma.productVariant.create({
+      data: {
+        productId,
+        name: dto.name,
+        sku: dto.sku || null,
+        basePrice: dto.basePrice ?? null,
+        estimatedMinutes: dto.estimatedMinutes ?? null,
+        estimatedGrams: dto.estimatedGrams ?? null,
+        sortOrder: dto.sortOrder ?? 0,
+      },
+    });
+  }
+
+  async updateVariant(variantId: string, dto: UpdateProductVariantDto) {
+    const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
+    if (!variant) throw new NotFoundException('Variant not found');
+    return this.prisma.productVariant.update({ where: { id: variantId }, data: dto });
+  }
+
+  async removeVariant(variantId: string) {
+    const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
+    if (!variant) throw new NotFoundException('Variant not found');
+    await this.prisma.productVariant.delete({ where: { id: variantId } });
+    return { deleted: true };
   }
 
   async removeImage(productId: string, attachmentId: string) {

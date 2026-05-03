@@ -12,7 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { useToast } from '@/components/ui/toast';
 
@@ -47,6 +47,13 @@ export default function ProductDetailPage() {
   const [threeMfFile, setThreeMfFile] = useState<File | null>(null);
   const [threeMfAnalysis, setThreeMfAnalysis] = useState<any>(null);
   const [analyzingThreeMf, setAnalyzingThreeMf] = useState(false);
+
+  // Variants
+  const [showAddVariant, setShowAddVariant] = useState(false);
+  const [showEditVariant, setShowEditVariant] = useState<any>(null);
+  const [showDeleteVariant, setShowDeleteVariant] = useState<string | null>(null);
+  const [savingVariant, setSavingVariant] = useState(false);
+  const [deletingVariant, setDeletingVariant] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -265,6 +272,65 @@ export default function ProductDetailPage() {
     } catch (err: any) {
       toast('error', err.message || 'Delete failed');
       setDeletingProduct(false);
+    }
+  }
+
+  async function handleAddVariant(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSavingVariant(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.post(`/products/${id}/variants`, {
+        name: form.get('name') as string,
+        sku: form.get('sku') as string,
+        basePrice: form.get('basePrice') ? parseFloat(form.get('basePrice') as string) : undefined,
+        estimatedMinutes: form.get('estimatedMinutes') ? parseFloat(form.get('estimatedMinutes') as string) : undefined,
+        estimatedGrams: form.get('estimatedGrams') ? parseFloat(form.get('estimatedGrams') as string) : undefined,
+        isActive: form.get('isActive') !== 'false',
+      });
+      setShowAddVariant(false);
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setSavingVariant(false);
+    }
+  }
+
+  async function handleUpdateVariant(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!showEditVariant) return;
+    setSavingVariant(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.patch(`/products/${id}/variants/${showEditVariant.id}`, {
+        name: form.get('name') as string,
+        sku: form.get('sku') as string,
+        basePrice: form.get('basePrice') ? parseFloat(form.get('basePrice') as string) : null,
+        estimatedMinutes: form.get('estimatedMinutes') ? parseFloat(form.get('estimatedMinutes') as string) : null,
+        estimatedGrams: form.get('estimatedGrams') ? parseFloat(form.get('estimatedGrams') as string) : null,
+        isActive: form.get('isActive') !== 'false',
+      });
+      setShowEditVariant(null);
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setSavingVariant(false);
+    }
+  }
+
+  async function handleDeleteVariant() {
+    if (!showDeleteVariant) return;
+    setDeletingVariant(true);
+    try {
+      await api.delete(`/products/${id}/variants/${showDeleteVariant}`);
+      setShowDeleteVariant(null);
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setDeletingVariant(false);
     }
   }
 
@@ -602,6 +668,130 @@ export default function ProductDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Variants */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Variants</CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Same product, different sizes or colours — each gets its own SKU</p>
+          </div>
+          <Button size="sm" onClick={() => setShowAddVariant(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Add Variant
+          </Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          {(!product.variants || product.variants.length === 0) ? (
+            <div className="py-6 text-center text-sm text-gray-500 dark:text-gray-400 flex flex-col items-center gap-2">
+              <Tag className="h-5 w-5" />
+              No variants yet. Add a variant to offer this product in different sizes or colours.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Minutes</TableHead>
+                  <TableHead>Grams</TableHead>
+                  <TableHead>Active</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {product.variants.map((v: any) => (
+                  <TableRow key={v.id}>
+                    <TableCell className="font-medium">{v.name}</TableCell>
+                    <TableCell className="font-mono text-xs">{v.sku}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {v.basePrice != null ? formatCurrency(v.basePrice) : <span className="text-gray-400 italic">inherited</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {v.estimatedMinutes != null ? `${v.estimatedMinutes}min` : <span className="text-gray-400 italic">inherited</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {v.estimatedGrams != null ? `${v.estimatedGrams}g` : <span className="text-gray-400 italic">inherited</span>}
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={v.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}>
+                        {v.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setShowEditVariant(v)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Edit">
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => setShowDeleteVariant(v.id)} className="text-red-400 hover:text-red-600" title="Delete">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add Variant dialog */}
+      <Dialog open={showAddVariant} onClose={() => setShowAddVariant(false)} title="Add Variant">
+        <form onSubmit={handleAddVariant} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input name="name" label="Variant Name" placeholder="e.g. Large — Red" required />
+            <Input name="sku" label="SKU" placeholder="e.g. PROD-L-RED" required />
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Leave price/time/grams blank to inherit from the parent product.</p>
+          <div className="grid grid-cols-3 gap-4">
+            <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" placeholder={product.basePrice ? product.basePrice.toFixed(3) : ''} />
+            <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : ''} />
+            <Input name="estimatedGrams" label="Est. Grams" type="number" step="0.1" min="0" placeholder={product.estimatedGrams ? String(Math.round(product.estimatedGrams)) : ''} />
+          </div>
+          <Select name="isActive" label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]} defaultValue="true" />
+          <div className="flex gap-3 justify-end">
+            <Button type="button" variant="outline" onClick={() => setShowAddVariant(false)}>Cancel</Button>
+            <Button type="submit" disabled={savingVariant}>{savingVariant ? 'Saving...' : 'Add Variant'}</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Edit Variant dialog */}
+      <Dialog open={!!showEditVariant} onClose={() => setShowEditVariant(null)} title="Edit Variant">
+        {showEditVariant && (
+          <form onSubmit={handleUpdateVariant} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Input name="name" label="Variant Name" defaultValue={showEditVariant.name} required />
+              <Input name="sku" label="SKU" defaultValue={showEditVariant.sku} required />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Leave price/time/grams blank to inherit from the parent product.</p>
+            <div className="grid grid-cols-3 gap-4">
+              <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" defaultValue={showEditVariant.basePrice ?? ''} placeholder={product.basePrice ? product.basePrice.toFixed(3) : ''} />
+              <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" defaultValue={showEditVariant.estimatedMinutes ?? ''} placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : ''} />
+              <Input name="estimatedGrams" label="Est. Grams" type="number" step="0.1" min="0" defaultValue={showEditVariant.estimatedGrams ?? ''} placeholder={product.estimatedGrams ? String(Math.round(product.estimatedGrams)) : ''} />
+            </div>
+            <Select name="isActive" label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]} defaultValue={showEditVariant.isActive ? 'true' : 'false'} />
+            <div className="flex gap-3 justify-end">
+              <Button type="button" variant="outline" onClick={() => setShowEditVariant(null)}>Cancel</Button>
+              <Button type="submit" disabled={savingVariant}>{savingVariant ? 'Saving...' : 'Save Changes'}</Button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Delete Variant dialog */}
+      <Dialog open={!!showDeleteVariant} onClose={() => setShowDeleteVariant(null)} title="Delete Variant">
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-gray-500">Are you sure you want to delete this variant? This cannot be undone.</p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setShowDeleteVariant(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteVariant} disabled={deletingVariant}>
+              {deletingVariant ? 'Deleting...' : 'Delete Variant'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog open={showAddComponent} onClose={() => setShowAddComponent(false)} title="Add Component">
         <form onSubmit={handleAddComponent} className="space-y-4">

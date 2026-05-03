@@ -371,6 +371,25 @@ export interface UpdateProductComponentDto {
   stockOnHand?: number;
 }
 
+export interface CreateProductVariantDto {
+  name: string;
+  sku?: string;
+  basePrice?: number;
+  estimatedMinutes?: number;
+  estimatedGrams?: number;
+  sortOrder?: number;
+}
+
+export interface UpdateProductVariantDto {
+  name?: string;
+  sku?: string;
+  basePrice?: number | null;
+  estimatedMinutes?: number | null;
+  estimatedGrams?: number | null;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
 export interface ProductCostResult extends CostBreakdown {
   suggestedPrice: number;
   markupMultiplier: number;

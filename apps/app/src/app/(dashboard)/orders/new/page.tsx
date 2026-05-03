@@ -20,7 +20,7 @@ export default function NewOrderPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const { items, addItem, removeItem, updateItem, handleProductSelect, subtotal } = useLineItems(products);
+  const { items, addItem, removeItem, updateItem, handleProductSelect, handleVariantSelect, subtotal } = useLineItems(products);
 
   useEffect(() => {
     api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch(console.error);
@@ -38,7 +38,11 @@ export default function NewOrderPage() {
         customerId: form.get('customerId'),
         notes: form.get('notes') || undefined,
         dueDate: form.get('dueDate') || undefined,
-        items: items.filter(i => i.description).map(i => ({ ...i, productId: i.productId || undefined })),
+        items: items.filter(i => i.description).map(i => ({
+          ...i,
+          productId: i.productId || undefined,
+          variantId: i.variantId || undefined,
+        })),
       });
       router.push('/orders');
     } catch (err: any) {
@@ -92,6 +96,24 @@ export default function NewOrderPage() {
                       onChange={e => handleProductSelect(i, e.target.value)}
                     />
                   )}
+                  {(() => {
+                    const prod = products.find(p => p.id === item.productId);
+                    const variants = (prod as any)?.variants;
+                    if (!variants?.length) return null;
+                    return (
+                      <Select
+                        options={[
+                          { value: '', label: 'No variant (use product defaults)' },
+                          ...variants.map((v: any) => ({
+                            value: v.id,
+                            label: `${v.name} — ${v.sku}${v.basePrice != null ? ` (${formatCurrency(v.basePrice)})` : ' (inherited price)'}`,
+                          })),
+                        ]}
+                        value={item.variantId ?? ''}
+                        onChange={e => handleVariantSelect(i, e.target.value, prod!.basePrice)}
+                      />
+                    );
+                  })()}
                   <div className="flex gap-3 items-end">
                     <div className="flex-1">
                       <Input

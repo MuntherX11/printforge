@@ -19,6 +19,8 @@ export default function NewJobPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [jobName, setJobName] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,7 +55,21 @@ export default function NewJobPage() {
 
   function handleProductChange(productId: string) {
     const product = products.find((p: any) => p.id === productId);
+    setSelectedProductId(productId);
+    setSelectedVariantId('');
     setJobName(product?.name ?? '');
+  }
+
+  function handleVariantChange(variantId: string) {
+    setSelectedVariantId(variantId);
+    if (variantId) {
+      const product = products.find((p: any) => p.id === selectedProductId);
+      const variant = product?.variants?.find((v: any) => v.id === variantId);
+      if (variant) setJobName(`${product.name} — ${variant.name}`);
+    } else {
+      const product = products.find((p: any) => p.id === selectedProductId);
+      setJobName(product?.name ?? '');
+    }
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -74,6 +90,7 @@ export default function NewJobPage() {
       payload.orderId = form.get('orderId') || undefined;
     } else {
       payload.productId = form.get('productId') || undefined;
+      if (selectedVariantId) payload.variantId = selectedVariantId;
     }
 
     if (!payload.orderId && !payload.productId) {
@@ -148,16 +165,34 @@ export default function NewJobPage() {
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleOrderChange(e.target.value)}
               />
             ) : (
-              <Select
-                name="productId"
-                label="Product *"
-                required
-                options={[
-                  { value: '', label: 'Select a product...' },
-                  ...products.map((p: any) => ({ value: p.id, label: p.name })),
-                ]}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProductChange(e.target.value)}
-              />
+              <>
+                <Select
+                  name="productId"
+                  label="Product *"
+                  required
+                  options={[
+                    { value: '', label: 'Select a product...' },
+                    ...products.map((p: any) => ({ value: p.id, label: p.name })),
+                  ]}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProductChange(e.target.value)}
+                />
+                {(() => {
+                  const prod = products.find((p: any) => p.id === selectedProductId);
+                  const variants = (prod as any)?.variants;
+                  if (!variants?.length) return null;
+                  return (
+                    <Select
+                      label="Variant"
+                      options={[
+                        { value: '', label: 'No variant (use product defaults)' },
+                        ...variants.map((v: any) => ({ value: v.id, label: `${v.name} — ${v.sku}` })),
+                      ]}
+                      value={selectedVariantId}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleVariantChange(e.target.value)}
+                    />
+                  );
+                })()}
+              </>
             )}
 
             <Input

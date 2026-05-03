@@ -11,6 +11,8 @@ import {
   UpdateProductDto,
   AddProductComponentDto,
   UpdateProductComponentDto,
+  CreateProductVariantDto,
+  UpdateProductVariantDto,
 } from '@printforge/types';
 
 @Controller('products')
@@ -161,5 +163,26 @@ export class ProductsController {
   @Roles('ADMIN', 'OPERATOR')
   removeImage(@Param('id') id: string, @Param('attachmentId') attachmentId: string) {
     return this.productsService.removeImage(id, attachmentId);
+  }
+
+  @Post(':id/variants')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  addVariant(@Param('id') id: string, @Body() dto: CreateProductVariantDto) {
+    return this.productsService.addVariant(id, dto);
+  }
+
+  @Patch(':id/variants/:variantId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  updateVariant(@Param('id') id: string, @Param('variantId') variantId: string, @Body() dto: UpdateProductVariantDto) {
+    return this.productsService.updateVariant(variantId, dto);
+  }
+
+  @Delete(':id/variants/:variantId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  removeVariant(@Param('id') id: string, @Param('variantId') variantId: string) {
+    return this.productsService.removeVariant(variantId);
   }
 }
