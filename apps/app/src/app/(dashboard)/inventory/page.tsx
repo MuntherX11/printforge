@@ -46,7 +46,7 @@ export default function InventoryPage() {
 
   const loadMaterials = (p = page) => {
     setLoading(true);
-    api.get<ApiPaginatedResponse<ApiMaterial>>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiMaterial>>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   };
 
   useEffect(() => { loadMaterials(page); }, [page]);

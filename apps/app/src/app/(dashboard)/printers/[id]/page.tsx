@@ -40,7 +40,7 @@ export default function PrinterDetailPage() {
   const [formKey, setFormKey] = useState(0); // forces form re-render on save
 
   const load = useCallback(() => {
-    return api.get(`/printers/${id}`).then(setPrinter).catch(console.error).finally(() => setLoading(false));
+    return api.get(`/printers/${id}`).then(setPrinter).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => { load(); }, [load]);

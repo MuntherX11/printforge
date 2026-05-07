@@ -41,11 +41,11 @@ export default function ProductionPage() {
       setData(null);
       const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (filter !== 'ALL') params.set('status', filter);
-      api.get<ApiPaginatedResponse<ApiProductionJob>>(`/jobs?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+      api.get<ApiPaginatedResponse<ApiProductionJob>>(`/jobs?${params}`).then(setData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
     } else {
       setLoading(true);
       setQueue(null);
-      api.get<ApiJobQueue>('/jobs/queue').then(setQueue).catch(console.error).finally(() => setLoading(false));
+      api.get<ApiJobQueue>('/jobs/queue').then(setQueue).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
     }
   }, [filter, view, page]);
 

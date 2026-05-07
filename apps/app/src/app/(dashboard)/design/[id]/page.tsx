@@ -37,7 +37,7 @@ export default function DesignDetailPage() {
     ]).then(([proj, userList]) => {
       setProject(proj);
       setUsers(Array.isArray(userList) ? userList : []);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }
 
   useEffect(() => { loadProject(); }, [id]);

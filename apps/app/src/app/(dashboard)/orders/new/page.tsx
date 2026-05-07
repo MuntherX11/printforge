@@ -11,10 +11,12 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useLineItems } from '@/hooks/use-line-items';
 import { Plus, Trash2 } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function NewOrderPage() {
   const router = useRouter();
   const formatCurrency = useFormatCurrency();
+  const { toast } = useToast();
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,8 +25,8 @@ export default function NewOrderPage() {
   const { items, addItem, removeItem, updateItem, handleProductSelect, handleVariantSelect, subtotal } = useLineItems(products);
 
   useEffect(() => {
-    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch(console.error);
-    api.get<any[]>('/products/active').then(setProducts).catch(console.error);
+    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+    api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {

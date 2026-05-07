@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const [printerNames, setPrinterNames] = useState<Record<string, string>>({});
   const { printerStatuses } = useWebSocket();
   const formatCurrency = useFormatCurrency();
+  const { toast } = useToast();
 
   // Fetch printer names once for the active print cards
   useEffect(() => {
@@ -129,7 +130,7 @@ export default function DashboardPage() {
   useEffect(() => {
     api.get<DashboardKPIs>('/reports/dashboard')
       .then(setKpis)
-      .catch(console.error)
+      .catch((err: any) => toast('error', err?.message || 'Failed to load'))
       .finally(() => setLoading(false));
   }, []);
 

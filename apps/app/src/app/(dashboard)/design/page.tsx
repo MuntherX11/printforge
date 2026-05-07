@@ -13,6 +13,7 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { Pagination } from '@/components/ui/pagination';
 import { Palette } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   REQUESTED: 'warning',
@@ -28,6 +29,7 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' 
 };
 
 export default function DesignPage() {
+  const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -40,7 +42,7 @@ export default function DesignPage() {
     if (statusFilter) params.set('status', statusFilter);
     api.get<any>(`/design-projects?${params}`)
       .then(setData)
-      .catch(console.error)
+      .catch((err: any) => toast('error', err?.message || 'Failed to load'))
       .finally(() => setLoading(false));
   }, [statusFilter, page]);
 

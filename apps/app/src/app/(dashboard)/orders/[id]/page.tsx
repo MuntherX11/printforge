@@ -44,7 +44,7 @@ export default function OrderDetailPage() {
   const [printers, setPrinters] = useState<any[]>([]);
 
   const load = useCallback(() => {
-    api.get(`/orders/${id}`).then(setOrder).catch(console.error).finally(() => setLoading(false));
+    api.get(`/orders/${id}`).then(setOrder).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [id]);
   useEffect(() => { load(); }, [load]);
 

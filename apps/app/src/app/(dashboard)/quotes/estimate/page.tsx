@@ -24,7 +24,7 @@ export default function EstimatePage() {
     Promise.all([
       api.get<any[]>('/materials').then(setMaterials),
       api.get<any[]>('/printers').then(setPrinters),
-    ]).catch(console.error);
+    ]).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);
 
   async function handleEstimate(e: React.FormEvent<HTMLFormElement>) {

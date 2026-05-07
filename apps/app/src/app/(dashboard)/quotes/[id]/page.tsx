@@ -31,9 +31,8 @@ export default function QuoteDetailPage() {
   const [converting, setConverting] = useState(false);
   const [updating, setUpdating] = useState(false);
 
-  const load = () => api.get(`/quotes/${id}`).then(setQuote).catch((err) => {
-    console.error(err);
-    toast('error', 'Failed to load quote details');
+  const load = () => api.get(`/quotes/${id}`).then(setQuote).catch((err: any) => {
+    toast('error', err?.message || 'Failed to load quote details');
   }).finally(() => setLoading(false));
 
   useEffect(() => { load(); }, [id]);

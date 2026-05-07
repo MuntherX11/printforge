@@ -57,7 +57,7 @@ export default function JobDetailPage() {
   const ws = useWebSocket();
   const liveProgress = ws.jobProgress[id as string];
 
-  const load = () => api.get(`/jobs/${id}`).then(setJob).catch(console.error).finally(() => setLoading(false));
+  const load = () => api.get(`/jobs/${id}`).then(setJob).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   useEffect(() => { load(); }, [id]);
 
   // Auto-reload when the job completes/fails via WebSocket

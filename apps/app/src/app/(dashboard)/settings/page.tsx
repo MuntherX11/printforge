@@ -47,7 +47,7 @@ export default function SettingsPage() {
   }, [isDirty]);
 
   useEffect(() => {
-    api.get<Record<string, string>>('/settings').then(setSettings).catch(console.error).finally(() => setLoading(false));
+    api.get<Record<string, string>>('/settings').then(setSettings).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
     // Check if logo exists
     fetch('/api/settings/logo', { credentials: 'include' }).then(r => {
       if (r.ok) setLogoUrl('/api/settings/logo');

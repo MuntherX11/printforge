@@ -32,7 +32,7 @@ export default function PrintersPage() {
       status: (printerStatuses[p.id]?.printerState?.toUpperCase() as ApiPrinter['status']) ?? p.status,
     })), [printers, printerStatuses]);
 
-  const load = () => api.get<ApiPrinter[]>('/printers').then(setPrinters).catch(console.error).finally(() => setLoading(false));
+  const load = () => api.get<ApiPrinter[]>('/printers').then(setPrinters).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {

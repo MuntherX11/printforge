@@ -14,9 +14,11 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
 import type { ApiPaginatedResponse, ApiProduct } from '@/lib/types/api';
 import { Plus, Box, Upload } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function ProductsPage() {
   const formatCurrency = useFormatCurrency();
+  const { toast } = useToast();
   const [data, setData] = useState<ApiPaginatedResponse<ApiProduct> | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -27,7 +29,7 @@ export default function ProductsPage() {
   const fetchProducts = useCallback(() => {
     setLoading(true);
     setData(null);
-    api.get<ApiPaginatedResponse<ApiProduct>>(`/products?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiProduct>>(`/products?page=${page}&limit=25`).then(setData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [page]);
 
   useEffect(() => {

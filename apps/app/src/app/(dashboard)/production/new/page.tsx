@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { ShoppingCart, Package } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 type Mode = 'order' | 'stock';
 
 export default function NewJobPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [mode, setMode] = useState<Mode | null>(null);
   const [printers, setPrinters] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -28,7 +30,7 @@ export default function NewJobPage() {
     Promise.all([
       api.get<any[]>('/printers').then(setPrinters),
       api.get<any[]>('/users').then(setUsers),
-    ]).catch(console.error);
+    ]).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);
 
   useEffect(() => {
@@ -36,10 +38,10 @@ export default function NewJobPage() {
     if (mode === 'order') {
       api.get<any>('/orders?status=CONFIRMED&status=IN_PRODUCTION&limit=100')
         .then(r => setOrders(r?.data || r || []))
-        .catch(console.error);
+        .catch((err: any) => toast('error', err?.message || 'Failed to load'));
     }
     if (mode === 'stock') {
-      api.get<any[]>('/products/active').then(setProducts).catch(console.error);
+      api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
     }
   }, [mode]);
 

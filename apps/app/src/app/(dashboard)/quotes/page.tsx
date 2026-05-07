@@ -13,9 +13,11 @@ import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { Pagination } from '@/components/ui/pagination';
 import { Plus, FileText } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 export default function QuotesPage() {
   const formatCurrency = useFormatCurrency();
+  const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -23,7 +25,7 @@ export default function QuotesPage() {
   useEffect(() => {
     setLoading(true);
     setData(null);
-    api.get(`/quotes?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
+    api.get(`/quotes?page=${page}&limit=25`).then(setData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [page]);
 
   if (loading) return <Loading />;

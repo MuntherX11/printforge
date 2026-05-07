@@ -68,7 +68,7 @@ export default function QuickQuotePage() {
       setMaterials(Array.isArray(mats) ? mats : []);
       setPrinters(prts);
       setCustomers(Array.isArray(custs) ? custs : []);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, []);
 
   // ── Handlers ──────────────────────────────────────────────────────────────

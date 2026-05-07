@@ -14,11 +14,13 @@ import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import type { ApiPaginatedResponse, ApiOrder } from '@/lib/types/api';
 import { Plus, ShoppingCart } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
 
 const statusFilters = ['ALL', 'PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
 export default function OrdersPage() {
   const formatCurrency = useFormatCurrency();
+  const { toast } = useToast();
   const [data, setData] = useState<ApiPaginatedResponse<ApiOrder> | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
@@ -29,7 +31,7 @@ export default function OrdersPage() {
     setData(null);
     const params = new URLSearchParams({ page: String(page), limit: '25' });
     if (filter !== 'ALL') params.set('status', filter);
-    api.get<ApiPaginatedResponse<ApiOrder>>(`/orders?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiOrder>>(`/orders?${params}`).then(setData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [filter, page]);
 
   if (loading) return <Loading />;

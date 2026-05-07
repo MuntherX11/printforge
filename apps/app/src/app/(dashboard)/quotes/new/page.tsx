@@ -25,8 +25,8 @@ export default function NewQuotePage() {
   const { items, addItem, removeItem, updateItem, handleProductSelect, subtotal } = useLineItems(products);
 
   useEffect(() => {
-    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch(console.error);
-    api.get<any[]>('/products/active').then(setProducts).catch(console.error);
+    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+    api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {

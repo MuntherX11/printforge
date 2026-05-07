@@ -29,7 +29,7 @@ export default function CustomerDetailPage() {
   const [sending, setSending] = useState(false);
 
   const load = useCallback(() => {
-    api.get(`/customers/${id}`).then(setCustomer).catch(console.error).finally(() => setLoading(false));
+    api.get(`/customers/${id}`).then(setCustomer).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [id]);
   useEffect(() => { load(); }, [load]);
 

@@ -26,7 +26,7 @@ export default function WatchFolderPage() {
     ]).then(([imps, mats]) => {
       setImports(imps);
       setMaterials(Array.isArray(mats) ? mats : []);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

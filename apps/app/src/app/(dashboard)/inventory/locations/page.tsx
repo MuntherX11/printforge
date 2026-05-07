@@ -21,9 +21,8 @@ export default function LocationsPage() {
   const [showDelete, setShowDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const load = () => api.get<any[]>('/locations').then(setLocations).catch((err) => {
-    console.error(err);
-    toast('error', 'Failed to load locations');
+  const load = () => api.get<any[]>('/locations').then(setLocations).catch((err: any) => {
+    toast('error', err?.message || 'Failed to load');
   }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 

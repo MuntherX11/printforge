@@ -44,7 +44,7 @@ export default function CustomerDesignDetailPage() {
   function loadProject() {
     api.get<any>(`/design-projects/${id}`)
       .then(setProject)
-      .catch(console.error)
+      .catch((err: any) => toast('error', err?.message || 'Failed to load'))
       .finally(() => setLoading(false));
   }
 

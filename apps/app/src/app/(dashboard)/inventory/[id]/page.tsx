@@ -52,7 +52,7 @@ export default function MaterialDetailPage() {
     ]).then(([m, locs]) => {
       setMaterial(m);
       setLocations(locs);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, [id]);
 

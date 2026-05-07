@@ -70,9 +70,8 @@ export default function ProductDetailPage() {
       setMaterials(m);
       setPrinters(pr);
       setImages(imgs);
-    }).catch((err) => {
-      console.error(err);
-      toast('error', 'Failed to load product details');
+    }).catch((err: any) => {
+      toast('error', err?.message || 'Failed to load product details');
     }).finally(() => setLoading(false));
   };
 
