@@ -1,12 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -15,8 +13,11 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Mail, MessageCircle, AlertTriangle, CheckCircle, Factory } from 'lucide-react';
+import { notFound } from 'next/navigation';
+import { AlertTriangle, CheckCircle, Factory } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { useOrder } from './useOrder';
+import { InvoiceList } from './InvoiceList';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -30,10 +31,9 @@ const orderStatuses = [
 
 export default function OrderDetailPage() {
   const formatCurrency = useFormatCurrency();
-  const { id } = useParams();
   const { toast } = useToast();
-  const [order, setOrder] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { id, order, loading, reload } = useOrder();
+
   const [showPlanDialog, setShowPlanDialog] = useState(false);
   const [plan, setPlan] = useState<any[]>([]);
   const [planOverrides, setPlanOverrides] = useState<Record<string, any>>({});
@@ -43,17 +43,12 @@ export default function OrderDetailPage() {
   const [updating, setUpdating] = useState(false);
   const [printers, setPrinters] = useState<any[]>([]);
 
-  const load = useCallback(() => {
-    api.get(`/orders/${id}`).then(setOrder).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
-  }, [id]);
-  useEffect(() => { load(); }, [load]);
-
   async function updateStatus(status: string) {
     setUpdating(true);
     try {
       await api.patch(`/orders/${id}`, { status });
       toast('success', 'Order status updated');
-      load();
+      reload();
     } catch (err: any) {
       toast('error', err.message);
     } finally {
@@ -109,7 +104,7 @@ export default function OrderDetailPage() {
       const res = await api.post<any>(`/jobs/plan/${id}`, { overrides: overrides.length > 0 ? overrides : undefined });
       setShowPlanDialog(false);
       toast('success', `Created ${res.jobsCreated} production job(s)`);
-      load();
+      reload();
     } catch (err: any) {
       toast('error', err.message);
     } finally {
@@ -132,7 +127,7 @@ export default function OrderDetailPage() {
     setCreatingInvoice(true);
     try {
       await api.post('/invoices', { orderId: id });
-      load();
+      reload();
       toast('success', 'Invoice created');
     } catch (err: any) {
       toast('error', err.message);
@@ -142,7 +137,7 @@ export default function OrderDetailPage() {
   }
 
   if (loading) return <Loading />;
-  if (!order) return <div className="text-center py-12 text-gray-500">Order not found</div>;
+  if (!order) return notFound();
 
   return (
     <div className="space-y-6">
@@ -266,36 +261,16 @@ export default function OrderDetailPage() {
         );
       })()}
 
-      {order.invoices && order.invoices.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Invoices</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {(order.invoices || []).map((inv: any) => (
-                <div key={inv.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
-                  <div>
-                    <p className="text-sm font-medium">{inv.invoiceNumber}</p>
-                    <p className="text-xs text-gray-500">{formatDate(inv.createdAt)}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium">{formatCurrency(inv.total)}</span>
-                    <StatusBadge status={inv.status} />
-                    <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer">
-                      <Button variant="outline" size="sm">PDF</Button>
-                    </a>
-                    <Button variant="outline" size="sm" onClick={() => sendInvoiceEmail(inv.id)} title="Send via Email">
-                      <Mail className="h-3 w-3" />
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => whatsAppInvoice(inv)} title="WhatsApp">
-                      <MessageCircle className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <InvoiceList
+        invoices={order.invoices || []}
+        orderId={id}
+        creating={creatingInvoice}
+        onCreateInvoice={createInvoice}
+        onSendEmail={sendInvoiceEmail}
+        onWhatsApp={whatsAppInvoice}
+        formatCurrency={formatCurrency}
+        formatDate={formatDate}
+      />
 
       {order.productionJobs && order.productionJobs.length > 0 && (
         <Card>
@@ -315,6 +290,7 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       )}
+
       <Dialog open={showPlanDialog} onClose={() => setShowPlanDialog(false)} title="Production Plan Preview">
         <div className="space-y-4 max-h-[70vh] overflow-y-auto">
           {plan.length === 0 ? (
