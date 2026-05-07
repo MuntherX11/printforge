@@ -7,7 +7,11 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Disable NestJS's default body-parser (100 KB limit) and register our own.
+  // Without this, large multipart uploads (gcode/3mf) get 413 before multer can run.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use(require('express').json({ limit: '210mb' }));
+  app.use(require('express').urlencoded({ limit: '210mb', extended: true }));
 
   // Security headers (X-Frame-Options, CSP, HSTS, etc.)
   app.use(helmet({
