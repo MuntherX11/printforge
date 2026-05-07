@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,12 +16,12 @@ import { Plus, Printer, Clock, Wrench, Camera } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useToast } from '@/components/ui/toast';
 import { useWebSocket } from '@/lib/use-websocket';
+import { useApi } from '@/hooks/use-api';
 
 export default function PrintersPage() {
   const { toast } = useToast();
   const { printerStatuses } = useWebSocket();
-  const [printers, setPrinters] = useState<ApiPrinter[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: printers, loading, refetch: load } = useApi<ApiPrinter[]>('/printers', { initialData: [] });
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
   const [cameraTarget, setCameraTarget] = useState<{ id: string; name: string; cameraUrl?: string } | null>(null);
@@ -31,9 +31,6 @@ export default function PrintersPage() {
       ...p,
       status: (printerStatuses[p.id]?.printerState?.toUpperCase() as ApiPrinter['status']) ?? p.status,
     })), [printers, printerStatuses]);
-
-  const load = () => api.get<ApiPrinter[]>('/printers').then(setPrinters).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
 
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

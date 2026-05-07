@@ -26,6 +26,7 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const { toast } = useToast();
 
+  // TODO: migrate to useApi once pagination is stable (uses Promise.all + page param)
   function loadData(p = page) {
     Promise.all([
       api.get<ApiPaginatedResponse<ApiCustomer>>(`/customers?page=${p}&limit=25`),

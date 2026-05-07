@@ -22,6 +22,7 @@ export default function QuotesPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
+  // TODO: migrate to useApi once pagination is stable (fetch URL depends on page param)
   useEffect(() => {
     setLoading(true);
     setData(null);

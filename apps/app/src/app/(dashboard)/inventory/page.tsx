@@ -44,6 +44,7 @@ export default function InventoryPage() {
   const [creating, setCreating] = useState(false);
   const [page, setPage] = useState(1);
 
+  // TODO: migrate to useApi once pagination is stable (page param + imperative reload after mutations)
   const loadMaterials = (p = page) => {
     setLoading(true);
     api.get<ApiPaginatedResponse<ApiMaterial>>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
