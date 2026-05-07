@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { EmptyState } from '@/components/ui/empty-state';
+import type { ApiPrinter } from '@/lib/types/api';
 import { Plus, Printer, Clock, Wrench, Camera } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useToast } from '@/components/ui/toast';
@@ -19,7 +20,7 @@ import { useWebSocket } from '@/lib/use-websocket';
 export default function PrintersPage() {
   const { toast } = useToast();
   const { printerStatuses } = useWebSocket();
-  const [printers, setPrinters] = useState<any[]>([]);
+  const [printers, setPrinters] = useState<ApiPrinter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -28,10 +29,10 @@ export default function PrintersPage() {
   const displayPrinters = useMemo(() =>
     printers.map(p => ({
       ...p,
-      status: (printerStatuses[p.id]?.printerState?.toUpperCase() as any) ?? p.status,
+      status: (printerStatuses[p.id]?.printerState?.toUpperCase() as ApiPrinter['status']) ?? p.status,
     })), [printers, printerStatuses]);
 
-  const load = () => api.get<any[]>('/printers').then(setPrinters).catch(console.error).finally(() => setLoading(false));
+  const load = () => api.get<ApiPrinter[]>('/printers').then(setPrinters).catch(console.error).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   async function handleAdd(e: React.FormEvent<HTMLFormElement>) {
@@ -91,8 +92,8 @@ export default function PrintersPage() {
                           <Wrench className="h-3 w-3" /> In Maintenance
                         </span>
                       )}
-                      {p.maintenanceIntervalHours > 0 &&
-                        ((p.totalPrintHours ?? 0) - (p.lastMaintenancePrintHours ?? 0)) >= p.maintenanceIntervalHours &&
+                      {(p.maintenanceIntervalHours ?? 0) > 0 &&
+                        ((p.totalPrintHours ?? 0) - (p.lastMaintenancePrintHours ?? 0)) >= (p.maintenanceIntervalHours ?? 0) &&
                         p.status !== 'MAINTENANCE' && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                           <Clock className="h-3 w-3" /> Overdue
@@ -111,7 +112,7 @@ export default function PrintersPage() {
                         <button
                           type="button"
                           title="View camera"
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); setCameraTarget({ id: p.id, name: p.name, cameraUrl: p.cameraUrl }); }}
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); setCameraTarget({ id: p.id, name: p.name, cameraUrl: p.cameraUrl ?? undefined }); }}
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-gray-100 hover:bg-blue-100 hover:text-blue-700 dark:bg-gray-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-400 transition-colors"
                         >
                           <Camera className="h-3 w-3" />

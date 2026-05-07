@@ -31,8 +31,7 @@ export default function ExpensesPage() {
     api.get<any[]>('/accounting/expenses').then(setExpenses),
     api.get<any[]>('/accounting/categories').then(setCategories),
   ]).catch((err) => {
-    console.error(err);
-    toast('error', 'Failed to load expenses');
+    toast('error', err?.message || 'Failed to load expenses');
   }).finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);

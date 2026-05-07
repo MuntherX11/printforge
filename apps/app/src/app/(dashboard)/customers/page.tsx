@@ -13,11 +13,12 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
 import { Pagination } from '@/components/ui/pagination';
+import type { ApiPaginatedResponse, ApiCustomer } from '@/lib/types/api';
 import { Plus, Users, UserCheck, UserX } from 'lucide-react';
 
 export default function CustomersPage() {
-  const [data, setData] = useState<any>(null);
-  const [pending, setPending] = useState<any[]>([]);
+  const [data, setData] = useState<ApiPaginatedResponse<ApiCustomer> | null>(null);
+  const [pending, setPending] = useState<ApiCustomer[]>([]);
   const [loading, setLoading] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null);
@@ -27,8 +28,8 @@ export default function CustomersPage() {
 
   function loadData(p = page) {
     Promise.all([
-      api.get(`/customers?page=${p}&limit=25`),
-      api.get('/auth/customers/pending').catch(() => []),
+      api.get<ApiPaginatedResponse<ApiCustomer>>(`/customers?page=${p}&limit=25`),
+      api.get<ApiCustomer[]>('/auth/customers/pending').catch(() => [] as ApiCustomer[]),
     ]).then(([customers, pendingList]) => {
       setData(customers);
       setPending(Array.isArray(pendingList) ? pendingList : []);
@@ -67,7 +68,7 @@ export default function CustomersPage() {
 
   if (loading) return <Loading />;
 
-  const customers = data?.data || data || [];
+  const customers: ApiCustomer[] = data?.data || [];
 
   return (
     <div className="space-y-6">
@@ -98,7 +99,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pending.map((c: any) => (
+                {pending.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell>{c.email}</TableCell>
@@ -145,7 +146,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {customers.map((c: any) => (
+                {customers.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell>
                       <Link href={`/customers/${c.id}`} className="font-medium text-brand-600 hover:underline">

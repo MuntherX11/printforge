@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -279,10 +280,14 @@ export default function CustomerQuickQuotePage() {
                         className="h-4 w-4 rounded border-gray-300 text-brand-600"
                       />
                       {plate.thumbnailBase64 && (
-                        <img
+                        <Image
                           src={plate.thumbnailBase64}
                           alt={plate.name}
+                          width={64}
+                          height={48}
+                          loading="lazy"
                           className="h-12 w-16 object-contain rounded bg-gray-100 dark:bg-gray-800"
+                          unoptimized
                         />
                       )}
                       <div className="flex-1 min-w-0">

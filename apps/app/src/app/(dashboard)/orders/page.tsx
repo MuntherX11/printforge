@@ -12,13 +12,14 @@ import { Pagination } from '@/components/ui/pagination';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
+import type { ApiPaginatedResponse, ApiOrder } from '@/lib/types/api';
 import { Plus, ShoppingCart } from 'lucide-react';
 
 const statusFilters = ['ALL', 'PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
 export default function OrdersPage() {
   const formatCurrency = useFormatCurrency();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ApiPaginatedResponse<ApiOrder> | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
   const [page, setPage] = useState(1);
@@ -28,11 +29,11 @@ export default function OrdersPage() {
     setData(null);
     const params = new URLSearchParams({ page: String(page), limit: '25' });
     if (filter !== 'ALL') params.set('status', filter);
-    api.get(`/orders?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiOrder>>(`/orders?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
   }, [filter, page]);
 
   if (loading) return <Loading />;
-  const orders = data?.data || data || [];
+  const orders: ApiOrder[] = data?.data || [];
 
   return (
     <div className="space-y-6">
@@ -79,7 +80,7 @@ export default function OrdersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((o: any) => (
+                {orders.map((o) => (
                   <TableRow key={o.id}>
                     <TableCell>
                       <Link href={`/orders/${o.id}`} className="font-medium text-brand-600 hover:underline">{o.orderNumber}</Link>

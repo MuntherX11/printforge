@@ -38,8 +38,7 @@ export default function AccountingPage() {
     ])
       .then(([r, t, m]) => { setReport(r); setTrend(t); setMargins(m); })
       .catch((err) => {
-        console.error(err);
-        toast('error', 'Failed to load accounting data');
+        toast('error', err?.message || 'Failed to load accounting data');
       })
       .finally(() => setLoading(false));
   }

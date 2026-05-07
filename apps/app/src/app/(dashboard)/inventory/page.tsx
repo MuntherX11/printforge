@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import type { ScannedFields as ScannedSpoolFields } from '@/components/spool-label-scanner';
 import dynamic from 'next/dynamic';
 const SpoolLabelScanner = dynamic(
   () => import('@/components/spool-label-scanner').then(m => ({ default: m.SpoolLabelScanner })),
@@ -20,23 +21,32 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
 import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import type { ApiPaginatedResponse, ApiMaterial } from '@/lib/types/api';
+
+/** Shape returned by bulk-upload endpoint */
+interface BulkUploadResult {
+  created: number;
+  skipped: number;
+  errors: string[];
+}
+
 
 export default function InventoryPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
-  const [materialsData, setMaterialsData] = useState<any>(null);
+  const [materialsData, setMaterialsData] = useState<ApiPaginatedResponse<ApiMaterial> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [uploadResult, setUploadResult] = useState<BulkUploadResult | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [scannedFields, setScannedFields] = useState<any>(null);
+  const [scannedFields, setScannedFields] = useState<ScannedSpoolFields | null>(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
   const [creating, setCreating] = useState(false);
   const [page, setPage] = useState(1);
 
   const loadMaterials = (p = page) => {
     setLoading(true);
-    api.get<any>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiMaterial>>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch(console.error).finally(() => setLoading(false));
   };
 
   useEffect(() => { loadMaterials(page); }, [page]);
@@ -51,20 +61,20 @@ export default function InventoryPage() {
       setUploadResult(result);
       loadMaterials();
     } catch (err: any) {
-      setUploadResult({ errors: [err.message] });
+      setUploadResult({ created: 0, skipped: 0, errors: [err.message] });
     } finally {
       setUploading(false);
       e.target.value = '';
     }
   }
 
-  function handleScanResult(fields: any) {
+  function handleScanResult(fields: ScannedSpoolFields) {
     setScannedFields(fields);
     setShowRawOcr(false);
   }
 
   function updateField(key: string, value: string) {
-    setScannedFields((prev: any) => ({ ...prev, [key]: value }));
+    setScannedFields((prev) => prev ? { ...prev, [key]: value } : prev);
   }
 
   async function handleConfirmCreate() {
@@ -78,7 +88,7 @@ export default function InventoryPage() {
       const matColor = scannedFields.color || '';
 
       // Check if a matching material already exists
-      const materialsList: any[] = materialsData?.data || materialsData || [];
+      const materialsList: ApiMaterial[] = materialsData?.data || [];
       let material = materialsList.find(
         (m) =>
           m.type?.toUpperCase() === matType.toUpperCase() &&
@@ -87,7 +97,7 @@ export default function InventoryPage() {
       );
 
       if (!material) {
-        material = await api.post('/materials', {
+        material = await api.post<ApiMaterial>('/materials', {
           name: matName,
           type: matType,
           color: matColor,
@@ -116,7 +126,7 @@ export default function InventoryPage() {
 
   if (loading) return <Loading />;
 
-  const materials: any[] = materialsData?.data || materialsData || [];
+  const materials: ApiMaterial[] = materialsData?.data || [];
 
   return (
     <div className="space-y-6">
@@ -185,7 +195,7 @@ export default function InventoryPage() {
               </TableHeader>
               <TableBody>
                 {materials.map((m) => {
-                  const totalStock = (m.spools || []).reduce((sum: number, s: any) => sum + s.currentWeight, 0);
+                  const totalStock = (m.spools || []).reduce((sum, s) => sum + s.currentWeight, 0);
                   const isLow = totalStock < m.reorderPoint;
                   return (
                     <TableRow key={m.id}>

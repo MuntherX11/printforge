@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
@@ -852,10 +853,14 @@ export default function QuickQuotePage() {
               <CardContent className="p-6">
                 <div className="flex gap-4">
                   {scrapedData.thumbnailUrl && (
-                    <img
+                    <Image
                       src={scrapedData.thumbnailUrl}
                       alt={scrapedData.title || 'Model preview'}
+                      width={128}
+                      height={128}
+                      loading="lazy"
                       className="w-32 h-32 object-cover rounded-lg border"
+                      unoptimized
                     />
                   )}
                   <div className="flex-1">

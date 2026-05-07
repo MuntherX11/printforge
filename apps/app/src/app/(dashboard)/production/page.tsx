@@ -13,6 +13,7 @@ import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Pagination } from '@/components/ui/pagination';
+import type { ApiPaginatedResponse, ApiProductionJob, ApiJobQueue, ApiJobFailureStats } from '@/lib/types/api';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
 
@@ -21,17 +22,17 @@ const statusFilters = ['ALL', 'QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'F
 export default function ProductionPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ApiPaginatedResponse<ApiProductionJob> | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
-  const [failStats, setFailStats] = useState<any>(null);
+  const [failStats, setFailStats] = useState<ApiJobFailureStats | null>(null);
   const [view, setView] = useState<'list' | 'queue'>('list');
-  const [queue, setQueue] = useState<any>(null);
+  const [queue, setQueue] = useState<ApiJobQueue | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    api.get('/jobs/stats/failures').then(setFailStats).catch(() => {});
+    api.get<ApiJobFailureStats>('/jobs/stats/failures').then(setFailStats).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -40,18 +41,18 @@ export default function ProductionPage() {
       setData(null);
       const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (filter !== 'ALL') params.set('status', filter);
-      api.get(`/jobs?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
+      api.get<ApiPaginatedResponse<ApiProductionJob>>(`/jobs?${params}`).then(setData).catch(console.error).finally(() => setLoading(false));
     } else {
       setLoading(true);
       setQueue(null);
-      api.get('/jobs/queue').then(setQueue).catch(console.error).finally(() => setLoading(false));
+      api.get<ApiJobQueue>('/jobs/queue').then(setQueue).catch(console.error).finally(() => setLoading(false));
     }
   }, [filter, view, page]);
 
   async function handleAutoAssign() {
     setAssigning(true);
     try {
-      const result = await api.post<any>('/jobs/auto-assign');
+      const result = await api.post<{ assigned: number; reason?: string }>('/jobs/auto-assign');
       if (result.assigned > 0) {
         toast('success', `Assigned ${result.assigned} job(s) to printers`);
       } else {
@@ -61,9 +62,9 @@ export default function ProductionPage() {
       if (view === 'list') {
         const params = new URLSearchParams({ page: String(page), limit: '25' });
         if (filter !== 'ALL') params.set('status', filter);
-        api.get(`/jobs?${params}`).then(setData);
+        api.get<ApiPaginatedResponse<ApiProductionJob>>(`/jobs?${params}`).then(setData);
       } else {
-        api.get('/jobs/queue').then(setQueue);
+        api.get<ApiJobQueue>('/jobs/queue').then(setQueue);
       }
     } catch (err: any) {
       toast('error', err.message);
@@ -137,7 +138,7 @@ export default function ProductionPage() {
 
       {/* List View */}
       {view === 'list' && (() => {
-        const jobs: any[] = data?.data || data || [];
+        const jobs: ApiProductionJob[] = data?.data || [];
         return (
           <Card>
             <CardContent className="p-0">
@@ -162,7 +163,7 @@ export default function ProductionPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {jobs.map((j: any) => (
+                    {jobs.map((j) => (
                       <TableRow key={j.id}>
                         <TableCell>
                           <Link href={`/production/${j.id}`} className="font-medium text-brand-600 hover:underline">{j.name}</Link>
@@ -201,7 +202,7 @@ export default function ProductionPage() {
                 <Table>
                   <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Job</TableHead><TableHead>Order</TableHead><TableHead>Qty</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {queue.unassigned.map((j: any, i: number) => (
+                    {queue.unassigned.map((j, i) => (
                       <TableRow key={j.id}>
                         <TableCell className="text-gray-400 text-xs">{i + 1}</TableCell>
                         <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link></TableCell>
@@ -217,7 +218,7 @@ export default function ProductionPage() {
           )}
 
           {/* Per-printer queues */}
-          {queue.printers?.map((p: any) => (
+          {queue.printers?.map((p) => (
             <Card key={p.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center justify-between">
@@ -242,7 +243,7 @@ export default function ProductionPage() {
                   <Table>
                     <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Job</TableHead><TableHead>Status</TableHead><TableHead>Order</TableHead><TableHead>Qty</TableHead></TableRow></TableHeader>
                     <TableBody>
-                      {p.productionJobs.map((j: any, i: number) => (
+                      {p.productionJobs.map((j, i) => (
                         <TableRow key={j.id}>
                           <TableCell className="text-gray-400 text-xs">{i + 1}</TableCell>
                           <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link></TableCell>

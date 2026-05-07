@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -11,11 +12,12 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
+import type { ApiPaginatedResponse, ApiProduct } from '@/lib/types/api';
 import { Plus, Box, Upload } from 'lucide-react';
 
 export default function ProductsPage() {
   const formatCurrency = useFormatCurrency();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ApiPaginatedResponse<ApiProduct> | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [importing, setImporting] = useState(false);
@@ -25,7 +27,7 @@ export default function ProductsPage() {
   const fetchProducts = useCallback(() => {
     setLoading(true);
     setData(null);
-    api.get<any>(`/products?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
+    api.get<ApiPaginatedResponse<ApiProduct>>(`/products?page=${page}&limit=25`).then(setData).catch(console.error).finally(() => setLoading(false));
   }, [page]);
 
   useEffect(() => {
@@ -67,7 +69,7 @@ export default function ProductsPage() {
 
   if (loading) return <Loading />;
 
-  const products: any[] = data?.data || data || [];
+  const products: ApiProduct[] = data?.data || [];
 
   return (
     <div className="space-y-6">
@@ -135,7 +137,7 @@ export default function ProductsPage() {
                   <TableRow key={p.id}>
                     <TableCell className="w-16">
                       {p.imageUrl ? (
-                        <img src={`/api/uploads/${p.imageUrl}`} alt={p.name} className="h-10 w-10 rounded object-cover" />
+                        <Image src={`/api/uploads/${p.imageUrl}`} alt={p.name} width={40} height={40} loading="lazy" className="h-10 w-10 rounded object-cover" unoptimized />
                       ) : (
                         <div className="h-10 w-10 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
                           <Box className="h-5 w-5 text-gray-400" />

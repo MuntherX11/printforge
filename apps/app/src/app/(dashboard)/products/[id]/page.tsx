@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import NextImage from 'next/image';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -697,10 +698,14 @@ export default function ProductDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {images.map((img: any) => (
                 <div key={img.id} className="relative group">
-                  <img
+                  <NextImage
                     src={`/api/attachments/${img.id}/file`}
                     alt={img.fileName}
+                    width={200}
+                    height={128}
+                    loading="lazy"
                     className="w-full h-32 object-cover rounded-md border dark:border-gray-700"
+                    unoptimized
                   />
                   <button
                     onClick={() => setShowDeleteImage(img.id)}

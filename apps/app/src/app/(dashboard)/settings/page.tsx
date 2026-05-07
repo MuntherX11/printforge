@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ export default function SettingsPage() {
   const [testingWa, setTestingWa] = useState(false);
   const [backups, setBackups] = useState<Array<{ filename: string; sizeBytes: number; createdAt: string }>>([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
 
   function loadBackups() {
     setLoadingBackups(true);
@@ -33,6 +35,16 @@ export default function SettingsPage() {
       .catch(() => {})
       .finally(() => setLoadingBackups(false));
   }
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   useEffect(() => {
     api.get<Record<string, string>>('/settings').then(setSettings).catch(console.error).finally(() => setLoading(false));
@@ -52,6 +64,7 @@ export default function SettingsPage() {
       .map(([key, value]) => ({ key, value: value as string }));
     try {
       await api.put('/settings', { settings: entries });
+      setIsDirty(false);
       toast('success', 'Settings saved');
     } catch (err: any) {
       toast('error', err.message);
@@ -86,7 +99,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <form onSubmit={handleSave} onChange={() => setIsDirty(true)} className="space-y-6">
         <Card>
           <CardHeader><CardTitle>Company</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -95,7 +108,7 @@ export default function SettingsPage() {
                 <p className="text-sm font-medium text-gray-700 mb-2">Company Logo</p>
                 <div className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden bg-gray-50">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="Company logo" width={96} height={96} loading="lazy" className="w-full h-full object-contain" />
+                    <Image src={logoUrl} alt="Company logo" width={96} height={96} loading="lazy" className="w-full h-full object-contain" unoptimized />
                   ) : (
                     <Upload className="h-8 w-8 text-gray-400" />
                   )}

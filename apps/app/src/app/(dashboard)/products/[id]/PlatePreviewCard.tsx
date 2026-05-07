@@ -1,6 +1,7 @@
 'use client';
 
 import { Printer } from 'lucide-react';
+import Image from 'next/image';
 import { ThreeMfPlateInfo } from '@printforge/types';
 
 interface PlatePreviewCardProps {
@@ -52,14 +53,17 @@ export default function PlatePreviewCard({
 
       {/* Thumbnail */}
       <div
-        className="aspect-video w-full bg-gray-100 dark:bg-gray-800 rounded flex items-center justify-center mb-2 overflow-hidden cursor-pointer"
+        className="relative aspect-video w-full bg-gray-100 dark:bg-gray-800 rounded flex items-center justify-center mb-2 overflow-hidden cursor-pointer"
         onClick={() => onToggle(plate.plateIndex)}
       >
         {plate.thumbnailBase64 ? (
-          <img
+          <Image
             src={plate.thumbnailBase64}
             alt={name}
-            className="w-full h-full object-contain"
+            fill
+            loading="lazy"
+            className="object-contain"
+            unoptimized
           />
         ) : (
           <Printer className="h-8 w-8 text-gray-400 dark:text-gray-500" />
