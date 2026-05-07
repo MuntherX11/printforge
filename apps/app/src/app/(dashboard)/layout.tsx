@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { SidebarProvider } from '@/components/sidebar-provider';
 import { LocaleProvider } from '@/lib/locale-context';
+import { AuthProvider } from '@/lib/auth-context';
 import { WsStatusBanner } from '@/components/ui/ws-status-banner';
 
 // Public pages that render inside the dashboard route group but without chrome
@@ -39,6 +40,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <LocaleProvider>
+      <AuthProvider>
       <SidebarProvider>
         <div className="flex h-screen overflow-hidden">
           <Sidebar />
@@ -51,6 +53,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </SidebarProvider>
+      </AuthProvider>
     </LocaleProvider>
   );
 }

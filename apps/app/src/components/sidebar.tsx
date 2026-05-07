@@ -2,10 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { api } from '@/lib/api';
 import { useSidebar } from '@/components/sidebar-provider';
+import { useAuth } from '@/lib/auth-context';
 import {
   LayoutDashboard,
   Package,
@@ -46,16 +45,10 @@ const navigation: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [role, setRole] = useState<string | null>(null);
+  const { role } = useAuth();
   const { open, setOpen } = useSidebar();
 
-  useEffect(() => {
-    api.get<{ role: string }>('/auth/me')
-      .then(u => setRole(u.role))
-      .catch(() => setRole(''));
-  }, []);
-
-  // null = still loading, '' = loaded but no role (error), string = loaded
+  // null = still loading (from AuthContext), '' = loaded but no role (error), string = loaded
   const filteredNav = role === null
     ? null
     : navigation.filter(item => !item.roles || item.roles.includes(role));

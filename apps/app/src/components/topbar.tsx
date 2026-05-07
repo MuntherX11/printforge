@@ -7,18 +7,15 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { getTheme, toggleTheme } from '@/lib/theme';
 import { useSidebar } from '@/components/sidebar-provider';
-import type { AuthUser } from '@printforge/types';
+import { useAuth } from '@/lib/auth-context';
 
 export function Topbar() {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [notifCount, setNotifCount] = useState(0);
+  const { user, notifCount } = useAuth();
   const [isDark, setIsDark] = useState(false);
   const router = useRouter();
   const { toggle } = useSidebar();
 
   useEffect(() => {
-    api.get<AuthUser>('/auth/me').then(setUser).catch(() => {});
-    api.get<number>('/notifications/count').then(setNotifCount).catch(() => {});
     setIsDark(getTheme() === 'dark');
   }, []);
 
@@ -46,8 +43,11 @@ export function Topbar() {
         >
           {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
-        <button className="relative p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-          <Bell className="h-5 w-5" />
+        <button
+          className="relative p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          aria-label={notifCount > 0 ? `Notifications (${notifCount} unread)` : 'Notifications'}
+        >
+          <Bell className="h-5 w-5" aria-hidden="true" />
           {notifCount > 0 && (
             <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
               {notifCount > 9 ? '9+' : notifCount}

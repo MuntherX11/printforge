@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useWebSocket, type PrinterStatusEvent } from '@/lib/use-websocket';
 import type { DashboardKPIs } from '@printforge/types';
-import { ShoppingCart, Hammer, Printer, TrendingUp, AlertTriangle, Thermometer, Pause, Play, XCircle } from 'lucide-react';
+import { Thermometer, Pause, Play, XCircle } from 'lucide-react';
 import { Loading } from '@/components/ui/loading';
 import { useToast } from '@/components/ui/toast';
 
@@ -142,12 +142,20 @@ export default function DashboardPage() {
   if (!kpis) return <div className="text-center py-12 text-gray-500">Failed to load dashboard</div>;
 
   const stats = [
-    { name: 'Active Jobs', value: kpis.activeJobs, icon: Hammer, color: 'text-blue-600' },
-    { name: 'Pending Orders', value: kpis.pendingOrders, icon: ShoppingCart, color: 'text-yellow-600' },
-    { name: 'Low Stock', value: kpis.lowStockMaterials, icon: AlertTriangle, color: kpis.lowStockMaterials > 0 ? 'text-red-600' : 'text-green-600' },
-    { name: 'Monthly Revenue', value: formatCurrency(kpis.monthlyRevenue), icon: TrendingUp, color: 'text-green-600' },
-    { name: 'Monthly Profit', value: formatCurrency(kpis.monthlyProfit), icon: TrendingUp, color: kpis.monthlyProfit >= 0 ? 'text-green-600' : 'text-red-600' },
-    { name: 'Printer Utilization', value: `${Math.round(kpis.printerUtilization)}%`, icon: Printer, color: 'text-indigo-600' },
+    { name: 'Active Jobs', value: String(kpis.activeJobs), color: 'text-blue-600 dark:text-blue-400' },
+    { name: 'Pending Orders', value: String(kpis.pendingOrders), color: 'text-amber-600 dark:text-amber-400' },
+    {
+      name: 'Low Stock',
+      value: String(kpis.lowStockMaterials),
+      color: kpis.lowStockMaterials > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400',
+    },
+    { name: 'Monthly Revenue', value: formatCurrency(kpis.monthlyRevenue), color: 'text-gray-900 dark:text-gray-100' },
+    {
+      name: 'Monthly Profit',
+      value: formatCurrency(kpis.monthlyProfit),
+      color: kpis.monthlyProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
+    },
+    { name: 'Printer Utilization', value: `${Math.round(kpis.printerUtilization)}%`, color: 'text-gray-900 dark:text-gray-100' },
   ];
 
   return (
@@ -158,7 +166,7 @@ export default function DashboardPage() {
       {activePrints.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
+            <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
             </span>
@@ -177,21 +185,15 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {/* KPI summary strip — ledger row, not hero cards */}
+      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
         {stats.map((stat) => (
-          <Card key={stat.name}>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">{stat.name}</p>
-                  <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-                </div>
-                <stat.icon className={`h-8 w-8 ${stat.color} opacity-50`} />
-              </div>
-            </CardContent>
-          </Card>
+          <div key={stat.name} className="px-5 py-4 flex flex-col gap-0.5">
+            <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{stat.name}</dt>
+            <dd className={`text-xl font-semibold tabular-nums ${stat.color}`}>{stat.value}</dd>
+          </div>
         ))}
-      </div>
+      </dl>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
