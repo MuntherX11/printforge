@@ -64,12 +64,57 @@
   color: hsl(var(--foreground));
 }
 
+/* ── Smooth scroll ────────────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Text selection ───────────────────────────────────────────────────────── */
+::selection {
+  background-color: #bfdbfe; /* brand-200 */
+  color: #1e3a8a;            /* brand-900 */
+}
+.dark ::selection {
+  background-color: #1e3a8a;
+  color: #bfdbfe;
+}
+
+/* ── Thin, brand-tinted scrollbars (WebKit) ───────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* slate-300 */
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #93c5fd; /* brand-300 */
+}
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #334155;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #3b82f6; /* brand-500 */
+}
+
+/* ── Toast slide-up animation ─────────────────────────────────────────────── */
 @keyframes slide-up {
   from { opacity: 0; transform: translateY(1rem); }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-slide-up {
   animation: slide-up 0.2s ease-out;
+}
+
+/* ── Reduced motion: no slide animation ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up {
+    animation: none;
+  }
 }
 
 /* ── Window Controls Overlay (desktop PWA titlebar) ──────────────────────── */

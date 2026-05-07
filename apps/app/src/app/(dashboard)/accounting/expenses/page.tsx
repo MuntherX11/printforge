@@ -147,13 +147,13 @@ export default function ExpensesPage() {
                       </span>
                     </TableCell>
                     <TableCell>{e.description}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(e.amount)}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums font-medium">{formatCurrency(e.amount)}</TableCell>
                     <TableCell className="text-right">
                       <button
                         onClick={() => setShowDelete(e.id)}
                         disabled={deleting === e.id}
-                        className="text-gray-400 hover:text-red-500 transition-colors"
-                        aria-label="Delete"
+                        className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                        aria-label="Delete expense"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

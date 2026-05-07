@@ -71,13 +71,13 @@ export function Sidebar() {
         )}
       >
         <div className="flex h-16 items-center justify-between px-6 border-b dark:border-gray-700">
-          <Link href="/" className="text-xl font-bold text-brand-600 dark:text-brand-400">
+          <Link href="/" className="text-xl font-bold tracking-tight text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors duration-150">
             PrintForge
           </Link>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="md:hidden p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="md:hidden rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             aria-label="Close sidebar"
           >
             <X className="h-5 w-5" />
@@ -101,7 +101,7 @@ export function Sidebar() {
                   key={item.name}
                   href={item.href}
                   className={cn(
-                    'flex items-center gap-3 rounded-md px-3 py-2 min-h-[44px] text-sm font-medium transition-colors',
+                    'flex items-center gap-3 rounded-md px-3 py-2 min-h-[44px] text-sm font-medium transition-colors duration-150',
                     isActive
                       ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',

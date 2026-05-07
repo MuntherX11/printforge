@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Dialog } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { ThreeMfAnalysis } from '@printforge/types';
 import PlatePreviewCard from './PlatePreviewCard';
@@ -110,20 +111,12 @@ export function ThreeMfImportWizard({
           {selectedPlates.length} of {analysis.totalPlates} selected
         </p>
         <div className="flex gap-2">
-          <button
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
-            onClick={onClose}
-            disabled={importing}
-          >
+          <Button variant="outline" onClick={onClose} disabled={importing}>
             Cancel
-          </button>
-          <button
-            className="px-4 py-2 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700 disabled:opacity-50 transition-colors"
-            onClick={handleImport}
-            disabled={importing || selectedPlates.length === 0}
-          >
+          </Button>
+          <Button onClick={handleImport} disabled={importing || selectedPlates.length === 0}>
             {importing ? 'Importing...' : `Import ${selectedPlates.length} plate${selectedPlates.length !== 1 ? 's' : ''}`}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

@@ -120,16 +120,16 @@ export default function ProductionPage() {
           {view === 'list' && statusFilters.map(s => (
             <button key={s} onClick={() => { setFilter(s); setPage(1); }}
               aria-pressed={filter === s}
-              className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
-              {s.replace(/_/g, ' ')}
+              className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors duration-150 ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
+              {s === 'ALL' ? 'All' : s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/, c => c.toUpperCase())}
             </button>
           ))}
         </div>
         <div className="flex gap-1 border rounded-lg p-0.5 dark:border-gray-600" role="group" aria-label="View mode">
-          <button onClick={() => { setView('list'); setFilter('ALL'); setPage(1); }} aria-pressed={view === 'list'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <button onClick={() => { setView('list'); setFilter('ALL'); setPage(1); }} aria-pressed={view === 'list'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors duration-150 ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             <LayoutList className="h-3.5 w-3.5" aria-hidden="true" /> List
           </button>
-          <button onClick={() => setView('queue')} aria-pressed={view === 'queue'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <button onClick={() => setView('queue')} aria-pressed={view === 'queue'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors duration-150 ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             <ListChecks className="h-3.5 w-3.5" aria-hidden="true" /> Queue
           </button>
         </div>

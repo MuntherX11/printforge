@@ -27,6 +27,12 @@ export function formatDateTime(date: string | Date): string {
   });
 }
 
+/** Converts "IN_PROGRESS" → "In progress", "COMPLETED" → "Completed" */
+export function formatStatus(status: string): string {
+  const s = status.replace(/_/g, ' ').toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function statusColor(status: string): string {
   const colors: Record<string, string> = {
     // Jobs

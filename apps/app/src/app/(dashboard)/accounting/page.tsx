@@ -192,16 +192,16 @@ export default function AccountingPage() {
                     </thead>
                     <tbody>
                       {margins.map((p: any) => (
-                        <tr key={p.productId} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                          <td className="px-4 py-3 font-medium">{p.productName}</td>
-                          <td className="px-4 py-3 text-right text-gray-500">{p.jobCount}</td>
-                          <td className="px-4 py-3 text-right">{formatCurrency(p.revenue)}</td>
-                          <td className="px-4 py-3 text-right text-orange-600">{formatCurrency(p.cogs)}</td>
-                          <td className={`px-4 py-3 text-right font-medium ${p.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <tr key={p.productId} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors duration-150">
+                          <td className="px-4 py-3 font-medium dark:text-gray-200">{p.productName}</td>
+                          <td className="px-4 py-3 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{p.jobCount}</td>
+                          <td className="px-4 py-3 text-right font-mono tabular-nums dark:text-gray-200">{formatCurrency(p.revenue)}</td>
+                          <td className="px-4 py-3 text-right font-mono tabular-nums text-orange-600 dark:text-orange-400">{formatCurrency(p.cogs)}</td>
+                          <td className={`px-4 py-3 text-right font-mono tabular-nums font-medium ${p.grossProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                             {formatCurrency(p.grossProfit)}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                               p.margin >= 50 ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
                               : p.margin >= 25 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
                               : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
