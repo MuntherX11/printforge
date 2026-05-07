@@ -172,6 +172,13 @@ export class ProductsController {
     return this.productsService.addVariant(id, dto);
   }
 
+  @Post(':id/variants/:variantId/calculate')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  calculateVariantCost(@Param('id') id: string, @Param('variantId') variantId: string) {
+    return this.productsService.calculateVariantCost(id, variantId);
+  }
+
   @Patch(':id/variants/:variantId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')

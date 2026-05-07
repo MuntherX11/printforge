@@ -12,7 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { useToast } from '@/components/ui/toast';
 
@@ -54,6 +54,8 @@ export default function ProductDetailPage() {
   const [showDeleteVariant, setShowDeleteVariant] = useState<string | null>(null);
   const [savingVariant, setSavingVariant] = useState(false);
   const [deletingVariant, setDeletingVariant] = useState(false);
+  const [calculatingVariant, setCalculatingVariant] = useState<string | null>(null);
+  const [variantCostResult, setVariantCostResult] = useState<{ id: string; result: any } | null>(null);
 
   const load = () => {
     Promise.all([
@@ -272,6 +274,20 @@ export default function ProductDetailPage() {
     } catch (err: any) {
       toast('error', err.message || 'Delete failed');
       setDeletingProduct(false);
+    }
+  }
+
+  async function handleCalculateVariant(variantId: string) {
+    setCalculatingVariant(variantId);
+    setVariantCostResult(null);
+    try {
+      const result = await api.post(`/products/${id}/variants/${variantId}/calculate`);
+      setVariantCostResult({ id: variantId, result });
+      load(); // refresh so new basePrice shows in the table
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setCalculatingVariant(null);
     }
   }
 
@@ -696,6 +712,7 @@ export default function ProductDetailPage() {
                   <TableHead>Minutes</TableHead>
                   <TableHead>Grams</TableHead>
                   <TableHead>Active</TableHead>
+                  <TableHead title="Set Est. Grams + Est. Minutes, then click Calculate to auto-price">Auto-price</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -717,6 +734,21 @@ export default function ProductDetailPage() {
                       <Badge className={v.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}>
                         {v.isActive ? 'Active' : 'Inactive'}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {v.estimatedGrams != null && v.estimatedMinutes != null ? (
+                        <button
+                          onClick={() => handleCalculateVariant(v.id)}
+                          disabled={calculatingVariant === v.id}
+                          title="Calculate price from grams + minutes"
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/20 dark:text-brand-400 dark:hover:bg-brand-900/40 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${calculatingVariant === v.id ? 'animate-spin' : ''}`} />
+                          {calculatingVariant === v.id ? 'Calculating…' : 'Calculate'}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic" title="Set Est. Grams and Est. Minutes to enable auto-pricing">needs grams+min</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -743,7 +775,7 @@ export default function ProductDetailPage() {
             <Input name="name" label="Variant Name" placeholder="e.g. Large — Red" required />
             <Input name="sku" label="SKU" placeholder="e.g. PROD-L-RED" required />
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Leave price/time/grams blank to inherit from the parent product.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Set Est. Grams and Est. Minutes for this size — then use the <strong>Calculate</strong> button in the table to auto-price it. Leave price blank until you calculate.</p>
           <div className="grid grid-cols-3 gap-4">
             <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" placeholder={product.basePrice ? product.basePrice.toFixed(3) : ''} />
             <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : ''} />
@@ -765,7 +797,7 @@ export default function ProductDetailPage() {
               <Input name="name" label="Variant Name" defaultValue={showEditVariant.name} required />
               <Input name="sku" label="SKU" defaultValue={showEditVariant.sku} required />
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Leave price/time/grams blank to inherit from the parent product.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Set Est. Grams and Est. Minutes for this size — then use the <strong>Calculate</strong> button in the table to auto-price it. Leave price blank until you calculate.</p>
             <div className="grid grid-cols-3 gap-4">
               <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" defaultValue={showEditVariant.basePrice ?? ''} placeholder={product.basePrice ? product.basePrice.toFixed(3) : ''} />
               <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" defaultValue={showEditVariant.estimatedMinutes ?? ''} placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : ''} />

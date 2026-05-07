@@ -417,6 +417,10 @@ export class ProductsService {
     return this.prisma.productVariant.update({ where: { id: variantId }, data: dto });
   }
 
+  async calculateVariantCost(productId: string, variantId: string) {
+    return this.productCosting.calculateVariantCost(productId, variantId);
+  }
+
   async removeVariant(variantId: string) {
     const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
     if (!variant) throw new NotFoundException('Variant not found');

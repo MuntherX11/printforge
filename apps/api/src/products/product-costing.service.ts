@@ -113,6 +113,89 @@ export class ProductCostingService {
     };
   }
 
+  /**
+   * Calculate the cost for a specific variant.
+   *
+   * A variant typically represents the same product in a different size — same
+   * materials, different quantities. We scale each parent component's gram
+   * usage proportionally to the variant's estimatedGrams, and use the
+   * variant's estimatedMinutes for time-based costs. The result is saved back
+   * to variant.basePrice.
+   */
+  async calculateVariantCost(productId: string, variantId: string): Promise<any> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        defaultPrinter: true,
+        components: {
+          include: {
+            material: true,
+            materials: { include: { material: true }, orderBy: { sortOrder: 'asc' } },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    });
+    if (!product) throw new Error('Product not found');
+
+    const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
+    if (!variant) throw new Error('Variant not found');
+    if (variant.estimatedGrams == null || variant.estimatedMinutes == null) {
+      throw new Error('Variant must have estimatedGrams and estimatedMinutes set before calculating cost');
+    }
+
+    const parentTotalGrams = product.components.reduce(
+      (sum, c) => sum + c.gramsUsed * c.quantity, 0,
+    );
+
+    // Proportionally scale each component's gram usage to the variant's total
+    const scaledMaterials = product.components.map((c) => {
+      const scaledGrams = parentTotalGrams > 0
+        ? (c.gramsUsed * c.quantity * variant.estimatedGrams!) / parentTotalGrams
+        : 0;
+
+      const subs: any[] = (c as any).materials ?? (c as any).componentMaterials ?? [];
+      const isMulticolor = !c.materialId && subs.length > 0;
+      const costPerGram = c.material?.costPerGram
+        ?? (isMulticolor && subs.length
+          ? subs.reduce((s: number, cm: any) => s + (cm.material?.costPerGram ?? 0), 0) / subs.length
+          : 0);
+
+      return { gramsUsed: scaledGrams, costPerGram };
+    });
+
+    const defaultPrinter = product.defaultPrinterId
+      ? await this.prisma.printer.findUnique({ where: { id: product.defaultPrinterId } })
+      : null;
+
+    const fullBreakdown = await this.costingService.calculateJobCost({
+      printDuration: variant.estimatedMinutes! * 60,
+      colorChanges: product.colorChanges,
+      purgeWasteGrams: 0,
+      printer: defaultPrinter,
+      materials: scaledMaterials,
+    });
+
+    const markupMultiplier = (defaultPrinter as any)?.markupMultiplier || parseFloat(
+      (await this.prisma.systemSetting.findUnique({ where: { key: 'markup_multiplier' } }))?.value || '2.5',
+    );
+
+    const suggestedPrice = Math.round(fullBreakdown.totalCost * markupMultiplier * 1000) / 1000;
+
+    await this.prisma.productVariant.update({
+      where: { id: variantId },
+      data: { basePrice: suggestedPrice },
+    });
+
+    return {
+      ...fullBreakdown,
+      suggestedPrice,
+      markupMultiplier,
+      variantId,
+      variantName: variant.name,
+    };
+  }
+
   async recalculateAggregates(productId: string) {
     const components = await this.prisma.productComponent.findMany({
       where: { productId },
