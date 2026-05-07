@@ -46,8 +46,9 @@ export default function OrdersPage() {
           <button
             key={s}
             onClick={() => { setFilter(s); setPage(1); }}
-            className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-              filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            aria-pressed={filter === s}
+            className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors ${
+              filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 text-gray-600 border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
             }`}
           >
             {s.replace(/_/g, ' ')}

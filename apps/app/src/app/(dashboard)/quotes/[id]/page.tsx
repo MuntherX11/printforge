@@ -70,7 +70,7 @@ export default function QuoteDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{quote.quoteNumber}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{quote.quoteNumber}</h1>
           <p className="text-sm text-gray-500">{quote.customer?.name} | {formatDate(quote.createdAt)}</p>
         </div>
         <div className="flex gap-2 items-center">
@@ -86,11 +86,11 @@ export default function QuoteDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={quote.status} /></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total</p><p className="text-lg font-bold">{formatCurrency(quote.total)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Valid Until</p><p className="text-lg font-bold">{quote.validUntil ? formatDate(quote.validUntil) : 'N/A'}</p></CardContent></Card>
-      </div>
+      <dl className="grid grid-cols-3 divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</dt><dd><StatusBadge status={quote.status} /></dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(quote.total)}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Valid Until</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{quote.validUntil ? formatDate(quote.validUntil) : 'N/A'}</dd></div>
+      </dl>
 
       <Card>
         <CardHeader><CardTitle>Items</CardTitle></CardHeader>

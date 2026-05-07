@@ -86,18 +86,31 @@ export default function ProductionPage() {
         </div>
       </div>
 
-      {/* Failure Stats Summary */}
+      {/* Failure Stats — inline callout strip, not hero cards */}
       {failStats && failStats.failedJobs > 0 && (
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Jobs</p><p className="text-lg font-bold">{failStats.totalJobs}</p></CardContent></Card>
-          <Card className="border-red-200 dark:border-red-800">
-            <CardContent className="p-4">
-              <p className="text-xs text-red-500 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Failed Jobs</p>
-              <p className="text-lg font-bold text-red-600">{failStats.failedJobs}</p>
-            </CardContent>
-          </Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Failure Rate</p><p className="text-lg font-bold">{failStats.failureRate}%</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Wasted Filament</p><p className="text-lg font-bold">{Math.round(failStats.totalWasteGrams)}g</p></CardContent></Card>
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50/60 dark:bg-red-950/20 px-4 py-3 flex flex-wrap gap-x-8 gap-y-3 items-center" role="status" aria-label="Failure summary">
+          <div className="flex items-center gap-2 text-red-600 dark:text-red-400 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span>Job failures detected</span>
+          </div>
+          <dl className="flex flex-wrap gap-x-8 gap-y-2">
+            <div className="flex flex-col">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Jobs</dt>
+              <dd className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">{failStats.totalJobs}</dd>
+            </div>
+            <div className="flex flex-col">
+              <dt className="text-[11px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider">Failed</dt>
+              <dd className="text-base font-semibold tabular-nums text-red-600 dark:text-red-400">{failStats.failedJobs}</dd>
+            </div>
+            <div className="flex flex-col">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Failure Rate</dt>
+              <dd className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">{failStats.failureRate}%</dd>
+            </div>
+            <div className="flex flex-col">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Wasted Filament</dt>
+              <dd className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(failStats.totalWasteGrams)}g</dd>
+            </div>
+          </dl>
         </div>
       )}
 
@@ -106,17 +119,18 @@ export default function ProductionPage() {
         <div className="flex gap-2 flex-wrap">
           {view === 'list' && statusFilters.map(s => (
             <button key={s} onClick={() => { setFilter(s); setPage(1); }}
-              className={`px-3 py-1 text-xs rounded-full border transition-colors ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
+              aria-pressed={filter === s}
+              className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors ${filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
               {s.replace(/_/g, ' ')}
             </button>
           ))}
         </div>
-        <div className="flex gap-1 border rounded-lg p-0.5 dark:border-gray-600">
-          <button onClick={() => { setView('list'); setFilter('ALL'); setPage(1); }} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
-            <LayoutList className="h-3.5 w-3.5" /> List
+        <div className="flex gap-1 border rounded-lg p-0.5 dark:border-gray-600" role="group" aria-label="View mode">
+          <button onClick={() => { setView('list'); setFilter('ALL'); setPage(1); }} aria-pressed={view === 'list'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+            <LayoutList className="h-3.5 w-3.5" aria-hidden="true" /> List
           </button>
-          <button onClick={() => setView('queue')} className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
-            <ListChecks className="h-3.5 w-3.5" /> Queue
+          <button onClick={() => setView('queue')} aria-pressed={view === 'queue'} className={`px-3 py-2 min-h-[36px] text-xs rounded-md flex items-center gap-1 transition-colors ${view === 'queue' ? 'bg-brand-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+            <ListChecks className="h-3.5 w-3.5" aria-hidden="true" /> Queue
           </button>
         </div>
       </div>

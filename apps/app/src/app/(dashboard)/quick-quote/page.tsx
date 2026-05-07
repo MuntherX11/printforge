@@ -666,15 +666,16 @@ export default function QuickQuotePage() {
                     <h3 className="font-semibold dark:text-gray-100">
                       Total — {threeMfResult.plates.length} plate{threeMfResult.plates.length !== 1 ? 's' : ''}
                     </h3>
-                    <div className="text-right">
-                      <div className="text-sm text-gray-500">
-                        Cost: {formatCurrency(threeMfResult.grandTotalCost)}
+                    <dl className="flex gap-6 text-right">
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cost</dt>
+                        <dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(threeMfResult.grandTotalCost)}</dd>
                       </div>
-                      <div className="text-2xl font-bold text-brand-600 dark:text-brand-400">
-                        {formatCurrency(threeMfResult.grandSuggestedPrice)}
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Price ({threeMfResult.markupMultiplier}×)</dt>
+                        <dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(threeMfResult.grandSuggestedPrice)}</dd>
                       </div>
-                      <div className="text-xs text-gray-400">{threeMfResult.markupMultiplier}× markup</div>
-                    </div>
+                    </dl>
                   </div>
                   <div className="pt-4 border-t dark:border-gray-700 space-y-3">
                     <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Save as Quote</h4>

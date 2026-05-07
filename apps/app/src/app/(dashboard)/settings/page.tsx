@@ -80,7 +80,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
         <div className="flex gap-2">
           <Link href="/settings/users"><Button variant="outline">User Management</Button></Link>
         </div>
@@ -95,7 +95,7 @@ export default function SettingsPage() {
                 <p className="text-sm font-medium text-gray-700 mb-2">Company Logo</p>
                 <div className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden bg-gray-50">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+                    <img src={logoUrl} alt="Company logo" width={96} height={96} loading="lazy" className="w-full h-full object-contain" />
                   ) : (
                     <Upload className="h-8 w-8 text-gray-400" />
                   )}
@@ -122,7 +122,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader><CardTitle>Financial</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <Input name="currency" label="Currency Code" defaultValue={settings.currency || 'OMR'} placeholder="OMR" />
               <Input name="currency_decimals" label="Decimal Places" type="number" min="0" max="4" defaultValue={settings.currency_decimals || '3'} />
               <Input name="tax_rate" label="Tax Rate (%)" type="number" step="0.1" defaultValue={settings.tax_rate || '0'} />
@@ -149,7 +149,7 @@ export default function SettingsPage() {
                 { value: 'MM/dd/yyyy', label: '04/11/2026' },
               ]} />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Input name="markup_multiplier" label="Default Markup Multiplier" type="number" step="0.01" defaultValue={settings.markup_multiplier || '2.5'} />
               <Input name="machine_hourly_rate" label="Default Machine Rate (OMR/hr)" type="number" step="0.001" defaultValue={settings.machine_hourly_rate || '0.400'} />
               <Input name="electricity_rate_kwh" label="Electricity Rate (OMR/kWh)" type="number" step="0.001" defaultValue={settings.electricity_rate_kwh || '0.025'} />
@@ -183,14 +183,16 @@ export default function SettingsPage() {
               <Input name="smtp_pass" label="SMTP Password / App Password" type="password" defaultValue={settings.smtp_pass || ''} />
             </div>
             <Input name="admin_email" label="Admin Email (for internal alerts)" defaultValue={settings.admin_email || ''} />
-            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-              <input
-                type="text"
-                placeholder="test@example.com"
-                value={testEmailTo}
-                onChange={e => setTestEmailTo(e.target.value)}
-                className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-              />
+            <div className="flex items-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <div className="flex-1">
+                <Input
+                  label="Send test email to"
+                  type="email"
+                  placeholder="test@example.com"
+                  value={testEmailTo}
+                  onChange={e => setTestEmailTo(e.target.value)}
+                />
+              </div>
               <Button
                 type="button"
                 variant="outline"
@@ -233,14 +235,16 @@ export default function SettingsPage() {
             <p className="text-xs text-amber-600 dark:text-amber-400">
               ⚠️ Free-form text messages work only within 24 hours of a customer contacting you. For proactive outbound notifications, create approved Message Templates in Meta Business Manager.
             </p>
-            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-              <input
-                type="text"
-                placeholder="+96812345678"
-                value={testWaTo}
-                onChange={e => setTestWaTo(e.target.value)}
-                className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-              />
+            <div className="flex items-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <div className="flex-1">
+                <Input
+                  label="Send test WhatsApp to"
+                  type="tel"
+                  placeholder="+96812345678"
+                  value={testWaTo}
+                  onChange={e => setTestWaTo(e.target.value)}
+                />
+              </div>
               <Button
                 type="button"
                 variant="outline"

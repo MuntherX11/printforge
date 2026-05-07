@@ -90,7 +90,7 @@ export default function WatchFolderPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Watch Folder</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Watch Folder</h1>
           <p className="text-sm text-gray-500">Drop G-code or STL files into the watch folder. They appear here automatically.</p>
         </div>
         <Button variant="outline" onClick={load}>

@@ -241,12 +241,12 @@ export default function MaterialDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Cost/gram</p><p className="text-lg font-bold dark:text-gray-100">{formatCurrency(material.costPerGram)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Total Stock</p><p className="text-lg font-bold dark:text-gray-100">{Math.round(totalStock)}g</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Active Spools</p><p className="text-lg font-bold dark:text-gray-100">{material._count?.spools || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Reorder Point</p><p className="text-lg font-bold dark:text-gray-100">{material.reorderPoint}g</p></CardContent></Card>
-      </div>
+      <dl className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cost/gram</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(material.costPerGram)}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Stock</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(totalStock)}g</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Active Spools</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material._count?.spools || 0}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Reorder Point</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material.reorderPoint}g</dd></div>
+      </dl>
 
       <Card>
         <CardHeader><CardTitle>Spools</CardTitle></CardHeader>

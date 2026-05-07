@@ -175,12 +175,12 @@ export default function OrderDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={order.status} /></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total</p><p className="text-lg font-bold">{formatCurrency(order.total)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Paid</p><p className="text-lg font-bold">{formatCurrency(order.paidAmount)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Balance</p><p className="text-lg font-bold">{formatCurrency(order.total - order.paidAmount)}</p></CardContent></Card>
-      </div>
+      <dl className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</dt><dd><StatusBadge status={order.status} /></dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(order.total)}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Paid</dt><dd className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">{formatCurrency(order.paidAmount)}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(order.total - order.paidAmount)}</dd></div>
+      </dl>
 
       <Card>
         <CardHeader><CardTitle>Items</CardTitle></CardHeader>

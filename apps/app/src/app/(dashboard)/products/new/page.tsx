@@ -37,7 +37,7 @@ export default function NewProductPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">New Product</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">New Product</h1>
       <Card>
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-4">

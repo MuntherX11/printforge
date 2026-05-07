@@ -405,30 +405,34 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Components</p><p className="text-lg font-bold">{product.components?.length || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Est. Grams</p><p className="text-lg font-bold">{Math.round(product.estimatedGrams)}g</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Est. Minutes</p><p className="text-lg font-bold">{Math.round(product.estimatedMinutes)}min</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500 dark:text-gray-400">Color Changes</p><p className="text-lg font-bold">{product.colorChanges || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4">
-          <p className="text-xs text-gray-500 dark:text-gray-400">Default Printer</p>
-          <select
-            className="mt-1 w-full text-sm border rounded px-2 py-1 bg-white dark:bg-gray-800 dark:border-gray-600"
-            value={product.defaultPrinterId || ''}
-            onChange={async (e) => {
-              const val = e.target.value || null;
-              try {
-                await api.patch(`/products/${id}`, { defaultPrinterId: val });
-                load();
-              } catch (err: any) { toast('error', err.message); }
-            }}
-          >
-            <option value="">None</option>
-            {printers.map((p: any) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </CardContent></Card>
+      <div className="flex flex-col sm:flex-row gap-4">
+        <dl className="flex-1 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Components</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{product.components?.length || 0}</dd></div>
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Est. Grams</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(product.estimatedGrams)}g</dd></div>
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Est. Minutes</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(product.estimatedMinutes)}min</dd></div>
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Color Changes</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{product.colorChanges || 0}</dd></div>
+        </dl>
+        <Card className="sm:w-48 flex-shrink-0">
+          <CardContent className="p-4">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-medium text-[11px]">Default Printer</p>
+            <select
+              className="mt-1.5 w-full text-sm border rounded px-2 py-1.5 bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              value={product.defaultPrinterId || ''}
+              onChange={async (e) => {
+                const val = e.target.value || null;
+                try {
+                  await api.patch(`/products/${id}`, { defaultPrinterId: val });
+                  load();
+                } catch (err: any) { toast('error', err.message); }
+              }}
+            >
+              <option value="">None</option>
+              {printers.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </CardContent>
+        </Card>
       </div>
 
       {product.components?.length > 0 && (() => {
@@ -457,25 +461,25 @@ export default function ProductDetailPage() {
       })()}
 
       {costResult && (
-        <Card className="border-brand-200 bg-brand-50">
+        <Card className="border-brand-200 bg-brand-50 dark:border-brand-900 dark:bg-brand-950/20">
           <CardHeader><CardTitle>Cost Breakdown</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-4 mb-4">
-              <div><p className="text-xs text-gray-500">Material Cost</p><p className="text-lg font-bold">{formatCurrency(costResult.materialCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Machine Cost</p><p className="text-lg font-bold">{formatCurrency(costResult.machineCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Electricity</p><p className="text-lg font-bold">{formatCurrency(costResult.electricityCost || 0)}</p></div>
-              <div><p className="text-xs text-gray-500">Waste + Overhead</p><p className="text-lg font-bold">{formatCurrency(costResult.wasteCost + costResult.overheadCost)}</p></div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3 border-t pt-4">
-              <div><p className="text-xs text-gray-500">Total Cost</p><p className="text-xl font-bold">{formatCurrency(costResult.totalCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Suggested Price</p><p className="text-xl font-bold text-brand-600">{formatCurrency(costResult.suggestedPrice)}</p></div>
-              <div><p className="text-xs text-gray-500">Markup</p><p className="text-xl font-bold text-green-600">{costResult.markupMultiplier}x</p></div>
-            </div>
+          <CardContent className="p-0">
+            <dl className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-brand-100 dark:divide-gray-800">
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Material Cost</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.materialCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Machine Cost</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.machineCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Electricity</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.electricityCost || 0)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Waste + Overhead</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.wasteCost + costResult.overheadCost)}</dd></div>
+            </dl>
+            <dl className="grid grid-cols-3 divide-x divide-brand-100 dark:divide-gray-800 border-t border-brand-100 dark:border-gray-800">
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Cost</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.totalCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Suggested Price</dt><dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(costResult.suggestedPrice)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Markup</dt><dd className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">{costResult.markupMultiplier}×</dd></div>
+            </dl>
             {costResult.components?.length > 0 && (
-              <div className="mt-4 border-t pt-4">
-                <p className="text-sm font-medium mb-2">Per-Component Costs</p>
+              <div className="px-4 py-3 border-t border-brand-100 dark:border-gray-800">
+                <p className="text-sm font-medium mb-2 dark:text-gray-200">Per-Component Costs</p>
                 {costResult.components.map((c: any, i: number) => (
-                  <div key={i} className="flex justify-between text-sm py-1">
+                  <div key={i} className="flex justify-between text-sm py-1 dark:text-gray-300">
                     <span>{c.description} ({c.materialName})</span>
                     <span className="font-mono">{formatCurrency(c.componentCost)}</span>
                   </div>

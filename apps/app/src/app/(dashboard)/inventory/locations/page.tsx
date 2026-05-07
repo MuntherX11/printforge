@@ -67,7 +67,7 @@ export default function LocationsPage() {
           <Link href="/inventory">
             <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button>
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900">Storage Locations</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Storage Locations</h1>
         </div>
         <Button onClick={() => setShowAdd(true)}>
           <Plus className="h-4 w-4 mr-2" /> Add Location

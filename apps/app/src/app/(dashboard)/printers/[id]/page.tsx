@@ -130,7 +130,7 @@ export default function PrinterDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{printer.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{printer.name}</h1>
           <p className="text-sm text-gray-500">{printer.model} | {printer.connectionType}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -168,14 +168,14 @@ export default function PrinterDetailPage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-6">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={printer.status} /></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Hourly Rate</p><p className="text-lg font-bold">{formatCurrency(printer.hourlyRate)}/hr</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Markup</p><p className="text-lg font-bold">{printer.markupMultiplier ?? 2.5}x</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Jobs</p><p className="text-lg font-bold">{printer._count?.productionJobs || 0}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Print Hours</p><p className="text-lg font-bold">{Math.round(printer.totalPrintHours || 0)}h</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Last Seen</p><p className="text-sm">{printer.lastSeen ? formatDate(printer.lastSeen) : 'Never'}</p></CardContent></Card>
-      </div>
+      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</dt><dd><StatusBadge status={printer.status} /></dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hourly Rate</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(printer.hourlyRate)}/hr</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Markup</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{printer.markupMultiplier ?? 2.5}×</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Jobs</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{printer._count?.productionJobs || 0}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Print Hours</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(printer.totalPrintHours || 0)}h</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last Seen</dt><dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{printer.lastSeen ? formatDate(printer.lastSeen) : 'Never'}</dd></div>
+      </dl>
 
       {/* Printer Details — Edit (key forces re-render with fresh defaultValues) */}
       <Card key={`details-${formKey}`}>

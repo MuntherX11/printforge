@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 interface DialogProps {
   open: boolean;
@@ -15,6 +15,7 @@ interface DialogProps {
 export function Dialog({ open, onClose, title, children, className }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -71,20 +72,20 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="dialog-title"
+        aria-labelledby={titleId}
         className={cn(
           'relative z-50 w-full max-w-lg rounded-lg bg-white dark:bg-gray-900 p-6 shadow-lg',
           className,
         )}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 id="dialog-title" className="text-lg font-semibold dark:text-gray-100">
+          <h2 id={titleId} className="text-lg font-semibold dark:text-gray-100">
             {title}
           </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             <X className="h-5 w-5" />
           </button>

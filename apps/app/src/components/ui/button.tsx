@@ -17,9 +17,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     const sizes = {
-      sm: 'px-3 py-1.5 text-xs',
-      md: 'px-4 py-2 text-sm',
-      lg: 'px-6 py-3 text-base',
+      sm: 'px-3 py-2 text-xs min-h-[36px]',
+      md: 'px-4 py-2 text-sm min-h-[40px]',
+      lg: 'px-6 py-3 text-base min-h-[48px]',
     };
 
     return (
@@ -27,7 +27,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={cn(
           'inline-flex items-center justify-center rounded-md font-medium transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
           'disabled:pointer-events-none disabled:opacity-50',
           variants[variant],
           sizes[size],

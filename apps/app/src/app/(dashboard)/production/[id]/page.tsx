@@ -209,7 +209,7 @@ export default function JobDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{job.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{job.name}</h1>
           <p className="text-sm text-gray-500">
             {job.printer?.name || 'No printer'} | {job.assignedTo?.name || 'Unassigned'}
             {job.order && <> | <Link href={`/orders/${job.order.id}`} className="text-brand-600 hover:underline">{job.order.orderNumber}</Link></>}
@@ -324,16 +324,18 @@ export default function JobDetailPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-gray-500">Print Duration</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Print Duration</p>
             <div className="flex items-center gap-2 mt-1">
               <Input type="number" className="w-24 h-8 text-sm" defaultValue={job.printDuration ? Math.round(job.printDuration / 60) : ''} placeholder="min"
                 onBlur={e => { const v = parseFloat(e.target.value); if (v) updateJob({ printDuration: v * 60 }); }} />
-              <span className="text-xs text-gray-500">minutes</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">minutes</span>
             </div>
           </CardContent>
         </Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Color Changes</p><p className="text-lg font-bold">{job.colorChanges}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Status</p><StatusBadge status={job.status} /></CardContent></Card>
+        <dl className="col-span-2 grid grid-cols-2 divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Color Changes</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{job.colorChanges}</dd></div>
+          <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</dt><dd><StatusBadge status={job.status} /></dd></div>
+        </dl>
       </div>
 
       {job.status === 'FAILED' && (
@@ -366,14 +368,14 @@ export default function JobDetailPage() {
       {job.totalCost && (
         <Card>
           <CardHeader><CardTitle>Cost Breakdown</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-5 gap-4 text-center">
-              <div><p className="text-xs text-gray-500">Material</p><p className="text-lg font-bold">{formatCurrency(job.materialCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Machine</p><p className="text-lg font-bold">{formatCurrency(job.machineCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Waste</p><p className="text-lg font-bold">{formatCurrency(job.wasteCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Overhead</p><p className="text-lg font-bold">{formatCurrency(job.overheadCost)}</p></div>
-              <div><p className="text-xs text-gray-500">Total</p><p className="text-lg font-bold text-brand-600">{formatCurrency(job.totalCost)}</p></div>
-            </div>
+          <CardContent className="p-0">
+            <dl className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800">
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Material</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.materialCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Machine</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.machineCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Waste</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.wasteCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overhead</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.overheadCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</dt><dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(job.totalCost)}</dd></div>
+            </dl>
           </CardContent>
         </Card>
       )}

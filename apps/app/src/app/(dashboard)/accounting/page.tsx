@@ -14,28 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { TrendingUp, TrendingDown, DollarSign, BarChart2, Package, Percent } from 'lucide-react';
+import { BarChart2, Package } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
-
-// ── KPI card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, icon: Icon, color }: {
-  label: string; value: string; sub?: string; icon: any; color: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">{label}</p>
-            <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-            {sub && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{sub}</p>}
-          </div>
-          <Icon className={`h-7 w-7 ${color} opacity-40 mt-0.5`} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 export default function AccountingPage() {
   const formatCurrency = useFormatCurrency();
@@ -93,27 +73,38 @@ export default function AccountingPage() {
 
       {loading ? <Loading /> : report && (
         <>
-          {/* KPI cards */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <KpiCard label="Revenue" value={formatCurrency(report.revenue)}
-              sub={`${report.orderCount} paid invoice${report.orderCount !== 1 ? 's' : ''}`}
-              icon={TrendingUp} color="text-green-600" />
-            <KpiCard label="COGS" value={formatCurrency(report.cogs)}
-              sub={`${report.jobCount} completed job${report.jobCount !== 1 ? 's' : ''}`}
-              icon={DollarSign} color="text-orange-600" />
-            <KpiCard label="Gross Profit" value={formatCurrency(report.grossProfit)}
-              sub={`${report.grossMargin.toFixed(1)}% margin`}
-              icon={Percent} color={report.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'} />
-            <KpiCard label="Operating Expenses" value={formatCurrency(report.expenses)}
-              icon={BarChart2} color="text-purple-600" />
-            <KpiCard label="Net Profit" value={formatCurrency(report.netProfit)}
-              sub={`${report.netMargin.toFixed(1)}% net margin`}
-              icon={report.netProfit >= 0 ? TrendingUp : TrendingDown}
-              color={report.netProfit >= 0 ? 'text-green-600' : 'text-red-600'} />
-            <KpiCard label="Gross Margin" value={`${report.grossMargin.toFixed(1)}%`}
-              sub="Revenue − COGS ÷ Revenue"
-              icon={Percent} color={grossMarginColor} />
-          </div>
+          {/* P&L ledger strip */}
+          <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Revenue</dt>
+              <dd className="text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(report.revenue)}</dd>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{report.orderCount} invoice{report.orderCount !== 1 ? 's' : ''}</p>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">COGS</dt>
+              <dd className="text-xl font-semibold tabular-nums text-orange-600 dark:text-orange-400">{formatCurrency(report.cogs)}</dd>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{report.jobCount} job{report.jobCount !== 1 ? 's' : ''}</p>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Gross Profit</dt>
+              <dd className={`text-xl font-semibold tabular-nums ${report.grossProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{formatCurrency(report.grossProfit)}</dd>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{report.grossMargin.toFixed(1)}% margin</p>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Op. Expenses</dt>
+              <dd className="text-xl font-semibold tabular-nums text-purple-600 dark:text-purple-400">{formatCurrency(report.expenses)}</dd>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Net Profit</dt>
+              <dd className={`text-xl font-semibold tabular-nums ${report.netProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{formatCurrency(report.netProfit)}</dd>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{report.netMargin.toFixed(1)}% net margin</p>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-0.5">
+              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Gross Margin</dt>
+              <dd className={`text-xl font-semibold tabular-nums ${grossMarginColor}`}>{report.grossMargin.toFixed(1)}%</dd>
+              <p className="text-xs text-gray-400 dark:text-gray-500">Revenue − COGS</p>
+            </div>
+          </dl>
 
           {/* Monthly trend chart + P&L summary */}
           <div className="grid gap-6 lg:grid-cols-2">
