@@ -179,6 +179,19 @@ export class ProductsController {
     return this.productsService.calculateVariantCost(id, variantId);
   }
 
+  @Post(':id/variants/:variantId/onboard-gcode')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
+  async onboardVariantGcode(
+    @Param('id') id: string,
+    @Param('variantId') variantId: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.productsService.onboardVariantFromGcode(id, variantId, file);
+  }
+
   @Patch(':id/variants/:variantId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')

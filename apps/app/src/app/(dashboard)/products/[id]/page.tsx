@@ -56,6 +56,7 @@ export default function ProductDetailPage() {
   const [deletingVariant, setDeletingVariant] = useState(false);
   const [calculatingVariant, setCalculatingVariant] = useState<string | null>(null);
   const [variantCostResult, setVariantCostResult] = useState<{ id: string; result: any } | null>(null);
+  const [uploadingVariantGcode, setUploadingVariantGcode] = useState<string | null>(null);
 
   const load = () => {
     Promise.all([
@@ -333,6 +334,32 @@ export default function ProductDetailPage() {
       toast('error', err.message);
     } finally {
       setSavingVariant(false);
+    }
+  }
+
+  async function handleVariantGcodeUpload(variantId: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingVariantGcode(variantId);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/products/${id}/variants/${variantId}/onboard-gcode`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || body?.message || `Upload failed (${res.status})`);
+      }
+      toast('success', 'Grams, minutes and price updated from gcode');
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setUploadingVariantGcode(null);
+      e.target.value = '';
     }
   }
 
@@ -752,6 +779,18 @@ export default function ProductDetailPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
+                        <label title="Upload gcode to auto-set grams, minutes and price" className={`cursor-pointer text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 ${uploadingVariantGcode === v.id ? 'opacity-50 pointer-events-none' : ''}`}>
+                          <input
+                            type="file"
+                            accept=".gcode,.gco,.g"
+                            className="hidden"
+                            onChange={(e) => handleVariantGcodeUpload(v.id, e)}
+                            disabled={uploadingVariantGcode === v.id}
+                          />
+                          {uploadingVariantGcode === v.id
+                            ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            : <Upload className="h-3.5 w-3.5" />}
+                        </label>
                         <button onClick={() => setShowEditVariant(v)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Edit">
                           <Edit2 className="h-3.5 w-3.5" />
                         </button>

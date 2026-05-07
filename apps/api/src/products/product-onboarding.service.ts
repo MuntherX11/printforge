@@ -236,6 +236,34 @@ export class ProductOnboardingService {
     return { results };
   }
 
+  async onboardVariantFromGcode(productId: string, variantId: string, file: any) {
+    const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
+    if (!variant || variant.productId !== productId) throw new NotFoundException('Variant not found');
+
+    const analysis = this.gcodeParser.parseHeader(file.buffer);
+
+    // Sum all active tools for multi-colour files; fall back to single-filament value
+    let totalGrams: number;
+    if (analysis.tools && analysis.tools.length > 1) {
+      const activeTools = analysis.tools.filter((t: any) => (t.filamentGrams || 0) > 0);
+      totalGrams = activeTools.reduce((sum: number, t: any) => sum + (t.filamentGrams || 0), 0);
+    } else {
+      totalGrams = analysis.filamentUsedGrams || 0;
+    }
+    const totalMinutes = analysis.estimatedTimeSeconds
+      ? Math.round(analysis.estimatedTimeSeconds / 60)
+      : 0;
+
+    // Persist grams + minutes, then auto-price
+    await this.prisma.productVariant.update({
+      where: { id: variantId },
+      data: { estimatedGrams: totalGrams, estimatedMinutes: totalMinutes },
+    });
+
+    const costResult = await this.productCosting.calculateVariantCost(productId, variantId);
+    return { estimatedGrams: totalGrams, estimatedMinutes: totalMinutes, ...costResult };
+  }
+
   async onboardFromThreeMf(productId: string, fileBuffer: Buffer, dto: OnboardThreeMfDto) {
     const exists = await this.prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
     if (!exists) throw new NotFoundException('Product not found');

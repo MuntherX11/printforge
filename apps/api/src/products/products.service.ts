@@ -243,6 +243,10 @@ export class ProductsService {
     return { results, product: await this.findOne(productId) };
   }
 
+  async onboardVariantFromGcode(productId: string, variantId: string, file: any) {
+    return this.productOnboarding.onboardVariantFromGcode(productId, variantId, file);
+  }
+
   async onboardFromThreeMf(productId: string, fileBuffer: Buffer, dto: OnboardThreeMfDto) {
     const { slicer, results } = await this.productOnboarding.onboardFromThreeMf(productId, fileBuffer, dto);
     return { slicer, results, product: await this.findOne(productId) };
