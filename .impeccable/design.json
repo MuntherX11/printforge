@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-07T00:00:00Z",
+  "title": "Design System: PrintForge",
+  "extensions": {
+    "colorMeta": {
+      "primary":            { "role": "primary",   "displayName": "Instrument Blue",      "canonical": "oklch(54.6% 0.246 264)", "tonalRamp": ["#172554","#1e3a8a","#1e40af","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd"] },
+      "primary-hover":      { "role": "primary",   "displayName": "Instrument Blue Deep", "canonical": "oklch(47.5% 0.243 264)", "tonalRamp": ["#172554","#1e3a8a","#1e40af","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd"] },
+      "primary-subtle":     { "role": "primary",   "displayName": "Blue Whisper",         "canonical": "oklch(97.4% 0.018 248)", "tonalRamp": ["#dbeafe","#e0edff","#e8f2ff","#eff6ff","#f5f9ff","#f8fbff","#fafcff","#fcfeff"] },
+      "primary-nav-active": { "role": "primary",   "displayName": "Blue Nav Tint",        "canonical": "oklch(93.8% 0.040 248)", "tonalRamp": ["#bfdbfe","#c7e0fe","#d0e6ff","#dbeafe","#e4eeff","#edf3ff","#f3f7ff","#f8fbff"] },
+      "surface":            { "role": "neutral",   "displayName": "Ledger White",         "canonical": "oklch(99.5% 0.003 248)", "tonalRamp": ["#e2e8f0","#edf0f4","#f1f4f7","#f5f7fa","#f8fafc","#fafbfd","#fcfdfe","#ffffff"] },
+      "surface-raised":     { "role": "neutral",   "displayName": "Page Gray",            "canonical": "oklch(98.5% 0.005 248)", "tonalRamp": ["#cbd5e1","#d6dce5","#e0e6ec","#e8edf3","#f1f5f9","#f5f7fb","#f8fafc","#fbfcfd"] },
+      "foreground":         { "role": "neutral",   "displayName": "Ink",                  "canonical": "oklch(15.4% 0.040 250)", "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f1f5f9"] },
+      "foreground-muted":   { "role": "neutral",   "displayName": "Margin Gray",          "canonical": "oklch(50.2% 0.022 248)", "tonalRamp": ["#1e293b","#334155","#475569","#64748b","#94a3b8","#b0bec9","#cbd5e1","#e2e8f0"] },
+      "border":             { "role": "neutral",   "displayName": "Rule Gray",            "canonical": "oklch(92.8% 0.012 248)", "tonalRamp": ["#94a3b8","#b0bec9","#c4cdd7","#cbd5e1","#d8e0e8","#e2e8f0","#edf0f4","#f1f5f9"] },
+      "destructive":        { "role": "semantic",  "displayName": "Fault Red",            "canonical": "oklch(55.4% 0.220 25)",  "tonalRamp": ["#7f1d1d","#991b1b","#b91c1c","#dc2626","#ef4444","#f87171","#fca5a5","#fee2e2"] },
+      "success":            { "role": "semantic",  "displayName": "Stock Green",          "canonical": "oklch(54.8% 0.175 145)", "tonalRamp": ["#14532d","#166534","#15803d","#16a34a","#22c55e","#4ade80","#86efac","#dcfce7"] },
+      "warning":            { "role": "semantic",  "displayName": "Queue Amber",          "canonical": "oklch(65.4% 0.178 72)",  "tonalRamp": ["#78350f","#92400e","#b45309","#d97706","#f59e0b","#fbbf24","#fcd34d","#fef9c3"] },
+      "surface-dark":       { "role": "neutral",   "displayName": "Forge Dark",           "canonical": "oklch(11.2% 0.038 250)", "tonalRamp": ["#0a0e1f","#0f172a","#1a2236","#1e293b","#263041","#2e3a4e","#3a4760","#4a5a72"] },
+      "surface-card-dark":  { "role": "neutral",   "displayName": "Panel Dark",           "canonical": "oklch(16.8% 0.028 248)", "tonalRamp": ["#0a0e1f","#0f172a","#111827","#1a2236","#1e293b","#263041","#2e3a4e","#3a4760"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title",  "purpose": "Card titles, section headings, dialog titles. Not for decorative text." },
+      "body":  { "displayName": "Body",   "purpose": "Table cells, form values, description text. Max 70ch on reading surfaces." },
+      "label": { "displayName": "Label",  "purpose": "Column headers (uppercase), badge text, form labels, tag metadata." },
+      "mono":  { "displayName": "Mono",   "purpose": "ALL numeric output: grams, minutes, OMR costs, temperatures, IDs. Tabular width." }
+    },
+    "shadows": [
+      { "name": "ambient-low",      "value": "0 1px 2px 0 rgba(15,23,42,0.05)",                                                       "purpose": "Cards and containers at rest. Near-invisible; lifts surface off page-gray." },
+      { "name": "interactive-lift", "value": "0 1px 3px 0 rgba(15,23,42,0.10), 0 1px 2px -1px rgba(15,23,42,0.10)",                   "purpose": "Primary buttons at rest. Signals pressability." },
+      { "name": "modal-presence",   "value": "0 10px 15px -3px rgba(15,23,42,0.10), 0 4px 6px -4px rgba(15,23,42,0.10)",              "purpose": "Dialog panels only. Separates panel from dimmed backdrop." }
+    ],
+    "motion": [
+      { "name": "ease-out-colors",  "value": "transition-colors 150ms ease-out",  "purpose": "Button hover, nav item hover, badge color shifts. Never layout." },
+      { "name": "sidebar-slide",    "value": "transform 200ms ease-out",           "purpose": "Mobile sidebar open/close." },
+      { "name": "toast-slide-up",   "value": "opacity + translateY 200ms ease-out","purpose": "Toast notification entrance. The one choreographed motion allowed." }
+    ],
+    "breakpoints": [
+      { "name": "md", "value": "768px", "purpose": "Sidebar switches from off-canvas to fixed. Topbar shows full layout. Grid columns expand." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main call to action. Used once per form or dialog section.",
+      "html": "<button class=\"ds-btn-primary\">Calculate Cost</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #2563eb; color: #ffffff; font-family: system-ui, -apple-system, sans-serif; font-size: 0.875rem; font-weight: 500; padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 1px 3px 0 rgba(15,23,42,0.10), 0 1px 2px -1px rgba(15,23,42,0.10); transition: background-color 150ms ease-out; } .ds-btn-primary:hover { background: #1d4ed8; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #3b82f6; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary action alongside a primary, or standalone import/upload triggers.",
+      "html": "<button class=\"ds-btn-outline\">Upload G-code</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #ffffff; color: #374151; font-family: system-ui, -apple-system, sans-serif; font-size: 0.875rem; font-weight: 500; padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: background-color 150ms ease-out, border-color 150ms ease-out; } .ds-btn-outline:hover { background: #f8fafc; } .ds-btn-outline:focus-visible { outline: none; box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #3b82f6; } .ds-btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Toolbars, icon-button rows, topbar actions. Zero visual weight at rest.",
+      "html": "<button class=\"ds-btn-ghost\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v14a2 2 0 0 1-2 2z\"/></svg> Export</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: transparent; color: #64748b; font-family: system-ui, -apple-system, sans-serif; font-size: 0.875rem; font-weight: 500; padding: 8px 12px; border: none; border-radius: 8px; cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-btn-ghost:hover { background: #f8fafc; color: #0f172a; } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #3b82f6; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-default",
+      "description": "Semantic status label. Color encodes state; always paired with readable text.",
+      "html": "<div style=\"display:flex;gap:8px\"><span class=\"ds-badge ds-badge-success\">In Stock</span><span class=\"ds-badge ds-badge-warning\">Low Stock</span><span class=\"ds-badge ds-badge-error\">Out of Stock</span><span class=\"ds-badge ds-badge-info\">In Progress</span></div>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; font-family: system-ui, -apple-system, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1.25; } .ds-badge-success { background: #dcfce7; color: #15803d; } .ds-badge-warning { background: #fef9c3; color: #a16207; } .ds-badge-error { background: #fee2e2; color: #b91c1c; } .ds-badge-info { background: #dbeafe; color: #1d4ed8; } .ds-badge-default { background: #f8fafc; color: #64748b; }"
+    },
+    {
+      "name": "Data Card",
+      "kind": "card",
+      "refersTo": "surface",
+      "description": "Groups a related section of data. Never used as a navigation target. Never nested.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\"><h3 class=\"ds-card-title\">Cost Breakdown</h3></div><div class=\"ds-card-content\"><p style=\"color:#64748b;font-size:0.875rem\">Material: <span class=\"ds-mono\">1.250 OMR</span></p></div></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(15,23,42,0.05); font-family: system-ui, -apple-system, sans-serif; } .ds-card-header { padding: 24px; border-bottom: 1px solid #e2e8f0; } .ds-card-title { margin: 0; font-size: 1.125rem; font-weight: 600; color: #0f172a; letter-spacing: -0.01em; line-height: 1.25; } .ds-card-content { padding: 16px 24px 24px; } .ds-mono { font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace; font-size: 0.875rem; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "surface",
+      "description": "Standard form field. Error state via red border. Focus via blue ring.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-label\" for=\"demo-input\">Est. Grams</label><input class=\"ds-input\" id=\"demo-input\" type=\"number\" placeholder=\"0.000\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; font-family: system-ui, -apple-system, sans-serif; } .ds-label { font-size: 0.875rem; font-weight: 500; color: #374151; } .ds-input { height: 40px; width: 100%; padding: 0 12px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 0.875rem; color: #0f172a; outline: none; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-input::placeholder { color: #94a3b8; } .ds-input:focus { border-color: transparent; box-shadow: 0 0 0 2px #3b82f6; } .ds-input:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Role-scoped vertical nav. Active state via background tint only, no side-stripe.",
+      "html": "<nav class=\"ds-sidebar\"><div class=\"ds-sidebar-logo\">PrintForge</div><a class=\"ds-nav-item ds-nav-active\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"/></svg>Dashboard</a><a class=\"ds-nav-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z\"/><path d=\"M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z\"/><path d=\"M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z\"/><path d=\"M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z\"/><path d=\"M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z\"/><path d=\"M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z\"/><path d=\"M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z\"/><path d=\"M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z\"/></svg>Production</a><a class=\"ds-nav-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg>Filaments</a></nav>",
+      "css": ".ds-sidebar { width: 256px; background: #ffffff; border-right: 1px solid #e2e8f0; padding: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; } .ds-sidebar-logo { padding: 0 24px; height: 64px; display: flex; align-items: center; font-size: 1.25rem; font-weight: 700; color: #2563eb; border-bottom: 1px solid #e2e8f0; } .ds-nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin: 2px 12px; border-radius: 8px; font-size: 0.875rem; font-weight: 500; color: #64748b; text-decoration: none; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-nav-item:hover { background: #f8fafc; color: #0f172a; } .ds-nav-active { background: #dbeafe; color: #1d4ed8; } .ds-nav-active:hover { background: #dbeafe; color: #1d4ed8; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operator's Ledger",
+    "overview": "PrintForge is not a dashboard that announces itself. It is a ledger: a precise, unadorned record of operational truth. Every screen exists to answer one question faster than the operator could ask it. The visual system takes its cue from Linear's light-mode variant: white surfaces, a single authoritative blue accent, monospaced numerics, and negative space used only where it helps the eye navigate, never as decoration.\n\nThe interface disappears. The data remains. Typography is system-native. Color is restrained to one role: the brand blue marks what is interactive or selected. Everything else is neutral.\n\nThis system explicitly rejects the aesthetic families listed in PRODUCT.md: no SaaS cream, no dark-neon print-farm aesthetic, no enterprise navy, no glassmorphism, no hero-metric template, no entrance animations or data loading choreography.",
+    "keyCharacteristics": [
+      "White-dominant surfaces with a subtle cool-gray hierarchy",
+      "Single blue accent (#2563eb), used only on interactive and active states",
+      "Monospaced numerics for all quantities, weights, costs, and temperatures",
+      "Flat elevation at rest; shadow only as a state response",
+      "Table-first layout: information density over empty-state padding",
+      "Light mode primary; dark mode matches fidelity, not just inverts"
+    ],
+    "rules": [
+      { "name": "The One Voice Rule",       "body": "The primary blue is the only color that signals interactivity or selection. Do not introduce secondary accent colors for status badges, chart series, or section differentiation.", "section": "colors" },
+      { "name": "The Mono Ledger Rule",     "body": "Every quantity, measurement, or currency value uses the monospace stack. OMR values always show 3 decimal places.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. A shadow on a table row, sidebar, or stat cell is not in this system. If you feel the need to add a shadow to a non-interactive surface, the layout needs fixing, not a shadow.", "section": "elevation" },
+      { "name": "The No Nested Cards Rule", "body": "Cards are never placed inside cards. Group content within a card using border-top separators or headings.", "section": "components" },
+      { "name": "The Table-First Rule",     "body": "When in doubt, use a table. Use a table with overflow-x scroll over a card grid for any list of more than 3 items with more than 2 attributes.", "section": "components" }
+    ],
+    "dos": [
+      "Do use font-family: ui-monospace for every numeric value: grams, minutes, temperatures, OMR costs, spool weights, job IDs.",
+      "Do display OMR currency to exactly 3 decimal places on every user-facing surface.",
+      "Do use the 2px brand-blue focus ring on every interactive element.",
+      "Do use role=\"dialog\" and aria-modal=\"true\" on all dialog panels, with aria-labelledby pointing to a useId()-generated ID.",
+      "Do wrap all data tables in an overflow-x-auto container.",
+      "Do use background tint (not side-stripe border) to indicate the active navigation item.",
+      "Do use semantic badge colors: green for success/in-stock, amber for low/queued, red for error/out-of-stock.",
+      "Do transition colors only (transition-colors), not layout properties. Keep transitions to 150-200ms ease-out.",
+      "Do design light mode first at full fidelity; dark mode must match, not merely invert."
+    ],
+    "donts": [
+      "Don't use border-left greater than 1px as a colored accent stripe on any card, list item, alert, or callout.",
+      "Don't use background-clip: text with a gradient. All text is a single solid color.",
+      "Don't use glassmorphism (backdrop-filter: blur) decoratively.",
+      "Don't build a hero-metric template: big number, small label underneath, gradient accent.",
+      "Don't build identical card grids with icon, heading, and text body repeated.",
+      "Don't add entrance animations, counter animations, or loading choreography to data.",
+      "Don't use dark neon, cyberpunk, or any aesthetic that reads as 3D printing brand.",
+      "Don't use enterprise navy or gold as accent colors.",
+      "Don't add a second accent color. The one-voice rule is absolute.",
+      "Don't nest cards inside cards.",
+      "Don't use a modal as the first thought for editing data. Prefer inline editing for single fields.",
+      "Don't suppress focus rings."
+    ]
+  }
+}
