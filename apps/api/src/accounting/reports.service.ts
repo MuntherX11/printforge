@@ -16,54 +16,53 @@ export class ReportsService {
       throw new Error('Invalid date format — expected ISO 8601 (e.g. 2026-01-01)');
     }
 
-    // Revenue: sum of paid invoices in period
-    const invoices = await this.prisma.invoice.findMany({
-      where: {
-        status: 'PAID',
-        paidAt: { gte: start, lte: end },
-      },
+    return this.cache.getOrSet(`reports:pnl:${startDate}:${endDate}`, 300, async () => {
+      const [invoices, jobs, expenses] = await Promise.all([
+        // Revenue: sum of paid invoices in period — only load the column we need
+        this.prisma.invoice.findMany({
+          where: { status: 'PAID', paidAt: { gte: start, lte: end } },
+          select: { paidAmount: true },
+        }),
+        // COGS: sum of production costs for completed jobs in period
+        this.prisma.productionJob.findMany({
+          where: { status: 'COMPLETED', completedAt: { gte: start, lte: end } },
+          select: { totalCost: true },
+        }),
+        // Expenses in period
+        this.prisma.expense.findMany({
+          where: { date: { gte: start, lte: end } },
+          include: { category: true },
+        }),
+      ]);
+
+      const revenue = invoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
+      const cogs = jobs.reduce((sum, job) => sum + (job.totalCost || 0), 0);
+      const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+      // Breakdown by category
+      const expensesByCategory = expenses.reduce((acc, exp) => {
+        const cat = exp.category.name;
+        acc[cat] = (acc[cat] || 0) + exp.amount;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const grossProfit = revenue - cogs;
+      const netProfit = grossProfit - totalExpenses;
+
+      return {
+        period: { startDate, endDate },
+        revenue,
+        cogs,
+        grossProfit,
+        grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
+        expenses: totalExpenses,
+        expensesByCategory,
+        netProfit,
+        netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0,
+        orderCount: invoices.length,
+        jobCount: jobs.length,
+      };
     });
-    const revenue = invoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
-
-    // COGS: sum of production costs for completed jobs in period
-    const jobs = await this.prisma.productionJob.findMany({
-      where: {
-        status: 'COMPLETED',
-        completedAt: { gte: start, lte: end },
-      },
-    });
-    const cogs = jobs.reduce((sum, job) => sum + (job.totalCost || 0), 0);
-
-    // Expenses in period
-    const expenses = await this.prisma.expense.findMany({
-      where: { date: { gte: start, lte: end } },
-      include: { category: true },
-    });
-    const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-
-    // Breakdown by category
-    const expensesByCategory = expenses.reduce((acc, exp) => {
-      const cat = exp.category.name;
-      acc[cat] = (acc[cat] || 0) + exp.amount;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const grossProfit = revenue - cogs;
-    const netProfit = grossProfit - totalExpenses;
-
-    return {
-      period: { startDate, endDate },
-      revenue,
-      cogs,
-      grossProfit,
-      grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
-      expenses: totalExpenses,
-      expensesByCategory,
-      netProfit,
-      netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0,
-      orderCount: invoices.length,
-      jobCount: jobs.length,
-    };
   }
 
   /**
@@ -72,30 +71,47 @@ export class ReportsService {
    */
   async getMonthlyTrend(months = 6) {
     return this.cache.getOrSet(`reports:monthly:${months}`, 300, async () => {
+      const now = new Date();
+
+      // Build the full date range covering all months in one pass
+      const startDate = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+      const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+      // Two bulk queries instead of 2 × months round-trips
+      const [allInvoices, allJobs] = await Promise.all([
+        this.prisma.invoice.findMany({
+          where: { status: 'PAID', paidAt: { gte: startDate, lte: endDate } },
+          select: { paidAt: true, paidAmount: true },
+        }),
+        this.prisma.productionJob.findMany({
+          where: { status: 'COMPLETED', completedAt: { gte: startDate, lte: endDate } },
+          select: { completedAt: true, totalCost: true },
+        }),
+      ]);
+
+      // Group by month in JS
       const result: Array<{
         month: string; revenue: number; cogs: number; grossProfit: number;
       }> = [];
 
-      const now = new Date();
       for (let i = months - 1; i >= 0; i--) {
-        const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+        const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const year = monthStart.getFullYear();
+        const month = monthStart.getMonth();
 
-        const [invoices, jobs] = await Promise.all([
-          this.prisma.invoice.findMany({
-            where: { status: 'PAID', paidAt: { gte: start, lte: end } },
-            select: { paidAmount: true },
-          }),
-          this.prisma.productionJob.findMany({
-            where: { status: 'COMPLETED', completedAt: { gte: start, lte: end } },
-            select: { totalCost: true },
-          }),
-        ]);
+        const invoices = allInvoices.filter(inv => {
+          const d = inv.paidAt!;
+          return d.getFullYear() === year && d.getMonth() === month;
+        });
+        const jobs = allJobs.filter(job => {
+          const d = job.completedAt!;
+          return d.getFullYear() === year && d.getMonth() === month;
+        });
 
         const revenue = invoices.reduce((s, inv) => s + inv.paidAmount, 0);
         const cogs = jobs.reduce((s, j) => s + (j.totalCost || 0), 0);
         result.push({
-          month: start.toLocaleString('default', { month: 'short', year: '2-digit' }),
+          month: monthStart.toLocaleString('default', { month: 'short', year: '2-digit' }),
           revenue,
           cogs,
           grossProfit: revenue - cogs,
@@ -168,6 +184,10 @@ export class ReportsService {
         monthlyInvoices,
         completedJobsThisMonth,
         printers,
+        materials,
+        stockByMaterial,
+        recentJobs,
+        recentOrders,
       ] = await Promise.all([
         this.prisma.productionJob.count({ where: { status: { in: ['QUEUED', 'IN_PROGRESS'] } } }),
         this.prisma.order.count({ where: { status: { in: ['PENDING', 'CONFIRMED'] } } }),
@@ -180,39 +200,34 @@ export class ReportsService {
           select: { totalCost: true },
         }),
         this.prisma.printer.findMany({ where: { isActive: true } }),
-      ]);
-
-      const monthlyRevenue = monthlyInvoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
-      const monthlyCost = completedJobsThisMonth.reduce((sum, job) => sum + (job.totalCost || 0), 0);
-
-      // Low stock check
-      const [materials, stockByMaterial] = await Promise.all([
         this.prisma.material.findMany({ select: { id: true, reorderPoint: true } }),
         this.prisma.spool.groupBy({
           by: ['materialId'],
           where: { isActive: true },
           _sum: { currentWeight: true },
         }),
+        this.prisma.productionJob.findMany({
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: { printer: { select: { name: true } } },
+        }),
+        this.prisma.order.findMany({
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: { customer: { select: { name: true } } },
+        }),
       ]);
+
+      const monthlyRevenue = monthlyInvoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
+      const monthlyCost = completedJobsThisMonth.reduce((sum, job) => sum + (job.totalCost || 0), 0);
+
+      // Low stock check
       const stockMap = new Map(stockByMaterial.map(s => [s.materialId, s._sum.currentWeight ?? 0]));
       const lowStockMaterials = materials.filter(m => (stockMap.get(m.id) ?? 0) < m.reorderPoint).length;
 
       // Printer utilization: how many are currently printing
       const printingCount = printers.filter(p => p.status === 'PRINTING').length;
       const printerUtilization = printers.length > 0 ? (printingCount / printers.length) * 100 : 0;
-
-      // Recent items
-      const recentJobs = await this.prisma.productionJob.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-        include: { printer: { select: { name: true } } },
-      });
-
-      const recentOrders = await this.prisma.order.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-        include: { customer: { select: { name: true } } },
-      });
 
       return {
         activeJobs,

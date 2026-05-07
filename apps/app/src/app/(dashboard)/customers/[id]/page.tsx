@@ -11,8 +11,10 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
+import type { ApiCustomer } from '@/lib/types/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
+import { notFound } from 'next/navigation';
 import { Mail, MessageCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
@@ -21,7 +23,7 @@ export default function CustomerDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const [customer, setCustomer] = useState<any>(null);
+  const [customer, setCustomer] = useState<ApiCustomer | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -29,12 +31,12 @@ export default function CustomerDetailPage() {
   const [sending, setSending] = useState(false);
 
   const load = useCallback(() => {
-    api.get(`/customers/${id}`).then(setCustomer).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
+    api.get<ApiCustomer>(`/customers/${id}`).then(setCustomer).catch((err: unknown) => toast('error', (err as Error)?.message || 'Failed to load')).finally(() => setLoading(false));
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
   function openWhatsApp() {
-    if (!customer.phone) { toast('error', 'Customer has no phone number'); return; }
+    if (!customer?.phone) { toast('error', 'Customer has no phone number'); return; }
     const phone = customer.phone.replace(/[^0-9+]/g, '').replace(/^\+/, '');
     window.open(`https://wa.me/${phone}`, '_blank');
   }
@@ -51,8 +53,8 @@ export default function CustomerDetailPage() {
       });
       setShowEmail(false);
       toast('success', 'Email sent successfully');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSending(false);
     }
@@ -70,18 +72,18 @@ export default function CustomerDetailPage() {
       notes: form.get('notes') as string || undefined,
     };
     try {
-      const updated = await api.patch<any>(`/customers/${id}`, data);
-      setCustomer((prev: any) => ({ ...prev, ...(updated as any) }));
+      const updated = await api.patch<ApiCustomer>(`/customers/${id}`, data);
+      setCustomer((prev) => ({ ...prev, ...updated } as ApiCustomer));
       setEditing(false);
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) return <Loading />;
-  if (!customer) return <div className="text-center py-12 text-gray-500">Customer not found</div>;
+  if (!customer) return notFound();
 
   return (
     <div className="space-y-6">
@@ -135,7 +137,7 @@ export default function CustomerDetailPage() {
               <p className="text-sm text-gray-500">No orders yet</p>
             ) : (
               <div className="space-y-2">
-                {customer.orders.map((o: any) => (
+                {(customer.orders ?? []).map((o) => (
                   <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
                     <div>
                       <p className="text-sm font-medium">{o.orderNumber}</p>

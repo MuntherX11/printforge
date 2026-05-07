@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { forwardRef } from 'react';
+import { forwardRef, useId } from 'react';
 
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
@@ -7,11 +7,19 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, label, error, ...props }, ref) => {
+  ({ className, label, error, id: propsId, ...props }, ref) => {
+    const generatedId = useId();
+    const id = propsId ?? generatedId;
+
     return (
       <div className="space-y-1">
-        {label && <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>}
+        {label && (
+          <label htmlFor={id} className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {label}
+          </label>
+        )}
         <textarea
+          id={id}
           ref={ref}
           className={cn(
             'flex min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',

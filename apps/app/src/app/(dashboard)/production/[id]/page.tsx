@@ -13,6 +13,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
+import { notFound } from 'next/navigation';
 import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircle, Loader2, Clock, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
@@ -203,7 +204,7 @@ export default function JobDetailPage() {
   }
 
   if (loading) return <Loading />;
-  if (!job) return <div className="text-center py-12 text-gray-500">Job not found</div>;
+  if (!job) return notFound();
 
   return (
     <div className="space-y-6">
@@ -302,6 +303,11 @@ export default function JobDetailPage() {
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
               <div
+                role="progressbar"
+                aria-valuenow={liveProgress?.progress ?? 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Print progress"
                 className="bg-brand-500 h-2.5 rounded-full transition-all duration-1000 ease-linear"
                 style={{ width: `${liveProgress?.progress ?? 0}%` }}
               />
@@ -466,8 +472,8 @@ export default function JobDetailPage() {
       <Dialog open={showFailDialog} onClose={() => setShowFailDialog(false)} title="Mark Job as Failed">
         <form onSubmit={handleFail} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Failure Reason</label>
-            <textarea name="failureReason" required rows={3} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="e.g. Bed adhesion failure, spaghetti at layer 45..." />
+            <label htmlFor="failureReason" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Failure Reason</label>
+            <textarea id="failureReason" name="failureReason" required rows={3} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm" placeholder="e.g. Bed adhesion failure, spaghetti at layer 45..." />
           </div>
           <Input name="wasteGrams" label="Estimated Filament Wasted (grams)" type="number" step="0.1" defaultValue="0" min="0" />
           <p className="text-xs text-gray-500">Waste grams will be deducted proportionally from the assigned spools.</p>

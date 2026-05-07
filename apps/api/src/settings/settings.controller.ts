@@ -1,4 +1,5 @@
 import { Controller, Get, Put, Post, Param, Body, UseGuards, UseInterceptors, UploadedFile, Res, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { SettingsService } from './settings.service';
@@ -19,6 +20,7 @@ export class SettingsController {
 
   // Public — frontend needs locale/currency before auth
   @Get('locale')
+  @Throttle({ long: { ttl: 60000, limit: 30 } })
   async getLocale() {
     const [currency, locale, decimals, dateFormat] = await Promise.all([
       this.settingsService.get('currency', 'OMR'),
@@ -51,6 +53,8 @@ export class SettingsController {
       const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
       const ext = path.extname(file.originalname).toLowerCase();
       if (!allowed.includes(ext)) return cb(new BadRequestException('Only JPG, PNG, WebP allowed'), false);
+      const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowedMimes.includes(file.mimetype)) return cb(new BadRequestException('Invalid file type'), false);
       cb(null, true);
     },
   }))
@@ -121,6 +125,6 @@ export class SettingsController {
 
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/gzip');
-    res.sendFile(fullPath);
+    res.sendFile(filename, { root: BACKUP_DIR });
   }
 }

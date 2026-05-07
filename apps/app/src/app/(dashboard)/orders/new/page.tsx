@@ -31,8 +31,15 @@ export default function NewOrderPage() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     setError('');
+
+    const validItems = items.filter(i => i.description.trim());
+    if (validItems.length === 0) {
+      setError('Add at least one item with a description before saving.');
+      return;
+    }
+
+    setLoading(true);
     const form = new FormData(e.currentTarget);
 
     try {
@@ -40,7 +47,7 @@ export default function NewOrderPage() {
         customerId: form.get('customerId'),
         notes: form.get('notes') || undefined,
         dueDate: form.get('dueDate') || undefined,
-        items: items.filter(i => i.description).map(i => ({
+        items: validItems.map(i => ({
           ...i,
           productId: i.productId || undefined,
           variantId: i.variantId || undefined,
@@ -63,7 +70,7 @@ export default function NewOrderPage() {
     <div className="max-w-3xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">New Order</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
-        {error && <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
+        {error && <div role="alert" className="rounded-md bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         <Card>
           <CardContent className="pt-6 space-y-4">
@@ -116,10 +123,11 @@ export default function NewOrderPage() {
                       />
                     );
                   })()}
-                  <div className="flex gap-3 items-end">
-                    <div className="flex-1">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-[10rem]">
                       <Input
                         placeholder="Description"
+                        aria-label="Description"
                         value={item.description}
                         onChange={e => updateItem(i, 'description', e.target.value)}
                         required
@@ -129,6 +137,7 @@ export default function NewOrderPage() {
                       <Input
                         type="number"
                         min="1"
+                        aria-label="Quantity"
                         value={item.quantity}
                         onChange={e => updateItem(i, 'quantity', parseInt(e.target.value) || 1)}
                       />
@@ -138,6 +147,7 @@ export default function NewOrderPage() {
                         type="number"
                         step="0.001"
                         min="0"
+                        aria-label="Unit price (OMR)"
                         value={item.unitPrice}
                         onChange={e => updateItem(i, 'unitPrice', parseFloat(e.target.value) || 0)}
                       />
@@ -146,7 +156,7 @@ export default function NewOrderPage() {
                       {(item.quantity * item.unitPrice).toFixed(3)}
                     </div>
                     {items.length > 1 && (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(i)}>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(i)} aria-label={`Remove item ${i + 1}`}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     )}

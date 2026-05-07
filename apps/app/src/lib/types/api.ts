@@ -87,6 +87,8 @@ export interface ApiCustomer {
   _count?: {
     orders: number;
   };
+  /** Present on detail endpoint — slim order list. */
+  orders?: Array<{ id: string; orderNumber: string; total: number; status: OrderStatus; createdAt: string }>;
 }
 
 // ============ INVENTORY ============
@@ -132,13 +134,18 @@ export interface ApiMaterial {
   reorderPoint: number;
   createdAt: string;
   updatedAt: string;
-  /** Active spools included on list endpoint (slim shape). */
+  /** Active spools — slim shape on list endpoint (see ApiMaterialDetail for full shape). */
   spools?: ApiSpoolSlim[];
   /** Count of all spools on list endpoint. */
   _count?: {
     spools: number;
     jobMaterials?: number;
   };
+}
+
+/** Material as returned by the detail endpoint — includes full spool objects. */
+export interface ApiMaterialDetail extends Omit<ApiMaterial, 'spools'> {
+  spools?: ApiSpool[];
 }
 
 // ============ PRODUCTS ============
@@ -151,6 +158,10 @@ export interface ApiComponentMaterial {
   gramsUsed: number;
   colorIndex: number;
   sortOrder: number;
+  /** Computed fields present on detail endpoint. */
+  hasEnoughStock?: boolean;
+  totalStock?: number;
+  gramsNeeded?: number;
 }
 
 export interface ApiProductComponent {
@@ -167,6 +178,10 @@ export interface ApiProductComponent {
   isMultiColor: boolean;
   createdAt: string;
   materials?: ApiComponentMaterial[];
+  /** Computed fields present on detail endpoint. */
+  hasEnoughStock?: boolean;
+  totalStock?: number;
+  gramsNeeded?: number;
 }
 
 export interface ApiProductVariant {
@@ -422,4 +437,75 @@ export interface ApiJobFailureStats {
   failedJobs: number;
   failureRate: number;
   totalWasteGrams: number;
+}
+
+// ============ DESIGN PROJECTS ============
+
+export interface ApiDesignComment {
+  id: string;
+  content: string;
+  authorName: string;
+  isCustomer: boolean;
+  createdAt: string;
+}
+
+export interface ApiDesignRevision {
+  id: string;
+  versionNumber: number;
+  description: string;
+  createdAt: string;
+}
+
+export interface ApiDesignProject {
+  id: string;
+  projectNumber: string;
+  title: string;
+  status: string;
+  brief: string | null;
+  customerId: string;
+  customer?: ApiCustomerRef | null;
+  assignedToId: string | null;
+  assignedTo?: { id: string; name: string } | null;
+  designFeeType: string | null;
+  designFeeAmount: number | null;
+  designFeeHours: number | null;
+  totalDesignFee: number | null;
+  estimatedDelivery: string | null;
+  quote?: { id: string; quoteNumber: string; total: number; status: string } | null;
+  comments?: ApiDesignComment[];
+  revisions?: ApiDesignRevision[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============ ACCOUNTING REPORTS ============
+
+export interface ApiPnlReport {
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
+  expenses: number;
+  netProfit: number;
+  netMargin: number;
+  orderCount: number;
+  jobCount: number;
+  expensesByCategory?: Record<string, number>;
+}
+
+export interface ApiMonthlyTrend {
+  month: string;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+}
+
+export interface ApiProductMargin {
+  productId: string;
+  productName: string;
+  jobCount: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  margin: number;
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   CostBreakdown,
   MultiColorCostBreakdown,
@@ -13,27 +14,10 @@ import {
 
 @Injectable()
 export class CostingService {
-  private settingsCache = new Map<string, { value: string; expires: number }>();
-  private readonly CACHE_TTL = 30000; // 30s cache for performance
-
-  constructor(private prisma: PrismaService) {}
-
-  private async getSetting(key: string, defaultValue: string): Promise<string> {
-    const cached = this.settingsCache.get(key);
-    if (cached && cached.expires > Date.now()) {
-      return cached.value;
-    }
-
-    const setting = await this.prisma.systemSetting.findUnique({ where: { key } });
-    const value = setting?.value ?? defaultValue;
-    
-    this.settingsCache.set(key, { 
-      value, 
-      expires: Date.now() + this.CACHE_TTL 
-    });
-    
-    return value;
-  }
+  constructor(
+    private prisma: PrismaService,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   /**
    * Calculate luminance from hex color (0 = black, 1 = white).
@@ -79,11 +63,11 @@ export class CostingService {
     printer?: { hourlyRate: number; wattage?: number } | null;
     materials: Array<{ gramsUsed: number; costPerGram: number }>;
   }): Promise<CostBreakdown> {
-    const overheadPercent = parseFloat(await this.getSetting('overhead_percent', '15'));
-    const purgeWastePerChange = parseFloat(await this.getSetting('purge_waste_grams', '5'));
-    const electricityRate = parseFloat(await this.getSetting('electricity_rate_kwh', '0.025'));
+    const overheadPercent = parseFloat(await this.settingsService.get('overhead_percent', '15'));
+    const purgeWastePerChange = parseFloat(await this.settingsService.get('purge_waste_grams', '5'));
+    const electricityRate = parseFloat(await this.settingsService.get('electricity_rate_kwh', '0.025'));
     // Machine hourly rate from settings (covers wear, depreciation, maintenance)
-    const settingsHourlyRate = parseFloat(await this.getSetting('machine_hourly_rate', '0.400'));
+    const settingsHourlyRate = parseFloat(await this.settingsService.get('machine_hourly_rate', '0.400'));
 
     // Material cost: sum of all job materials (costPerGram comes from material/spool)
     const materialCost = job.materials.reduce(
@@ -143,7 +127,7 @@ export class CostingService {
       : null;
 
     // Markup is printer-specific; fall back to global setting
-    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
+    const globalMarkup = parseFloat(await this.settingsService.get('markup_multiplier', '2.5'));
     const markupMultiplier = (printer?.markupMultiplier && printer.markupMultiplier > 0)
       ? printer.markupMultiplier
       : globalMarkup;
@@ -175,10 +159,10 @@ export class CostingService {
    * luminance-aware purge waste per transition.
    */
   async estimateMultiColor(input: MultiColorEstimateInput): Promise<MultiColorCostBreakdown> {
-    const overheadPercent = parseFloat(await this.getSetting('overhead_percent', '15'));
-    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
-    const basePurgeGrams = parseFloat(await this.getSetting('purge_waste_grams', '5'));
-    const settingsHourlyRate = parseFloat(await this.getSetting('machine_hourly_rate', '0.400'));
+    const overheadPercent = parseFloat(await this.settingsService.get('overhead_percent', '15'));
+    const globalMarkup = parseFloat(await this.settingsService.get('markup_multiplier', '2.5'));
+    const basePurgeGrams = parseFloat(await this.settingsService.get('purge_waste_grams', '5'));
+    const settingsHourlyRate = parseFloat(await this.settingsService.get('machine_hourly_rate', '0.400'));
 
     // Fetch all materials in one query
     const materialIds = [...new Set(input.colors.map(c => c.materialId))];
@@ -242,7 +226,7 @@ export class CostingService {
     const machineCost = hours * hourlyRate;
 
     // Electricity cost
-    const electricityRate = parseFloat(await this.getSetting('electricity_rate_kwh', '0.025'));
+    const electricityRate = parseFloat(await this.settingsService.get('electricity_rate_kwh', '0.025'));
     const wattage = printer?.wattage || 200;
     const electricityCost = (wattage / 1000) * hours * electricityRate;
 
@@ -310,7 +294,7 @@ export class CostingService {
       ? await this.prisma.printer.findUnique({ where: { id: dto.printerId } })
       : null;
 
-    const globalMarkup = parseFloat(await this.getSetting('markup_multiplier', '2.5'));
+    const globalMarkup = parseFloat(await this.settingsService.get('markup_multiplier', '2.5'));
     const markupMultiplier =
       printer?.markupMultiplier && printer.markupMultiplier > 0
         ? printer.markupMultiplier
@@ -345,7 +329,7 @@ export class CostingService {
         // we use the average transition purge between all distinct pairs of tools.
         let purgeWasteGrams = 0;
         if (plate.toolChanges > 0 && isMultiColor) {
-          const basePurge = parseFloat(await this.getSetting('purge_waste_grams', '5'));
+          const basePurge = parseFloat(await this.settingsService.get('purge_waste_grams', '5'));
           let totalPurgeRate = 0;
           let pairCount = 0;
           for (let i = 0; i < plate.tools.length; i++) {

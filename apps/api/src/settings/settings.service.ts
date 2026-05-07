@@ -6,7 +6,7 @@ import { RedisCacheService } from '../common/redis/redis-cache.service';
 const SETTINGS_TTL_S = 300;
 
 /** Keys whose values must never be returned to clients via getAll(). */
-const REDACTED_KEYS = new Set(['smtp_pass']);
+const REDACTED_KEYS = new Set(['smtp_pass', 'whatsapp_token', 'whatsapp_phone_id']);
 
 @Injectable()
 export class SettingsService {

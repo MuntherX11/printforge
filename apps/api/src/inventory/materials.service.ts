@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
+import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class MaterialsService {
@@ -10,14 +11,22 @@ export class MaterialsService {
     return this.prisma.material.create({ data: dto });
   }
 
-  async findAll() {
-    return this.prisma.material.findMany({
-      include: {
-        spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
-        _count: { select: { spools: true } },
-      },
-      orderBy: { name: 'asc' },
-    });
+  async findAll(pagination: PaginationDto) {
+    const page = pagination.page ?? 1;
+    const limit = pagination.limit ?? 20;
+    const [data, total] = await Promise.all([
+      this.prisma.material.findMany({
+        include: {
+          spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
+          _count: { select: { spools: true } },
+        },
+        orderBy: { name: 'asc' },
+        take: limit,
+        skip: (page - 1) * limit,
+      }),
+      this.prisma.material.count(),
+    ]);
+    return paginatedResponse(data, total, pagination);
   }
 
   async findOne(id: string) {
@@ -41,6 +50,16 @@ export class MaterialsService {
     const results = { created: 0, skipped: 0, errors: [] as string[] };
     const validTypes = ['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'];
 
+    const validRows: Array<{
+      name: string;
+      type: MaterialType;
+      color: string | null;
+      brand: string | null;
+      costPerGram: number;
+      density: number;
+      reorderPoint: number;
+    }> = [];
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2; // +2 for header row + 0-index
@@ -55,24 +74,32 @@ export class MaterialsService {
         results.skipped++;
         continue;
       }
+      validRows.push({
+        name: row.name,
+        type: type as MaterialType,
+        color: row.color || null,
+        brand: row.brand || null,
+        costPerGram: Number(row.costPerGram),
+        density: row.density ? Number(row.density) : 1.24,
+        reorderPoint: row.reorderPoint ? Number(row.reorderPoint) : 500,
+      });
+    }
+
+    if (validRows.length > 0) {
       try {
-        await this.prisma.material.create({
-          data: {
-            name: row.name,
-            type: type as MaterialType,
-            color: row.color || null,
-            brand: row.brand || null,
-            costPerGram: Number(row.costPerGram),
-            density: row.density ? Number(row.density) : 1.24,
-            reorderPoint: row.reorderPoint ? Number(row.reorderPoint) : 500,
-          },
+        const inserted = await this.prisma.material.createMany({
+          data: validRows,
+          skipDuplicates: true,
         });
-        results.created++;
+        results.created = inserted.count;
+        // Rows silently skipped by skipDuplicates count as skipped
+        results.skipped += validRows.length - inserted.count;
       } catch (err: unknown) {
-        results.errors.push(`Row ${rowNum}: ${(err as Error).message}`);
-        results.skipped++;
+        results.errors.push(`Bulk insert failed: ${(err as Error).message}`);
+        results.skipped += validRows.length;
       }
     }
+
     return results;
   }
 

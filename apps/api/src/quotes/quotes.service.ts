@@ -431,33 +431,54 @@ export class QuotesService {
       });
 
       if (orderWithItems) {
+        // Batch-load all products referenced by order items in one query
+        const productIds = orderWithItems.items
+          .map(i => i.productId)
+          .filter((id): id is string => Boolean(id));
+
+        const products = productIds.length > 0
+          ? await this.prisma.product.findMany({
+              where: { id: { in: productIds } },
+              select: { id: true, name: true, colorChanges: true },
+            })
+          : [];
+
+        const productMap = new Map(products.map(p => [p.id, p]));
+
+        // Collect all job records, then insert in a single createMany call
+        const jobsToCreate: Array<{
+          name: string;
+          orderId: string;
+          orderItemId: string;
+          colorChanges: number;
+          status: string;
+        }> = [];
+
         for (const item of orderWithItems.items) {
-          // Load product info for the job name
           let jobName = item.description;
           let colorChanges = 0;
 
           if (item.productId) {
-            const product = await this.prisma.product.findUnique({
-              where: { id: item.productId },
-            });
+            const product = productMap.get(item.productId);
             if (product) {
               jobName = product.name;
               colorChanges = product.colorChanges;
             }
           }
 
-          // Create one job per quantity unit
           for (let q = 0; q < item.quantity; q++) {
-            await this.prisma.productionJob.create({
-              data: {
-                name: item.quantity > 1 ? `${jobName} (${q + 1}/${item.quantity})` : jobName,
-                orderId: order.id,
-                orderItemId: item.id,
-                colorChanges,
-                status: 'QUEUED',
-              },
+            jobsToCreate.push({
+              name: item.quantity > 1 ? `${jobName} (${q + 1}/${item.quantity})` : jobName,
+              orderId: order.id,
+              orderItemId: item.id,
+              colorChanges,
+              status: 'QUEUED',
             });
           }
+        }
+
+        if (jobsToCreate.length > 0) {
+          await this.prisma.productionJob.createMany({ data: jobsToCreate });
         }
       }
     }

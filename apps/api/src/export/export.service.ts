@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { toCSV } from '../common/utils/csv-export';
 
@@ -101,6 +101,9 @@ export class ExportService {
   }
 
   async exportOrders(from?: string, to?: string) {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && !dateRegex.test(from)) throw new BadRequestException('Invalid from date format. Use YYYY-MM-DD');
+    if (to && !dateRegex.test(to)) throw new BadRequestException('Invalid to date format. Use YYYY-MM-DD');
     const where: any = {};
     if (from || to) {
       where.createdAt = {};
@@ -146,6 +149,9 @@ export class ExportService {
   }
 
   async exportJobs(from?: string, to?: string) {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && !dateRegex.test(from)) throw new BadRequestException('Invalid from date format. Use YYYY-MM-DD');
+    if (to && !dateRegex.test(to)) throw new BadRequestException('Invalid to date format. Use YYYY-MM-DD');
     const where: any = {};
     if (from || to) {
       where.createdAt = {};

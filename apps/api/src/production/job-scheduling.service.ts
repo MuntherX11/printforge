@@ -41,7 +41,8 @@ export class JobSchedulingService {
       loadMap.set(p.id, (p._count as any)?.productionJobs || 0);
     }
 
-    const assigned: any[] = [];
+    // Determine assignments in memory first
+    const assignments: Array<{ jobId: string; printerId: string }> = [];
 
     for (const job of unassigned) {
       let targetPrinterId: string | null = null;
@@ -63,17 +64,26 @@ export class JobSchedulingService {
 
       if (!targetPrinterId) continue;
 
-      const updated = await this.prisma.productionJob.update({
-        where: { id: job.id },
-        data: { printerId: targetPrinterId },
-        include: { printer: { select: { id: true, name: true } } },
-      });
-
       loadMap.set(targetPrinterId, (loadMap.get(targetPrinterId) || 0) + 1);
-      assigned.push(updated);
+      assignments.push({ jobId: job.id, printerId: targetPrinterId });
     }
 
-    return { assigned: assigned.length, jobs: assigned };
+    if (assignments.length === 0) {
+      return { assigned: 0, jobs: [] };
+    }
+
+    // Flush all updates in a single transaction instead of N serial round-trips
+    const updatedJobs = await this.prisma.$transaction(
+      assignments.map(({ jobId, printerId }) =>
+        this.prisma.productionJob.update({
+          where: { id: jobId },
+          data: { printerId },
+          include: { printer: { select: { id: true, name: true } } },
+        }),
+      ),
+    );
+
+    return { assigned: updatedJobs.length, jobs: updatedJobs };
   }
 
   async getQueue() {

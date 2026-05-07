@@ -16,6 +16,7 @@ import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { Dialog } from '@/components/ui/dialog';
+import { notFound } from 'next/navigation';
 import { Pause, Play, XCircle, RefreshCw, Thermometer, DollarSign, Settings, Trash2, Wrench, Clock, Camera } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
 
@@ -114,7 +115,7 @@ export default function PrinterDetailPage() {
   }
 
   if (loading) return <Loading />;
-  if (!printer) return <div className="text-center py-12 text-gray-500">Printer not found</div>;
+  if (!printer) return notFound();
 
   const isMoonraker = printer.connectionType === 'MOONRAKER' && printer.moonrakerUrl;
   const hasLiveStatus = ['MOONRAKER', 'CREALITY_WS'].includes(printer.connectionType) && printer.moonrakerUrl;

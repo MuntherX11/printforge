@@ -50,7 +50,7 @@ export default function OrdersPage() {
             key={s}
             onClick={() => { setFilter(s); setPage(1); }}
             aria-pressed={filter === s}
-            className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors duration-150 ${
+            className={`px-3 py-2 min-h-[36px] text-xs rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 ${
               filter === s ? 'bg-brand-600 text-white border-brand-600' : 'bg-white dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 text-gray-600 border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
             }`}
           >

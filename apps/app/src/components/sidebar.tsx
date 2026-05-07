@@ -19,12 +19,13 @@ import {
   Zap,
   Palette,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 
 interface NavItem {
   name: string;
   href: string;
-  icon: any;
+  icon: LucideIcon;
   roles?: string[]; // if undefined, visible to all staff
 }
 
@@ -64,6 +65,7 @@ export function Sidebar() {
         />
       )}
       <aside
+        aria-label="Main navigation"
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r bg-white dark:bg-gray-900 dark:border-gray-700 transition-transform duration-200 ease-out',
           'md:static md:translate-x-0',

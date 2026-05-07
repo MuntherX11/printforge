@@ -85,7 +85,7 @@ export class AuthController {
       maxAge: SESSION_MAX_AGE_MS,
     });
 
-    return result;
+    return { user: result.user };
   }
 
   @Post('logout')
@@ -140,7 +140,7 @@ export class AuthController {
       maxAge: SESSION_MAX_AGE_MS,
     });
 
-    return result;
+    return { user: result.user };
   }
 
   @Get('customer/me')

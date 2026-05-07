@@ -129,6 +129,7 @@ model Spool {
 
   @@index([materialId])
   @@index([isActive])
+  @@index([locationId])
 }
 
 // ============ PRODUCTS (BOM) ============
@@ -333,6 +334,7 @@ model ProductionJob {
 
   @@index([status])
   @@index([orderId])
+  @@index([orderItemId])
   @@index([reprintOfId])
   @@index([printerId])
   @@index([printerId, status])
@@ -360,6 +362,9 @@ model JobMaterial {
   costPerGram     Float
   colorIndex      Int           @default(0)
   createdAt       DateTime      @default(now())
+
+  @@index([jobId])
+  @@index([materialId])
 }
 
 // ============ ORDERS ============
@@ -480,6 +485,7 @@ model OrderItem {
   productionJobs  ProductionJob[]
 
   @@index([orderId])
+  @@index([productId])
 }
 
 model Invoice {
@@ -500,7 +506,7 @@ model Invoice {
 
   attachments     Attachment[]
 
-  @@index([paidAt])
+  @@index([status, paidAt])
 }
 
 enum InvoiceStatus {

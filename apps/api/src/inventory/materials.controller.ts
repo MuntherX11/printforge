@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Res, UseGuards, UseInterceptors, UploadedFile, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Res, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException, NotFoundException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { MaterialsService } from './materials.service';
@@ -7,6 +7,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { CreateMaterialDto, UpdateMaterialDto } from '@printforge/types';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import ExcelJS from 'exceljs';
 
 @Controller('materials')
@@ -22,8 +23,8 @@ export class MaterialsController {
   }
 
   @Get()
-  findAll() {
-    return this.materialsService.findAll();
+  findAll(@Query() pagination: PaginationDto) {
+    return this.materialsService.findAll(pagination);
   }
 
   @Post('bulk-upload')

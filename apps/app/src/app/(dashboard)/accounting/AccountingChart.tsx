@@ -3,18 +3,20 @@
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
+import type { TooltipProps } from 'recharts';
 import { useFormatCurrency } from '@/lib/locale-context';
+import type { ApiMonthlyTrend } from '@/lib/types/api';
 
-function CurrencyTooltip({ active, payload, label }: any) {
+function CurrencyTooltip({ active, payload, label }: TooltipProps<number, string>) {
   const formatCurrency = useFormatCurrency();
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 text-sm">
       <p className="font-semibold mb-2">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.name} className="flex justify-between gap-6">
           <span style={{ color: p.color }}>{p.name}</span>
-          <span className="font-medium">{formatCurrency(p.value)}</span>
+          <span className="font-medium">{formatCurrency(p.value ?? 0)}</span>
         </div>
       ))}
     </div>
@@ -22,7 +24,7 @@ function CurrencyTooltip({ active, payload, label }: any) {
 }
 
 interface AccountingChartProps {
-  trend: any[];
+  trend: ApiMonthlyTrend[];
 }
 
 export default function AccountingChart({ trend }: AccountingChartProps) {

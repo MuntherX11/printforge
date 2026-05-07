@@ -166,58 +166,89 @@ export class JobPlanningService {
   }>) {
     const { order, plan } = await this.previewPlan(orderId);
     const overrideMap = new Map((planOverrides || []).map(o => [o.componentId, o]));
-    const createdJobs: any[] = [];
 
+    // Pre-fetch all materials referenced in the plan so we can resolve costPerGram
+    // before entering the transaction (avoids nested tx queries for look-ups).
+    const allMaterialIds = new Set<string>();
     for (const item of plan) {
-      const override = overrideMap.get(item.componentId);
-      const toProduce = override?.toProduce ?? item.toProduce;
-      if (toProduce <= 0) continue;
-
-      const printerId = override?.printerId || item.printerId;
-
-      const job = await this.prisma.productionJob.create({
-        data: {
-          name: `${item.productName} — ${item.componentDescription} (×${toProduce})`,
-          orderId,
-          orderItemId: item.orderItemId,
-          productId: item.productId,
-          componentId: item.componentId,
-          quantityToProduce: toProduce,
-          printerId,
-          colorChanges: item.isMultiColor
-            ? (await this.prisma.product.findUnique({ where: { id: item.productId } }))?.colorChanges || 0
-            : 0,
-        },
-        include: { printer: true },
-      });
-
       for (const sub of item.subMaterials) {
-        const material = await this.prisma.material.findUnique({ where: { id: sub.materialId } });
-        if (!material) continue;
+        allMaterialIds.add(sub.materialId);
+      }
+    }
+    const materials = await this.prisma.material.findMany({
+      where: { id: { in: [...allMaterialIds] } },
+    });
+    const materialMap = new Map(materials.map(m => [m.id, m]));
 
-        const spoolId = override?.spoolId || sub.suggestedSpool?.id || null;
+    // Pre-fetch colorChanges for multi-color products outside the transaction.
+    const multiColorProductIds = new Set<string>();
+    for (const item of plan) {
+      if (item.isMultiColor) multiColorProductIds.add(item.productId);
+    }
+    const multiColorProducts = multiColorProductIds.size > 0
+      ? await this.prisma.product.findMany({
+          where: { id: { in: [...multiColorProductIds] } },
+          select: { id: true, colorChanges: true },
+        })
+      : [];
+    const colorChangesMap = new Map(multiColorProducts.map(p => [p.id, p.colorChanges || 0]));
 
-        await this.prisma.jobMaterial.create({
+    const createdJobs = await this.prisma.$transaction(async (tx) => {
+      const jobs: any[] = [];
+
+      for (const item of plan) {
+        const override = overrideMap.get(item.componentId);
+        const toProduce = override?.toProduce ?? item.toProduce;
+        if (toProduce <= 0) continue;
+
+        const printerId = override?.printerId || item.printerId;
+
+        const job = await tx.productionJob.create({
           data: {
-            jobId: job.id,
-            materialId: sub.materialId,
-            spoolId,
-            gramsUsed: sub.gramsPerUnit * toProduce,
-            costPerGram: material.costPerGram,
-            colorIndex: sub.colorIndex,
+            name: `${item.productName} — ${item.componentDescription} (×${toProduce})`,
+            orderId,
+            orderItemId: item.orderItemId,
+            productId: item.productId,
+            componentId: item.componentId,
+            quantityToProduce: toProduce,
+            printerId,
+            colorChanges: item.isMultiColor
+              ? (colorChangesMap.get(item.productId) ?? 0)
+              : 0,
           },
+          include: { printer: true },
+        });
+
+        for (const sub of item.subMaterials) {
+          const material = materialMap.get(sub.materialId);
+          if (!material) continue;
+
+          const spoolId = override?.spoolId || sub.suggestedSpool?.id || null;
+
+          await tx.jobMaterial.create({
+            data: {
+              jobId: job.id,
+              materialId: sub.materialId,
+              spoolId,
+              gramsUsed: sub.gramsPerUnit * toProduce,
+              costPerGram: material.costPerGram,
+              colorIndex: sub.colorIndex,
+            },
+          });
+        }
+
+        jobs.push(job);
+      }
+
+      if (order.status === 'CONFIRMED') {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: 'IN_PRODUCTION' },
         });
       }
 
-      createdJobs.push(job);
-    }
-
-    if (order.status === 'CONFIRMED') {
-      await this.prisma.order.update({
-        where: { id: orderId },
-        data: { status: 'IN_PRODUCTION' },
-      });
-    }
+      return jobs;
+    });
 
     return { jobsCreated: createdJobs.length, jobs: createdJobs };
   }

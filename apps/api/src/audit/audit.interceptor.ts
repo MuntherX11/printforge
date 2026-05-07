@@ -30,9 +30,26 @@ export class AuditInterceptor implements NestInterceptor {
       DELETE: 'deleted',
     };
 
+    // Sub-resource terminal segment overrides (e.g. POST /jobs/:id/complete → completed).
+    const terminalActionMap: Record<string, string> = {
+      complete: 'completed',
+      fail: 'failed',
+      cancel: 'cancelled',
+      approve: 'approved',
+      reject: 'rejected',
+      convert: 'converted',
+      'send-email': 'sent',
+      reprint: 'reprinted',
+    };
+
+    const cleanUrl = request.url.split('?')[0];
+    const lastSegment = cleanUrl.split('/').filter(Boolean).pop() ?? '';
+    const terminalAction = terminalActionMap[lastSegment];
+
     return next.handle().pipe(
       tap((responseData) => {
-        const action = `${entityType}.${actionMap[method]}`;
+        const baseAction = terminalAction ?? actionMap[method];
+        const action = `${entityType}.${baseAction}`;
         const resultId = responseData?.data?.id || responseData?.id || entityId;
 
         this.auditService.log({

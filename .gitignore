@@ -19,3 +19,8 @@ package_zip.py
 CHANGELOG.md
 HANDOFF.md
 graphify-out/
+
+# Editor temp files
+*.swp
+*.swo
+*~

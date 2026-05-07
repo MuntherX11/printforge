@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import type { ApiMaterialDetail, ApiLocation, ApiSpool } from '@/lib/types/api';
+import type { ScannedFields } from '@/components/spool-label-scanner';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
@@ -27,17 +29,17 @@ export default function MaterialDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [material, setMaterial] = useState<any>(null);
-  const [locations, setLocations] = useState<any[]>([]);
+  const [material, setMaterial] = useState<ApiMaterialDetail | null>(null);
+  const [locations, setLocations] = useState<ApiLocation[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAddSpool, setShowAddSpool] = useState(false);
   const [showEditMaterial, setShowEditMaterial] = useState(false);
-  const [editingSpool, setEditingSpool] = useState<any>(null);
+  const [editingSpool, setEditingSpool] = useState<ApiSpool | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedSpoolIds, setSelectedSpoolIds] = useState<Set<string>>(new Set());
   const [printingLabels, setPrintingLabels] = useState(false);
-  const [scannedFields, setScannedFields] = useState<any>(null);
+  const [scannedFields, setScannedFields] = useState<ScannedFields | null>(null);
   const [showDeleteMaterial, setShowDeleteMaterial] = useState(false);
   const [deletingMaterial, setDeletingMaterial] = useState(false);
   const [showDeleteSpool, setShowDeleteSpool] = useState<string | null>(null);
@@ -47,12 +49,12 @@ export default function MaterialDetailPage() {
 
   const load = () => {
     Promise.all([
-      api.get(`/materials/${id}`),
-      api.get<any[]>('/locations'),
+      api.get<ApiMaterialDetail>(`/materials/${id}`),
+      api.get<ApiLocation[]>('/locations'),
     ]).then(([m, locs]) => {
       setMaterial(m);
       setLocations(locs);
-    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
+    }).catch((err: unknown) => toast('error', (err as Error)?.message || 'Failed to load')).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, [id]);
 
@@ -72,8 +74,8 @@ export default function MaterialDetailPage() {
       });
       setShowAddSpool(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -95,8 +97,8 @@ export default function MaterialDetailPage() {
       });
       setShowEditMaterial(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -104,6 +106,7 @@ export default function MaterialDetailPage() {
 
   async function handleEditSpool(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!editingSpool) return;
     setSaving(true);
     const form = new FormData(e.currentTarget);
     try {
@@ -114,8 +117,8 @@ export default function MaterialDetailPage() {
       });
       setEditingSpool(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -127,8 +130,8 @@ export default function MaterialDetailPage() {
       await api.patch(`/spools/${spoolId}`, { isActive: false });
       setShowDeactivateSpool(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setDeactivatingSpool(null);
     }
@@ -140,8 +143,8 @@ export default function MaterialDetailPage() {
       await api.delete(`/spools/${spoolId}`);
       setShowDeleteSpool(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setDeletingSpool(null);
     }
@@ -152,8 +155,8 @@ export default function MaterialDetailPage() {
     try {
       await api.delete(`/materials/${id}`);
       router.push('/inventory');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
       setDeletingMaterial(false);
     }
   }
@@ -168,7 +171,7 @@ export default function MaterialDetailPage() {
   }
 
   function toggleAllSpools() {
-    const allIds = (material?.spools || []).map((s: any) => s.id);
+    const allIds = (material?.spools || []).map((s) => s.id);
     if (selectedSpoolIds.size === allIds.length) {
       setSelectedSpoolIds(new Set());
     } else {
@@ -190,8 +193,8 @@ export default function MaterialDetailPage() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setPrintingLabels(false);
     }
@@ -200,7 +203,7 @@ export default function MaterialDetailPage() {
   if (loading) return <Loading />;
   if (!material) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Material not found</div>;
 
-  const totalStock = (material.spools || []).reduce((sum: number, s: any) => sum + s.currentWeight, 0);
+  const totalStock = (material.spools || []).reduce((sum, s) => sum + s.currentWeight, 0);
 
   return (
     <div className="space-y-6">
@@ -275,7 +278,7 @@ export default function MaterialDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(material.spools || []).map((s: any) => (
+              {(material.spools || []).map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>
                     <input
@@ -390,7 +393,7 @@ export default function MaterialDetailPage() {
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage Location</label>
               <select name="locationId" className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
                 <option value="">No location</option>
-                {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
           )}
@@ -434,7 +437,7 @@ export default function MaterialDetailPage() {
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage Location</label>
               <select name="locationId" defaultValue={editingSpool.locationId || ''} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
                 <option value="">No location</option>
-                {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
             <div className="space-y-1">

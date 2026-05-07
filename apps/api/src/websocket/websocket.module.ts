@@ -4,11 +4,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway';
 import { BridgeModule } from '../moonraker-bridge/bridge.module';
 import { MoonrakerScheduler } from '../moonraker-bridge/moonraker.scheduler';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     BridgeModule,
-    // EventsGateway.afterInit() calls jwtService.verify() for WS auth — must match AuthModule config
+    AuthModule,
+    // EventsGateway.afterInit() calls jwtService.verify() for WS auth — must match AuthModule config.
+    // AuthModule already exports JwtModule, so we no longer register it here to avoid duplicate config.
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

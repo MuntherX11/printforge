@@ -99,6 +99,11 @@ function ActivePrintCard({ printerId, status, printerName }: { printerId: string
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
               <div
+                role="progressbar"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Print progress"
                 className={`h-2.5 rounded-full transition-all ${isPaused ? 'bg-amber-400' : 'bg-blue-600'}`}
                 style={{ width: `${progress}%` }}
               />
@@ -140,7 +145,14 @@ export default function DashboardPage() {
   );
 
   if (loading) return <Loading text="Loading dashboard..." />;
-  if (!kpis) return <div className="text-center py-12 text-gray-500">Failed to load dashboard</div>;
+  if (!kpis) return (
+    <div className="text-center py-12 space-y-3">
+      <p className="text-sm text-gray-500 dark:text-gray-400">Failed to load dashboard</p>
+      <button onClick={() => window.location.reload()} className="text-sm text-brand-600 hover:underline">
+        Try again
+      </button>
+    </div>
+  );
 
   const stats = [
     { name: 'Active Jobs', value: String(kpis.activeJobs), color: 'text-blue-600 dark:text-blue-400' },
@@ -191,7 +203,7 @@ export default function DashboardPage() {
         {stats.map((stat) => (
           <div key={stat.name} className="px-5 py-4 flex flex-col gap-0.5">
             <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{stat.name}</dt>
-            <dd className={`text-xl font-semibold tabular-nums ${stat.color}`}>{stat.value}</dd>
+            <dd className={`text-xl font-semibold tabular-nums min-w-0 truncate ${stat.color}`}>{stat.value}</dd>
           </div>
         ))}
       </dl>

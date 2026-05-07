@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { MoonrakerService, MoonrakerSnapshot } from '../moonraker-bridge/moonraker.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { TokenBlocklistService } from '../auth/token-blocklist.service';
 
 @WebSocketGateway({
   cors: {
@@ -29,12 +30,13 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private moonraker: MoonrakerService,
     private jwtService: JwtService,
     private prisma: PrismaService,
+    private tokenBlocklistService: TokenBlocklistService,
   ) {}
 
   afterInit(server: Server) {
     this.logger.log('WebSocket gateway initialized');
 
-    server.use((socket, next) => {
+    server.use(async (socket, next) => {
       try {
         const cookieHeader = socket.handshake.headers.cookie || '';
         const match = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/);
@@ -42,7 +44,13 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
           return next(new Error('Unauthorized'));
         }
         const token = decodeURIComponent(match[1]);
-        this.jwtService.verify(token);
+        const payload = this.jwtService.verify(token) as { jti?: string };
+        if (payload.jti) {
+          const blocked = await this.tokenBlocklistService.isBlocked(payload.jti);
+          if (blocked) {
+            return next(new Error('Token has been revoked'));
+          }
+        }
         next();
       } catch {
         next(new Error('Unauthorized'));

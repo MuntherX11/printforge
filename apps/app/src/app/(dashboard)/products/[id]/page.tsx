@@ -12,7 +12,9 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import type { ApiProduct, ApiMaterial, ApiPrinter } from '@/lib/types/api';
 import { useFormatCurrency } from '@/lib/locale-context';
+import { notFound } from 'next/navigation';
 import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { useToast } from '@/components/ui/toast';
@@ -22,9 +24,9 @@ export default function ProductDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const [product, setProduct] = useState<any>(null);
-  const [materials, setMaterials] = useState<any[]>([]);
-  const [printers, setPrinters] = useState<any[]>([]);
+  const [product, setProduct] = useState<ApiProduct | null>(null);
+  const [materials, setMaterials] = useState<ApiMaterial[]>([]);
+  const [printers, setPrinters] = useState<ApiPrinter[]>([]);
   const [images, setImages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddComponent, setShowAddComponent] = useState(false);
@@ -61,17 +63,17 @@ export default function ProductDetailPage() {
 
   const load = () => {
     Promise.all([
-      api.get(`/products/${id}`),
-      api.get<any[]>('/materials'),
-      api.get<any[]>('/printers'),
-      api.get<any[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => []),
+      api.get<ApiProduct>(`/products/${id}`),
+      api.get<ApiMaterial[]>('/materials'),
+      api.get<ApiPrinter[]>('/printers'),
+      api.get<{ id: string; fileName: string }[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => [] as { id: string; fileName: string }[]),
     ]).then(([p, m, pr, imgs]) => {
       setProduct(p);
       setMaterials(m);
       setPrinters(pr);
       setImages(imgs);
-    }).catch((err: any) => {
-      toast('error', err?.message || 'Failed to load product details');
+    }).catch((err: unknown) => {
+      toast('error', (err as Error)?.message || 'Failed to load product details');
     }).finally(() => setLoading(false));
   };
 
@@ -91,8 +93,8 @@ export default function ProductDetailPage() {
       });
       setShowAddComponent(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setAdding(false);
     }
@@ -104,8 +106,8 @@ export default function ProductDetailPage() {
       await api.delete(`/products/components/${componentId}`);
       setShowDeleteComponent(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setDeletingComponent(null);
     }
@@ -117,8 +119,8 @@ export default function ProductDetailPage() {
     try {
       const result = await api.post(`/products/${id}/calculate`);
       setCostResult(result);
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setCalculating(false);
     }
@@ -138,8 +140,8 @@ export default function ProductDetailPage() {
       });
       setShowEditProduct(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     }
   }
 
@@ -162,11 +164,11 @@ export default function ProductDetailPage() {
         throw new Error(body?.error || body?.message || `Upload failed (${res.status})`);
       }
       load();
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Reload anyway — the backend may have processed before the response failed
       load();
-      if (err.message !== 'Failed to fetch') {
-        toast('error', err.message);
+      if ((err as Error).message !== 'Failed to fetch') {
+        toast('error', (err as Error).message);
       }
     } finally {
       setUploadingGcode(false);
@@ -194,8 +196,8 @@ export default function ProductDetailPage() {
       const data = await res.json();
       setThreeMfAnalysis(data.analysis);
       setShowThreeMfWizard(true);
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to read 3MF file');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to read 3MF file');
       setThreeMfFile(null);
     } finally {
       setAnalyzingThreeMf(false);
@@ -219,8 +221,8 @@ export default function ProductDetailPage() {
       });
       if (!res.ok) throw new Error('Upload failed');
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setUploadingImages(false);
       e.target.value = '';
@@ -234,8 +236,8 @@ export default function ProductDetailPage() {
       await api.patch(`/products/${id}/components/${componentId}`, { description: editComponentName.trim() });
       setEditingComponentId(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSavingComponent(false);
     }
@@ -247,8 +249,8 @@ export default function ProductDetailPage() {
       await api.patch(`/products/${id}/components/${componentId}`, { materialId });
       setEditingMaterialId(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSavingComponent(false);
     }
@@ -260,8 +262,8 @@ export default function ProductDetailPage() {
       await api.delete(`/products/${id}/images/${attachmentId}`);
       setShowDeleteImage(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setDeletingImage(null);
     }
@@ -272,8 +274,8 @@ export default function ProductDetailPage() {
     try {
       await api.delete(`/products/${id}`);
       router.push('/products');
-    } catch (err: any) {
-      toast('error', err.message || 'Delete failed');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Delete failed');
       setDeletingProduct(false);
     }
   }
@@ -285,8 +287,8 @@ export default function ProductDetailPage() {
       const result = await api.post(`/products/${id}/variants/${variantId}/calculate`);
       setVariantCostResult({ id: variantId, result });
       load(); // refresh so new basePrice shows in the table
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setCalculatingVariant(null);
     }
@@ -307,8 +309,8 @@ export default function ProductDetailPage() {
       });
       setShowAddVariant(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSavingVariant(false);
     }
@@ -330,8 +332,8 @@ export default function ProductDetailPage() {
       });
       setShowEditVariant(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSavingVariant(false);
     }
@@ -355,8 +357,8 @@ export default function ProductDetailPage() {
       }
       toast('success', 'Grams, minutes and price updated from gcode');
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setUploadingVariantGcode(null);
       e.target.value = '';
@@ -370,15 +372,15 @@ export default function ProductDetailPage() {
       await api.delete(`/products/${id}/variants/${showDeleteVariant}`);
       setShowDeleteVariant(null);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setDeletingVariant(false);
     }
   }
 
   if (loading) return <Loading />;
-  if (!product) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Product not found</div>;
+  if (!product) return notFound();
 
   const materialOptions = materials.map(m => ({ value: m.id, label: `${m.name} (${m.type}${m.color ? ' - ' + m.color : ''})` }));
 
@@ -423,11 +425,11 @@ export default function ProductDetailPage() {
                 try {
                   await api.patch(`/products/${id}`, { defaultPrinterId: val });
                   load();
-                } catch (err: any) { toast('error', err.message); }
+                } catch (err: unknown) { toast('error', (err as Error).message); }
               }}
             >
               <option value="">None</option>
-              {printers.map((p: any) => (
+              {printers.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
@@ -435,9 +437,9 @@ export default function ProductDetailPage() {
         </Card>
       </div>
 
-      {product.components?.length > 0 && (() => {
-        const allReady = product.components.every((c: any) => c.hasEnoughStock);
-        const shortages = product.components.filter((c: any) => !c.hasEnoughStock);
+      {(product.components?.length ?? 0) > 0 && (() => {
+        const allReady = product.components!.every((c) => c.hasEnoughStock);
+        const shortages = product.components!.filter((c) => !c.hasEnoughStock);
         return (
           <Card className={allReady ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20' : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'}>
             <CardContent className="p-4 flex items-center gap-3">
@@ -633,7 +635,7 @@ export default function ProductDetailPage() {
                           try {
                             await api.patch(`/products/${id}/components/${c.id}`, { stockOnHand: val });
                             load();
-                          } catch (err: any) { toast('error', err.message); }
+                          } catch (err: unknown) { toast('error', (err as Error).message); }
                         }}
                         onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
@@ -899,7 +901,7 @@ export default function ProductDetailPage() {
           <Select
             name="defaultPrinterId"
             label="Default Printer"
-            options={[{ value: '', label: 'None' }, ...printers.map((p: any) => ({ value: p.id, label: p.name }))]}
+            options={[{ value: '', label: 'None' }, ...printers.map((p) => ({ value: p.id, label: p.name }))]}
             defaultValue={product.defaultPrinterId || ''}
           />
           <Select name="isActive" label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]} defaultValue={product.isActive ? 'true' : 'false'} />

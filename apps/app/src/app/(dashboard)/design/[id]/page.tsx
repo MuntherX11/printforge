@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loading } from '@/components/ui/loading';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
+import type { ApiDesignProject, ApiUser } from '@/lib/types/api';
 import { formatDate } from '@/lib/utils';
 import { Send, UserPlus, Upload, FileText } from 'lucide-react';
 
@@ -22,8 +23,8 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' 
 
 export default function DesignDetailPage() {
   const { id } = useParams();
-  const [project, setProject] = useState<any>(null);
-  const [users, setUsers] = useState<any[]>([]);
+  const [project, setProject] = useState<ApiDesignProject | null>(null);
+  const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -32,12 +33,12 @@ export default function DesignDetailPage() {
 
   function loadProject() {
     Promise.all([
-      api.get<any>(`/design-projects/${id}`),
-      api.get<any>('/users').then(r => r.data || r).catch(() => []),
+      api.get<ApiDesignProject>(`/design-projects/${id}`),
+      api.get<{ data: ApiUser[] } | ApiUser[]>('/users').then(r => Array.isArray(r) ? r : (r as { data: ApiUser[] }).data ?? []).catch(() => [] as ApiUser[]),
     ]).then(([proj, userList]) => {
       setProject(proj);
-      setUsers(Array.isArray(userList) ? userList : []);
-    }).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
+      setUsers(userList);
+    }).catch((err: unknown) => toast('error', (err as Error)?.message || 'Failed to load')).finally(() => setLoading(false));
   }
 
   useEffect(() => { loadProject(); }, [id]);
@@ -54,8 +55,8 @@ export default function DesignDetailPage() {
       await api.post(`/design-projects/${id}/comments`, { content: message });
       setMessage('');
       loadProject();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to send message');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to send message');
     } finally {
       setSending(false);
     }
@@ -66,8 +67,8 @@ export default function DesignDetailPage() {
       await api.post(`/design-projects/${id}/assign`, { userId });
       toast('success', 'Designer assigned');
       loadProject();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to assign');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to assign');
     }
   }
 
@@ -76,8 +77,8 @@ export default function DesignDetailPage() {
       await api.patch(`/design-projects/${id}`, { status });
       toast('success', `Status updated to ${status}`);
       loadProject();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to update status');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to update status');
     }
   }
 
@@ -86,8 +87,8 @@ export default function DesignDetailPage() {
       await api.post(`/design-projects/${id}/revisions`, { description: 'New revision' });
       toast('success', 'Revision added — project moved to REVIEW');
       loadProject();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to add revision');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to add revision');
     }
   }
 
@@ -103,8 +104,8 @@ export default function DesignDetailPage() {
       });
       toast('success', 'Project details updated');
       loadProject();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to update');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to update');
     }
   }
 
@@ -138,7 +139,7 @@ export default function DesignDetailPage() {
                     <p className="text-gray-700">{project.brief}</p>
                   </div>
                 )}
-                {project.comments?.map((c: any) => (
+                {project.comments?.map((c) => (
                   <div key={c.id} className={`flex ${c.isCustomer ? 'justify-start' : 'justify-end'}`}>
                     <div className={`max-w-[75%] rounded-lg p-3 text-sm ${
                       c.isCustomer ? 'bg-white border' : 'bg-brand-50 border border-brand-200'
@@ -169,14 +170,14 @@ export default function DesignDetailPage() {
           </Card>
 
           {/* Revisions */}
-          {project.revisions?.length > 0 && (
+          {(project.revisions?.length ?? 0) > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>Revisions</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {project.revisions.map((r: any) => (
+                  {project.revisions!.map((r) => (
                     <div key={r.id} className="flex justify-between items-center border-b pb-2 last:border-0">
                       <div>
                         <span className="font-medium text-sm">v{r.versionNumber}</span>
@@ -206,8 +207,8 @@ export default function DesignDetailPage() {
                 onChange={e => { if (e.target.value) handleAssign(e.target.value); }}
                 options={[
                   { value: '', label: 'Select operator...' },
-                  ...users.filter((u: any) => u.role === 'ADMIN' || u.role === 'OPERATOR')
-                    .map((u: any) => ({ value: u.id, label: u.name })),
+                  ...users.filter(u => u.role === 'ADMIN' || u.role === 'OPERATOR')
+                    .map(u => ({ value: u.id, label: u.name })),
                 ]}
               />
             </CardContent>
@@ -284,7 +285,7 @@ export default function DesignDetailPage() {
                   type="date"
                   defaultValue={project.estimatedDelivery?.split('T')[0] || ''}
                 />
-                {project.totalDesignFee > 0 && (
+                {(project.totalDesignFee ?? 0) > 0 && (
                   <div className="text-sm font-medium text-brand-600">
                     Total Fee: {project.totalDesignFee?.toFixed(3)} OMR
                   </div>

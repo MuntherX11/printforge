@@ -20,7 +20,7 @@ export function WsNotifications() {
     if (id === lastIdRef.current) return;
     lastIdRef.current = id;
 
-    const type = lastNotification.type === 'info' ? 'success' : lastNotification.type as any;
+    const type = lastNotification.type === 'info' ? 'success' : lastNotification.type as 'success' | 'error' | 'warning';
     toast(type, `${lastNotification.title}: ${lastNotification.message}`);
   }, [lastNotification, toast]);
 

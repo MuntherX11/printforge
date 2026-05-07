@@ -118,8 +118,9 @@ export default function NewJobPage() {
         <p className="text-sm text-gray-500">What is this job for?</p>
         <div className="grid grid-cols-2 gap-4">
           <button
+            type="button"
             onClick={() => setMode('order')}
-            className="flex flex-col items-center gap-3 p-8 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors text-left"
+            className="flex flex-col items-center gap-3 p-8 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             <ShoppingCart className="h-8 w-8 text-brand-600" />
             <div>
@@ -128,8 +129,9 @@ export default function NewJobPage() {
             </div>
           </button>
           <button
+            type="button"
             onClick={() => setMode('stock')}
-            className="flex flex-col items-center gap-3 p-8 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors text-left"
+            className="flex flex-col items-center gap-3 p-8 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             <Package className="h-8 w-8 text-brand-600" />
             <div>
@@ -145,7 +147,7 @@ export default function NewJobPage() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => setMode(null)} className="text-sm text-brand-600 hover:underline">← Back</button>
+        <button type="button" onClick={() => setMode(null)} className="text-sm text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">← Back</button>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           {mode === 'order' ? 'New Job — For Order' : 'New Job — Build Stock'}
         </h1>

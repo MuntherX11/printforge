@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import type { ApiPnlReport, ApiMonthlyTrend, ApiProductMargin } from '@/lib/types/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { BarChart2, Package } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
@@ -20,9 +21,9 @@ import { useToast } from '@/components/ui/toast';
 export default function AccountingPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
-  const [report, setReport] = useState<any>(null);
-  const [trend, setTrend] = useState<any[]>([]);
-  const [margins, setMargins] = useState<any[]>([]);
+  const [report, setReport] = useState<ApiPnlReport | null>(null);
+  const [trend, setTrend] = useState<ApiMonthlyTrend[]>([]);
+  const [margins, setMargins] = useState<ApiProductMargin[]>([]);
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10);
@@ -32,9 +33,9 @@ export default function AccountingPage() {
   function loadReport() {
     setLoading(true);
     Promise.all([
-      api.get<any>(`/reports/pnl?startDate=${startDate}&endDate=${endDate}`),
-      api.get<any[]>('/reports/monthly-trend?months=6'),
-      api.get<any[]>('/reports/product-margins'),
+      api.get<ApiPnlReport>(`/reports/pnl?startDate=${startDate}&endDate=${endDate}`),
+      api.get<ApiMonthlyTrend[]>('/reports/monthly-trend?months=6'),
+      api.get<ApiProductMargin[]>('/reports/product-margins'),
     ])
       .then(([r, t, m]) => { setReport(r); setTrend(t); setMargins(m); })
       .catch((err) => {
@@ -154,8 +155,8 @@ export default function AccountingPage() {
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Expenses by Category</p>
                     <div className="space-y-1.5">
                       {Object.entries(report.expensesByCategory || {})
-                        .sort(([, a]: any, [, b]: any) => (b as number) - (a as number))
-                        .map(([cat, amount]: any) => (
+                        .sort(([, a], [, b]) => (b as number) - (a as number))
+                        .map(([cat, amount]) => (
                           <div key={cat} className="flex justify-between text-sm">
                             <span className="text-gray-600 dark:text-gray-400">{cat}</span>
                             <span className="font-medium">{formatCurrency(amount)}</span>
@@ -190,7 +191,7 @@ export default function AccountingPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {margins.map((p: any) => (
+                      {margins.map((p) => (
                         <tr key={p.productId} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors duration-150">
                           <td className="px-4 py-3 font-medium dark:text-gray-200">{p.productName}</td>
                           <td className="px-4 py-3 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{p.jobCount}</td>
