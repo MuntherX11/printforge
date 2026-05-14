@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException, ConflictException } from '@nestjs/common';
+import { JobStatus } from '@prisma/client';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto, QuoteStatus, QuoteSource } from '@printforge/types';
@@ -451,7 +452,7 @@ export class QuotesService {
           orderId: string;
           orderItemId: string;
           colorChanges: number;
-          status: string;
+          status: JobStatus;
         }> = [];
 
         for (const item of orderWithItems.items) {
@@ -472,7 +473,7 @@ export class QuotesService {
               orderId: order.id,
               orderItemId: item.id,
               colorChanges,
-              status: 'QUEUED',
+              status: JobStatus.QUEUED,
             });
           }
         }

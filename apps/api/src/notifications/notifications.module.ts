@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
-import { WebSocketModule } from '../websocket/websocket.module';
+import { GatewayModule } from '../websocket/gateway.module';
 
 @Module({
-  imports: [WebSocketModule],
+  imports: [GatewayModule],
   controllers: [NotificationsController],
   providers: [NotificationsService],
   exports: [NotificationsService],

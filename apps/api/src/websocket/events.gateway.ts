@@ -9,7 +9,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
-import { MoonrakerService, MoonrakerSnapshot } from '../moonraker-bridge/moonraker.service';
+import { MoonrakerSnapshot } from '../moonraker-bridge/moonraker.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { TokenBlocklistService } from '../auth/token-blocklist.service';
 
@@ -27,7 +27,6 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   private lastBroadcastPayload = new Map<string, any>();
 
   constructor(
-    private moonraker: MoonrakerService,
     private jwtService: JwtService,
     private prisma: PrismaService,
     private tokenBlocklistService: TokenBlocklistService,

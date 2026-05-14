@@ -1,28 +1,15 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway';
+import { GatewayModule } from './gateway.module';
 import { BridgeModule } from '../moonraker-bridge/bridge.module';
 import { MoonrakerScheduler } from '../moonraker-bridge/moonraker.scheduler';
-import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
+    GatewayModule,
     BridgeModule,
-    AuthModule,
-    // EventsGateway.afterInit() calls jwtService.verify() for WS auth — must match AuthModule config.
-    // AuthModule already exports JwtModule, so we no longer register it here to avoid duplicate config.
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('SECRET_KEY'),
-        signOptions: { expiresIn: config.get<string>('JWT_EXPIRY', '7d') },
-      }),
-    }),
   ],
-  providers: [EventsGateway],
-  exports: [EventsGateway],
+  // EventsGateway is provided + exported by GatewayModule (@Global)
 })
 export class WebSocketModule implements OnModuleInit {
   constructor(
