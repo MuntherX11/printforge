@@ -15,7 +15,13 @@ export function useOrder() {
     setLoading(true);
     api.get(`/orders/${id}`)
       .then(setOrder)
-      .catch((err: unknown) => toast('error', (err as Error)?.message || 'Failed to load'))
+      .catch((err: unknown) => {
+        const msg = (err as Error)?.message || '';
+        // 404 → order stays null → page.tsx calls notFound(); no toast needed
+        if (!msg.includes('404')) {
+          toast('error', msg || 'Failed to load');
+        }
+      })
       .finally(() => setLoading(false));
   }, [id]);
 
