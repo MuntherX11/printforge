@@ -20,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuditModule } from './audit/audit.module';
 import { CommunicationsModule } from './communications/communications.module';
+import { DesignModule } from './design/design.module';
 import { ExportModule } from './export/export.module';
 import { FileParserModule } from './file-parser/file-parser.module';
 import { BridgeModule } from './moonraker-bridge/bridge.module';
@@ -57,6 +58,7 @@ import { HealthController } from './health/health.controller';
     SettingsModule,
     AuditModule,
     CommunicationsModule,
+    DesignModule,
     ExportModule,
     FileParserModule,
     BridgeModule,
