@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ProductCostingService } from './product-costing.service';
 import { ProductOnboardingService } from './product-onboarding.service';
+import { paginatedResponse } from '../common/dto/pagination.dto';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -51,6 +52,19 @@ export class ProductsService {
         _count: { select: { components: true } },
       },
     });
+  }
+
+  async findAllPaginated(page: number, limit: number) {
+    const [data, total] = await Promise.all([
+      this.prisma.product.findMany({
+        orderBy: { name: 'asc' },
+        include: { _count: { select: { components: true } } },
+        take: limit,
+        skip: (page - 1) * limit,
+      }),
+      this.prisma.product.count(),
+    ]);
+    return paginatedResponse(data, total, { page, limit } as any);
   }
 
   async findAllActive() {

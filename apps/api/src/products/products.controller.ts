@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 
 import { ProductsService } from './products.service';
@@ -29,7 +29,15 @@ export class ProductsController {
 
   @Get()
   @UseGuards(StaffGuard)
-  findAll() {
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    // Return paginated response when ?page= is given (dashboard list),
+    // flat array otherwise (backwards-compat for older callers)
+    if (page !== undefined) {
+      return this.productsService.findAllPaginated(
+        parseInt(page) || 1,
+        parseInt(limit ?? '25') || 25,
+      );
+    }
     return this.productsService.findAll();
   }
 
