@@ -51,6 +51,20 @@ export class ThreeMfParserService {
       }
     }
 
+    // Fallback: if slice_info.config exists but has no sliced plates (unsliced design file),
+    // detect plates from Metadata/plate_N.png thumbnails so the wizard can still show them.
+    if (plateStats.size === 0) {
+      zip.forEach((relativePath) => {
+        const m = relativePath.match(/^Metadata\/plate_(\d+)\.png$/i);
+        if (m) {
+          const idx = parseInt(m[1], 10);
+          if (!plateStats.has(idx)) {
+            plateStats.set(idx, { printSeconds: 0, weightGrams: 0, toolChanges: 0 });
+          }
+        }
+      });
+    }
+
     analysis.totalPlates = plateStats.size;
 
     // Process all plates in parallel

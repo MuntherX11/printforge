@@ -311,14 +311,13 @@ export class ProductOnboardingService {
 
         results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 1 });
       } else {
-        if (plate.weightGrams === 0) {
-          results.push({ plateIndex: plate.plateIndex, name: componentName, componentsCreated: 0 });
-          continue;
-        }
-
+        // For unsliced design .3mf files, plate.weightGrams === 0 and plate.tools is empty.
+        // Still create the component with placeholder values — user can fill in specs manually.
         const tool = plate.tools[0];
-        const materialType = tool?.materialType || 'PLA';
-        const materialId = await this.findOrCreateMaterial(allMaterials, materialType, tool?.colorHex);
+        // Only resolve a material when there is actual tool data; otherwise leave null
+        const materialId = tool
+          ? await this.findOrCreateMaterial(allMaterials, tool.materialType || 'PLA', tool.colorHex)
+          : (allMaterials.length > 0 ? allMaterials[0].id : null);
 
         await this.prisma.productComponent.create({
           data: {
