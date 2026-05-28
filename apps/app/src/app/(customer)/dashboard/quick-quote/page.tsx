@@ -58,7 +58,7 @@ export default function CustomerQuickQuotePage() {
   const router = useRouter();
 
   useEffect(() => {
-    api.get<Material[]>('/materials').then(setMaterials).catch(() => {});
+    api.get<any>('/materials?limit=500').then((r: any) => setMaterials(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => {});
   }, []);
 
   const is3mfFile = file?.name.toLowerCase().endsWith('.3mf') ?? false;

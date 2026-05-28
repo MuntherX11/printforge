@@ -64,7 +64,7 @@ export default function ProductDetailPage() {
   const load = () => {
     Promise.all([
       api.get<ApiProduct>(`/products/${id}`),
-      api.get<ApiMaterial[]>('/materials'),
+      api.get<{ data: ApiMaterial[] } | ApiMaterial[]>('/materials?limit=500').then((r: any) => Array.isArray(r) ? r : (r?.data ?? [])),
       api.get<ApiPrinter[]>('/printers'),
       api.get<{ id: string; fileName: string }[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => [] as { id: string; fileName: string }[]),
     ]).then(([p, m, pr, imgs]) => {

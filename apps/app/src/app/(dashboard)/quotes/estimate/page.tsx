@@ -22,7 +22,7 @@ export default function EstimatePage() {
 
   useEffect(() => {
     Promise.all([
-      api.get<any[]>('/materials').then(setMaterials),
+      api.get<any>('/materials?limit=500').then((r: any) => setMaterials(Array.isArray(r) ? r : (r?.data ?? []))),
       api.get<any[]>('/printers').then(setPrinters),
     ]).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);

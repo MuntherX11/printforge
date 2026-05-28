@@ -127,7 +127,8 @@ export default function JobDetailPage() {
   }
 
   async function openAddMaterial() {
-    const mats = await api.get<any[]>('/materials');
+    const matsRes = await api.get<any>('/materials?limit=500');
+    const mats = Array.isArray(matsRes) ? matsRes : (matsRes?.data ?? []);
     setMaterials(mats);
     setShowAddMaterial(true);
   }
