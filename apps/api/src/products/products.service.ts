@@ -16,6 +16,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ExcelJS from 'exceljs';
 
+/** Strip HTML/script tags from user-supplied strings */
+function stripHtml(s?: string | null): string | null {
+  if (!s) return s ?? null;
+  return s.replace(/<[^>]*>/g, '').trim();
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -25,11 +31,12 @@ export class ProductsService {
   ) {}
 
   async create(dto: CreateProductDto) {
+    if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
     return this.prisma.product.create({
       data: {
-        name: dto.name,
-        description: dto.description,
-        sku: dto.sku,
+        name: stripHtml(dto.name)!,
+        description: stripHtml(dto.description),
+        sku: dto.sku?.trim() || undefined,
         colorChanges: dto.colorChanges || 0,
         defaultPrinterId: (dto as any).defaultPrinterId || null,
       },
@@ -169,9 +176,12 @@ export class ProductsService {
 
   async update(id: string, dto: UpdateProductDto) {
     await this.findOne(id);
+    const sanitized: UpdateProductDto = { ...dto };
+    if (sanitized.name !== undefined) sanitized.name = stripHtml(sanitized.name) ?? undefined;
+    if (sanitized.description !== undefined) sanitized.description = stripHtml(sanitized.description) ?? undefined;
     return this.prisma.product.update({
       where: { id },
-      data: dto,
+      data: sanitized,
       include: {
         components: {
           include: { material: true },
