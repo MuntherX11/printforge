@@ -23,8 +23,10 @@ export class MaterialsController {
   }
 
   @Get()
-  findAll(@Query() pagination: PaginationDto) {
-    return this.materialsService.findAll(pagination);
+  findAll(@Query() pagination: PaginationDto, @Query('page') rawPage?: string) {
+    // Pass whether the caller explicitly requested a page — if not, return a flat array
+    // for backward compatibility with frontend code that pre-dates pagination.
+    return this.materialsService.findAll(pagination, rawPage !== undefined);
   }
 
   @Post('bulk-upload')

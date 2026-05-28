@@ -11,15 +11,28 @@ export class MaterialsService {
     return this.prisma.material.create({ data: dto });
   }
 
-  async findAll(pagination: PaginationDto) {
+  async findAll(pagination: PaginationDto, paginate = true) {
+    const materialInclude = {
+      spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
+      _count: { select: { spools: true } },
+    };
+
+    // When no ?page= param was sent (e.g. dropdown loaders requesting all materials),
+    // return a plain array so callers can use .map() without unwrapping.
+    if (!paginate) {
+      const limit = Math.min(pagination.limit ?? 500, 1000);
+      return this.prisma.material.findMany({
+        include: materialInclude,
+        orderBy: { name: 'asc' },
+        take: limit,
+      });
+    }
+
     const page = pagination.page ?? 1;
     const limit = pagination.limit ?? 20;
     const [data, total] = await Promise.all([
       this.prisma.material.findMany({
-        include: {
-          spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
-          _count: { select: { spools: true } },
-        },
+        include: materialInclude,
         orderBy: { name: 'asc' },
         take: limit,
         skip: (page - 1) * limit,
