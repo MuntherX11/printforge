@@ -60,6 +60,7 @@ export default function ProductDetailPage() {
   const [calculatingVariant, setCalculatingVariant] = useState<string | null>(null);
   const [variantCostResult, setVariantCostResult] = useState<{ id: string; result: any } | null>(null);
   const [uploadingVariantGcode, setUploadingVariantGcode] = useState<string | null>(null);
+  const [addVariantGcodeFile, setAddVariantGcodeFile] = useState<File | null>(null);
 
   const load = () => {
     Promise.all([
@@ -299,7 +300,7 @@ export default function ProductDetailPage() {
     setSavingVariant(true);
     const form = new FormData(e.currentTarget);
     try {
-      await api.post(`/products/${id}/variants`, {
+      const newVariant = await api.post<any>(`/products/${id}/variants`, {
         name: form.get('name') as string,
         sku: form.get('sku') as string,
         basePrice: form.get('basePrice') ? parseFloat(form.get('basePrice') as string) : undefined,
@@ -307,7 +308,22 @@ export default function ProductDetailPage() {
         estimatedGrams: form.get('estimatedGrams') ? parseFloat(form.get('estimatedGrams') as string) : undefined,
         isActive: form.get('isActive') !== 'false',
       });
+      // If a gcode file was attached in the dialog, upload it to the new variant now
+      if (addVariantGcodeFile && newVariant?.id) {
+        const gcodeForm = new FormData();
+        gcodeForm.append('file', addVariantGcodeFile);
+        const res = await fetch(`/api/products/${id}/variants/${newVariant.id}/onboard-gcode`, {
+          method: 'POST',
+          body: gcodeForm,
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          toast('error', body?.error || body?.message || 'G-code upload failed — variant was created but not priced');
+        }
+      }
       setShowAddVariant(false);
+      setAddVariantGcodeFile(null);
       load();
     } catch (err: unknown) {
       toast('error', (err as Error).message);
@@ -818,22 +834,53 @@ export default function ProductDetailPage() {
       </Card>
 
       {/* Add Variant dialog */}
-      <Dialog open={showAddVariant} onClose={() => setShowAddVariant(false)} title="Add Variant">
+      <Dialog open={showAddVariant} onClose={() => { setShowAddVariant(false); setAddVariantGcodeFile(null); }} title="Add Variant">
         <form onSubmit={handleAddVariant} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Input name="name" label="Variant Name" placeholder="e.g. Large — Red" required />
-            <Input name="sku" label="SKU" placeholder="e.g. PROD-L-RED" required />
+            <Input name="name" label="Variant Name" placeholder="e.g. Toyota Corolla" required />
+            <Input name="sku" label="SKU" placeholder="e.g. PROD-COROLLA" required />
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Set Est. Grams and Est. Minutes for this size — then use the <strong>Calculate</strong> button in the table to auto-price it. Leave price blank until you calculate.</p>
-          <div className="grid grid-cols-3 gap-4">
-            <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" placeholder={product.basePrice ? product.basePrice.toFixed(3) : ''} />
-            <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : ''} />
-            <Input name="estimatedGrams" label="Est. Grams" type="number" step="0.1" min="0" placeholder={product.estimatedGrams ? String(Math.round(product.estimatedGrams)) : ''} />
+
+          {/* G-code upload */}
+          <div>
+            <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              G-code File <span className="font-normal text-gray-400">(optional — auto-fills grams, minutes &amp; price)</span>
+            </p>
+            {addVariantGcodeFile ? (
+              <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 px-3 py-2">
+                <FileCode className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                <span className="text-sm text-green-700 dark:text-green-300 truncate flex-1">{addVariantGcodeFile.name}</span>
+                <button type="button" onClick={() => setAddVariantGcodeFile(null)} className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 ml-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 rounded-md border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-600 px-4 py-3 cursor-pointer transition-colors">
+                <input type="file" accept=".gcode,.gco,.g" className="hidden" onChange={(e) => setAddVariantGcodeFile(e.target.files?.[0] ?? null)} />
+                <Upload className="h-4 w-4 text-gray-400" />
+                <span className="text-sm text-gray-500 dark:text-gray-400">Click to attach a .gcode file</span>
+              </label>
+            )}
           </div>
+
+          {/* Manual override fields */}
+          <div>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">
+              {addVariantGcodeFile ? 'G-code will set these automatically — leave blank to let it fill them in:' : 'Or set values manually:'}
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <Input name="basePrice" label="Price (OMR)" type="number" step="0.001" min="0" placeholder={product.basePrice ? product.basePrice.toFixed(3) : '—'} />
+              <Input name="estimatedMinutes" label="Est. Minutes" type="number" step="1" min="0" placeholder={product.estimatedMinutes ? String(Math.round(product.estimatedMinutes)) : '—'} />
+              <Input name="estimatedGrams" label="Est. Grams" type="number" step="0.1" min="0" placeholder={product.estimatedGrams ? String(Math.round(product.estimatedGrams)) : '—'} />
+            </div>
+          </div>
+
           <Select name="isActive" label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]} defaultValue="true" />
           <div className="flex gap-3 justify-end">
-            <Button type="button" variant="outline" onClick={() => setShowAddVariant(false)}>Cancel</Button>
-            <Button type="submit" disabled={savingVariant}>{savingVariant ? 'Saving...' : 'Add Variant'}</Button>
+            <Button type="button" variant="outline" onClick={() => { setShowAddVariant(false); setAddVariantGcodeFile(null); }}>Cancel</Button>
+            <Button type="submit" disabled={savingVariant}>
+              {savingVariant ? (addVariantGcodeFile ? 'Creating & pricing…' : 'Saving...') : 'Add Variant'}
+            </Button>
           </div>
         </form>
       </Dialog>
