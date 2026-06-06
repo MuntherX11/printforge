@@ -91,7 +91,8 @@ export default function MaterialDetailPage() {
         type: form.get('type') as string,
         color: form.get('color') as string || null,
         brand: form.get('brand') as string || null,
-        costPerGram: parseFloat(form.get('costPerGram') as string),
+        spoolPrice: parseFloat(form.get('spoolPrice') as string),
+        spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
         density: parseFloat(form.get('density') as string) || 1.24,
         reorderPoint: parseFloat(form.get('reorderPoint') as string) || 500,
       });
@@ -244,11 +245,12 @@ export default function MaterialDetailPage() {
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+      <dl className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Price</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{(material as any).spoolPrice != null ? formatCurrency((material as any).spoolPrice) : '—'}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Weight</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{(material as any).spoolWeightGrams != null ? `${(material as any).spoolWeightGrams}g` : '—'}</dd></div>
         <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cost/gram</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(material.costPerGram)}</dd></div>
         <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Stock</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(totalStock)}g</dd></div>
         <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Active Spools</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material._count?.spools || 0}</dd></div>
-        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Reorder Point</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material.reorderPoint}g</dd></div>
       </dl>
 
       <Card>
@@ -418,8 +420,28 @@ export default function MaterialDetailPage() {
           </div>
           <Input name="color" label="Color" defaultValue={material.color || ''} />
           <Input name="brand" label="Brand" defaultValue={material.brand || ''} />
-          <Input name="costPerGram" label="Cost per Gram" type="number" step="0.001" defaultValue={material.costPerGram} required />
-          <Input name="density" label="Density (g/cm3)" type="number" step="0.01" defaultValue={material.density} />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              name="spoolPrice"
+              label="Spool Price"
+              type="number"
+              step="0.001"
+              min="0"
+              defaultValue={(material as any).spoolPrice ?? (material.costPerGram * ((material as any).spoolWeightGrams ?? 1000)).toFixed(3)}
+              required
+            />
+            <Input
+              name="spoolWeightGrams"
+              label="Spool Weight (g)"
+              type="number"
+              step="1"
+              min="1"
+              defaultValue={(material as any).spoolWeightGrams ?? 1000}
+              required
+            />
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Cost per gram is calculated automatically: Spool Price ÷ Spool Weight = <strong>{formatCurrency(material.costPerGram)}/g</strong></p>
+          <Input name="density" label="Density (g/cm³)" type="number" step="0.01" defaultValue={material.density} />
           <Input name="reorderPoint" label="Reorder Point (g)" type="number" defaultValue={material.reorderPoint} />
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowEditMaterial(false)}>Cancel</Button>

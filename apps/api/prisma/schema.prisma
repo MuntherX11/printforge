@@ -71,16 +71,19 @@ model Customer {
 // ============ INVENTORY ============
 
 model Material {
-  id              String       @id @default(cuid())
-  name            String
-  type            MaterialType
-  color           String?
-  brand           String?
-  costPerGram     Float
-  density         Float        @default(1.24)
-  reorderPoint    Float        @default(500)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  name             String
+  type             MaterialType
+  color            String?
+  brand            String?
+  costPerGram      Float
+  // Spool-level pricing (user-facing). costPerGram is derived from these when provided.
+  spoolPrice       Float?
+  spoolWeightGrams Float?
+  density          Float        @default(1.24)
+  reorderPoint     Float        @default(500)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   spools              Spool[]
   jobMaterials        JobMaterial[]

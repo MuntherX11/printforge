@@ -35,7 +35,8 @@ export default function NewMaterialPage() {
       type: form.get('type') as string,
       color: form.get('color') as string || undefined,
       brand: form.get('brand') as string || undefined,
-      costPerGram: parseFloat(form.get('costPerGram') as string),
+      spoolPrice: parseFloat(form.get('spoolPrice') as string),
+      spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
       density: parseFloat(form.get('density') as string) || 1.24,
       reorderPoint: parseFloat(form.get('reorderPoint') as string) || 500,
     };
@@ -63,9 +64,13 @@ export default function NewMaterialPage() {
               <Input name="color" label="Color" placeholder="e.g. White" />
               <Input name="brand" label="Brand" placeholder="e.g. eSUN" />
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <Input name="costPerGram" label="Cost per Gram" type="number" step="0.001" required />
-              <Input name="density" label="Density (g/cm3)" type="number" step="0.01" defaultValue="1.24" />
+            <div className="grid grid-cols-2 gap-4">
+              <Input name="spoolPrice" label="Spool Price" type="number" step="0.001" min="0" placeholder="e.g. 3.500" required />
+              <Input name="spoolWeightGrams" label="Spool Weight (g)" type="number" step="1" min="1" defaultValue="1000" required />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cost per gram is derived automatically: Spool Price ÷ Spool Weight.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Input name="density" label="Density (g/cm³)" type="number" step="0.01" defaultValue="1.24" />
               <Input name="reorderPoint" label="Reorder Point (g)" type="number" defaultValue="500" />
             </div>
             <div className="flex gap-3">

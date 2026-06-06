@@ -3,12 +3,29 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
 import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
 
+/** Derive costPerGram from spool-level pricing fields when they are supplied. */
+function resolveCostPerGram(
+  spoolPrice?: number | null,
+  spoolWeightGrams?: number | null,
+  fallbackCostPerGram?: number | null,
+): number {
+  if (spoolPrice != null && spoolPrice > 0) {
+    const weight = (spoolWeightGrams != null && spoolWeightGrams > 0) ? spoolWeightGrams : 1000;
+    return spoolPrice / weight;
+  }
+  return fallbackCostPerGram ?? 0;
+}
+
 @Injectable()
 export class MaterialsService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateMaterialDto) {
-    return this.prisma.material.create({ data: dto });
+    const { spoolPrice, spoolWeightGrams, costPerGram: rawCpg, ...rest } = dto as any;
+    const costPerGram = resolveCostPerGram(spoolPrice, spoolWeightGrams, rawCpg);
+    return this.prisma.material.create({
+      data: { ...rest, spoolPrice: spoolPrice ?? null, spoolWeightGrams: spoolWeightGrams ?? null, costPerGram },
+    });
   }
 
   async findAll(pagination: PaginationDto, paginate = true) {
@@ -56,7 +73,24 @@ export class MaterialsService {
 
   async update(id: string, dto: UpdateMaterialDto) {
     await this.findOne(id);
-    return this.prisma.material.update({ where: { id }, data: dto });
+    const { spoolPrice, spoolWeightGrams, costPerGram: rawCpg, ...rest } = dto as any;
+
+    // Re-derive costPerGram whenever spool pricing fields are changed.
+    // If the caller doesn't send spoolPrice at all, fall back to the explicit costPerGram.
+    const updateData: any = { ...rest };
+    if (spoolPrice !== undefined || spoolWeightGrams !== undefined) {
+      updateData.spoolPrice = spoolPrice ?? null;
+      updateData.spoolWeightGrams = spoolWeightGrams ?? null;
+      // Fetch current record to use existing spoolWeightGrams as default
+      const existing = await this.prisma.material.findUnique({ where: { id } });
+      const effectiveWeight = spoolWeightGrams ?? existing?.spoolWeightGrams ?? 1000;
+      const effectivePrice = spoolPrice ?? existing?.spoolPrice;
+      updateData.costPerGram = resolveCostPerGram(effectivePrice, effectiveWeight, rawCpg ?? existing?.costPerGram);
+    } else if (rawCpg !== undefined) {
+      updateData.costPerGram = rawCpg;
+    }
+
+    return this.prisma.material.update({ where: { id }, data: updateData });
   }
 
   async bulkImport(rows: BulkMaterialUploadRow[]) {
@@ -69,6 +103,8 @@ export class MaterialsService {
       color: string | null;
       brand: string | null;
       costPerGram: number;
+      spoolPrice: number | null;
+      spoolWeightGrams: number | null;
       density: number;
       reorderPoint: number;
     }> = [];
@@ -76,8 +112,9 @@ export class MaterialsService {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2; // +2 for header row + 0-index
-      if (!row.name || !row.type || !row.costPerGram) {
-        results.errors.push(`Row ${rowNum}: missing required fields (name, type, costPerGram)`);
+      const hasSpoolPricing = row.spoolPrice != null && Number(row.spoolPrice) > 0;
+      if (!row.name || !row.type || (!hasSpoolPricing && !row.costPerGram)) {
+        results.errors.push(`Row ${rowNum}: missing required fields (name, type, and either spoolPrice or costPerGram)`);
         results.skipped++;
         continue;
       }
@@ -87,12 +124,16 @@ export class MaterialsService {
         results.skipped++;
         continue;
       }
+      const spoolPrice = hasSpoolPricing ? Number(row.spoolPrice) : null;
+      const spoolWeightGrams = row.spoolWeightGrams ? Number(row.spoolWeightGrams) : (hasSpoolPricing ? 1000 : null);
       validRows.push({
         name: row.name,
         type: type as MaterialType,
         color: row.color || null,
         brand: row.brand || null,
-        costPerGram: Number(row.costPerGram),
+        costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, row.costPerGram ? Number(row.costPerGram) : null),
+        spoolPrice,
+        spoolWeightGrams,
         density: row.density ? Number(row.density) : 1.24,
         reorderPoint: row.reorderPoint ? Number(row.reorderPoint) : 500,
       });

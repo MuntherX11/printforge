@@ -188,7 +188,7 @@ export default function InventoryPage() {
                   <TableHead>Material</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Color</TableHead>
-                  <TableHead>Cost/g</TableHead>
+                  <TableHead>Spool Price</TableHead>
                   <TableHead>Active Spools</TableHead>
                   <TableHead>Total Stock (g)</TableHead>
                   <TableHead>Status</TableHead>
@@ -208,7 +208,11 @@ export default function InventoryPage() {
                       </TableCell>
                       <TableCell><Badge className="bg-gray-100 text-gray-700">{m.type}</Badge></TableCell>
                       <TableCell>{m.color || '-'}</TableCell>
-                      <TableCell>{formatCurrency(m.costPerGram)}/g</TableCell>
+                      <TableCell>
+                        {(m as any).spoolPrice != null
+                          ? <>{formatCurrency((m as any).spoolPrice)}<span className="text-xs text-gray-400 ml-1">/ {(m as any).spoolWeightGrams ?? 1000}g</span></>
+                          : <span className="text-xs text-gray-400">{formatCurrency(m.costPerGram)}/g</span>}
+                      </TableCell>
                       <TableCell>{m._count?.spools || 0}</TableCell>
                       <TableCell className="font-mono">{Math.round(totalStock)}g</TableCell>
                       <TableCell>

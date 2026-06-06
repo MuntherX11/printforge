@@ -284,7 +284,12 @@ export interface CreateMaterialDto {
   type: MaterialType;
   color?: string;
   brand?: string;
-  costPerGram: number;
+  /** Cost per gram — can be supplied directly or derived from spoolPrice / spoolWeightGrams. */
+  costPerGram?: number;
+  /** Price paid for one full spool (user-facing input). */
+  spoolPrice?: number;
+  /** Net weight of filament in the spool in grams (user-facing input). Defaults to 1000. */
+  spoolWeightGrams?: number;
   density?: number;
   reorderPoint?: number;
 }
@@ -323,7 +328,12 @@ export interface BulkMaterialUploadRow {
   type: string;
   color?: string;
   brand?: string;
-  costPerGram: number;
+  /** Direct cost per gram — used when spoolPrice/spoolWeightGrams are not provided. */
+  costPerGram?: number;
+  /** Price of one spool. Takes precedence over costPerGram when both are present. */
+  spoolPrice?: number;
+  /** Net filament weight in the spool (g). Defaults to 1000 when spoolPrice is given. */
+  spoolWeightGrams?: number;
   density?: number;
   reorderPoint?: number;
 }
