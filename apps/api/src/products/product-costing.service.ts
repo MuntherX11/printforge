@@ -116,13 +116,17 @@ export class ProductCostingService {
   /**
    * Calculate the cost for a specific variant.
    *
-   * A variant typically represents the same product in a different size — same
-   * materials, different quantities. We scale each parent component's gram
-   * usage proportionally to the variant's estimatedGrams, and use the
-   * variant's estimatedMinutes for time-based costs. The result is saved back
-   * to variant.basePrice.
+   * Two modes:
+   * 1. Parent has components — scale each component's gram usage proportionally
+   *    to the variant's estimatedGrams (same-product-different-size model).
+   * 2. Parent has NO components (generic template model) — use the variant's
+   *    own estimatedGrams with a material looked up by fallbackMaterialType
+   *    (extracted from the uploaded G-code). Falls back to any material with
+   *    costPerGram > 0, then to $0 material cost if nothing is configured.
+   *
+   * The result is saved back to variant.basePrice.
    */
-  async calculateVariantCost(productId: string, variantId: string): Promise<any> {
+  async calculateVariantCost(productId: string, variantId: string, fallbackMaterialType?: string): Promise<any> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       include: {
@@ -149,7 +153,7 @@ export class ProductCostingService {
     );
 
     // Proportionally scale each component's gram usage to the variant's total
-    const scaledMaterials = product.components.map((c) => {
+    let scaledMaterials: Array<{ gramsUsed: number; costPerGram: number }> = product.components.map((c) => {
       const scaledGrams = parentTotalGrams > 0
         ? (c.gramsUsed * c.quantity * variant.estimatedGrams!) / parentTotalGrams
         : 0;
@@ -163,6 +167,28 @@ export class ProductCostingService {
 
       return { gramsUsed: scaledGrams, costPerGram };
     });
+
+    // Generic-template fallback: product has no components, so scale the variant's
+    // own grams against a real material rate from the G-code or DB.
+    if (scaledMaterials.length === 0 && (variant.estimatedGrams ?? 0) > 0) {
+      const typeUpper = fallbackMaterialType ? fallbackMaterialType.toUpperCase() : null;
+      const fallbackMaterial = typeUpper
+        ? (await this.prisma.material.findFirst({
+            where: { type: typeUpper as any, costPerGram: { gt: 0 } },
+            orderBy: { costPerGram: 'asc' },
+          })) ?? (await this.prisma.material.findFirst({
+            where: { costPerGram: { gt: 0 } },
+            orderBy: { costPerGram: 'asc' },
+          }))
+        : await this.prisma.material.findFirst({
+            where: { costPerGram: { gt: 0 } },
+            orderBy: { costPerGram: 'asc' },
+          });
+
+      if (fallbackMaterial) {
+        scaledMaterials = [{ gramsUsed: variant.estimatedGrams!, costPerGram: fallbackMaterial.costPerGram }];
+      }
+    }
 
     const defaultPrinter = product.defaultPrinterId
       ? await this.prisma.printer.findUnique({ where: { id: product.defaultPrinterId } })

@@ -242,6 +242,12 @@ export class ProductOnboardingService {
 
     const analysis = this.gcodeParser.parseHeader(file.buffer);
 
+    // Extract material type for cost calculation fallback (used when product has no components)
+    const materialType: string | undefined =
+      analysis.filamentType ||
+      analysis.tools?.find((t: any) => t.materialType)?.materialType ||
+      undefined;
+
     // Sum all active tools for multi-colour files; fall back to single-filament value
     let totalGrams: number;
     if (analysis.tools && analysis.tools.length > 1) {
@@ -260,7 +266,9 @@ export class ProductOnboardingService {
       data: { estimatedGrams: totalGrams, estimatedMinutes: totalMinutes },
     });
 
-    const costResult = await this.productCosting.calculateVariantCost(productId, variantId);
+    // Pass materialType so calculateVariantCost can resolve a real material cost
+    // even for "generic" parent products that have no components of their own.
+    const costResult = await this.productCosting.calculateVariantCost(productId, variantId, materialType);
     return { estimatedGrams: totalGrams, estimatedMinutes: totalMinutes, ...costResult };
   }
 
