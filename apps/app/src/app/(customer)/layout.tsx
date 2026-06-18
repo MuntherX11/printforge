@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { CustomerSidebar } from '@/components/customer-sidebar';
 import { CustomerTopbar } from '@/components/customer-topbar';
+import { CustomerBottomNav } from '@/components/customer-bottom-nav';
 
 // NOTE: This layout checks for a token to gate UI routing only.
 // Actual access control is enforced by the API-level CustomerGuard on every endpoint.
@@ -16,13 +17,16 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <CustomerSidebar />
+      <div className="hidden md:flex md:flex-shrink-0">
+        <CustomerSidebar />
+      </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <CustomerTopbar />
-        <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-6">
+        <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-4 md:p-6 pb-20 md:pb-6">
           {children}
         </main>
       </div>
+      <CustomerBottomNav />
     </div>
   );
 }

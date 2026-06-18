@@ -70,10 +70,51 @@ export default function CustomerShopPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
           {products.map(product => (
             <Link key={product.id} href={`/dashboard/shop/${product.id}`} className="group block">
-              <Card className="h-full transition-shadow hover:shadow-md dark:hover:shadow-brand-900/20">
+              {/* Mobile list-card */}
+              <Card className="sm:hidden transition-shadow hover:shadow-md">
+                <CardContent className="p-3 flex gap-3">
+                  <div className="w-20 h-20 flex-shrink-0 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden">
+                    {product.imageUrl ? (
+                      <Image
+                        src={product.imageUrl}
+                        alt={product.name}
+                        width={80}
+                        height={80}
+                        className="w-full h-full object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
+                        <Package className="w-8 h-8" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="font-semibold text-gray-900 dark:text-gray-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors line-clamp-1 text-sm">
+                      {product.name}
+                    </h2>
+                    {product.description && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+                        {product.description}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between mt-2 gap-1">
+                      <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
+                        {product.variants.length > 0 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
+                      </span>
+                      {product.estimatedMinutes && (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{formatTime(product.estimatedMinutes)}</span>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Desktop grid card */}
+              <Card className="hidden sm:block h-full transition-shadow hover:shadow-md dark:hover:shadow-brand-900/20">
                 <div className="aspect-video bg-gray-100 dark:bg-gray-800 rounded-t-lg overflow-hidden">
                   {product.imageUrl ? (
                     <Image
