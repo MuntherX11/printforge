@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
@@ -34,6 +35,7 @@ export class OrdersController {
 
   @Post('customer')
   @UseGuards(CustomerGuard)
+  @Throttle({ long: { ttl: 3600000, limit: 10 } })
   createForCustomer(@Req() req: any, @Body() dto: CustomerCreateOrderDto) {
     return this.ordersService.createForCustomer(req.user.id, dto);
   }

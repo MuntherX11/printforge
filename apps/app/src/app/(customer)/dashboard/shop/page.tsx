@@ -6,15 +6,8 @@ import Image from 'next/image';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Package } from 'lucide-react';
-
-function formatTime(minutes?: number | null): string | null {
-  if (!minutes) return null;
-  const h = Math.floor(minutes / 60);
-  const m = Math.floor(minutes % 60);
-  if (h > 0) return `~${h}h ${m}m`;
-  return `~${m}m`;
-}
+import { Package, RefreshCw } from 'lucide-react';
+import { formatTime } from '@/lib/format';
 
 interface ProductSummary {
   id: string;
@@ -29,13 +22,18 @@ interface ProductSummary {
 export default function CustomerShopPage() {
   const [products, setProducts] = useState<ProductSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
+  function load() {
+    setLoading(true);
+    setError(false);
     api.get<any>('/products/customer/catalog')
       .then(r => setProducts(Array.isArray(r) ? r : r?.data ?? []))
-      .catch(() => {})
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const minPrice = (product: ProductSummary) => {
     const prices = [
@@ -55,10 +53,23 @@ export default function CustomerShopPage() {
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 9 }).map((_, i) => (
             <div key={i} className="bg-gray-100 dark:bg-gray-800 rounded-lg h-64 animate-pulse" />
           ))}
         </div>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-12 text-center text-gray-500 dark:text-gray-400">
+            <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">Couldn&apos;t load products</p>
+            <button
+              onClick={load}
+              className="mt-3 inline-flex items-center gap-2 text-sm text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Try again
+            </button>
+          </CardContent>
+        </Card>
       ) : products.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-gray-500 dark:text-gray-400">
@@ -103,7 +114,7 @@ export default function CustomerShopPage() {
                     )}
                     <div className="flex items-center justify-between mt-2 gap-1">
                       <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-                        {product.variants.length > 0 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
+                        {product.variants.length > 1 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
                       </span>
                       {product.estimatedMinutes && (
                         <span className="text-xs text-gray-400 dark:text-gray-500">{formatTime(product.estimatedMinutes)}</span>
@@ -142,7 +153,7 @@ export default function CustomerShopPage() {
                   )}
                   <div className="flex items-center justify-between mt-3 gap-2">
                     <span className="text-base font-bold text-brand-600 dark:text-brand-400 shrink-0">
-                      {product.variants.length > 0 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
+                      {product.variants.length > 1 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
                     </span>
                     <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 shrink-0">
                       {product.variants.length > 1 && (

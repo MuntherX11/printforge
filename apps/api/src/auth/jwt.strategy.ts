@@ -46,10 +46,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         throw new UnauthorizedException();
       }
 
-      if (!customer.isApproved) {
-        throw new UnauthorizedException('Account pending approval');
-      }
-
       return {
         id: customer.id,
         email: customer.email,

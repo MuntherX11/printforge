@@ -7,6 +7,9 @@ export class CustomerGuard implements CanActivate {
     if (!user || user.userType !== 'customer') {
       throw new ForbiddenException('Customer access only');
     }
+    if (!user.isApproved) {
+      throw new ForbiddenException('Account pending approval');
+    }
     return true;
   }
 }

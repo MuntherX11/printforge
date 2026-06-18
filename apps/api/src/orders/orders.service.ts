@@ -5,6 +5,7 @@ import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagina
 import { generateNumber } from '../common/utils/number-generator';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
+import { DiscordNotificationService } from '../communications/discord-notification.service';
 import { SettingsService } from '../settings/settings.service';
 
 /** Minimal shape of a customer row returned via Prisma include. */
@@ -21,6 +22,7 @@ export class OrdersService {
     @Optional() private emailNotifications?: EmailNotificationService,
     @Optional() private whatsapp?: WhatsAppService,
     @Optional() private settingsService?: SettingsService,
+    @Optional() private discord?: DiscordNotificationService,
   ) {}
 
   async create(dto: CreateOrderDto) {
@@ -260,6 +262,12 @@ export class OrdersService {
   async createForCustomer(customerId: string, dto: CustomerCreateOrderDto) {
     if (!dto.items?.length) throw new BadRequestException('Order must have at least one item');
 
+    for (const item of dto.items) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 50) {
+        throw new BadRequestException('Quantity must be a whole number between 1 and 50');
+      }
+    }
+
     // Resolve prices from DB — never trust client-supplied prices
     const resolvedItems = await Promise.all(
       dto.items.map(async item => {
@@ -277,7 +285,7 @@ export class OrdersService {
             description: `${variant.product.name} — ${variant.name}`,
             quantity: item.quantity,
             unitPrice: variantPrice,
-            totalPrice: item.quantity * variantPrice,
+            totalPrice: Math.round(item.quantity * variantPrice * 1000) / 1000,
           };
         } else if (item.productId) {
           const product = await this.prisma.product.findFirst({
@@ -292,7 +300,7 @@ export class OrdersService {
             description: product.name,
             quantity: item.quantity,
             unitPrice: product.basePrice,
-            totalPrice: item.quantity * product.basePrice,
+            totalPrice: Math.round(item.quantity * product.basePrice * 1000) / 1000,
           };
         }
         throw new BadRequestException('Each item must have variantId or productId');
@@ -310,24 +318,40 @@ export class OrdersService {
     }
     if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
-    const subtotal = resolvedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const subtotal = Math.round(resolvedItems.reduce((sum, item) => sum + item.totalPrice, 0) * 1000) / 1000;
     const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
-    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
-    const tax = subtotal * taxRate;
-    const total = subtotal + tax;
+    const taxRateRaw = parseFloat(taxRateSetting?.value || '0');
+    const taxRate = (taxRateRaw >= 0 && taxRateRaw <= 100) ? taxRateRaw / 100 : 0;
+    const tax = Math.round(subtotal * taxRate * 1000) / 1000;
+    const total = Math.round((subtotal + tax) * 1000) / 1000;
+    const sanitizedNotes = dto.notes
+      ? dto.notes.replace(/<[^>]*>/g, '').trim().slice(0, 1000) || undefined
+      : undefined;
 
-    return this.prisma.order.create({
+    const order = await this.prisma.order.create({
       data: {
         orderNumber,
         customerId,
-        notes: dto.notes,
+        notes: sanitizedNotes,
         subtotal,
         tax,
         total,
         items: { create: resolvedItems },
       },
-      include: { items: true },
+      include: {
+        items: true,
+        customer: { select: { name: true } },
+      },
     });
+
+    this.discord?.notifyNewPortalOrder({
+      orderNumber: order.orderNumber,
+      customerName: (order.customer as { name: string } | null)?.name ?? 'Customer',
+      total: order.total,
+      itemCount: order.items.length,
+    }).catch(() => {});
+
+    return order;
   }
 
   async update(id: string, dto: UpdateOrderDto) {
