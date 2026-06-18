@@ -10,9 +10,12 @@ import {
   User,
   Zap,
   ShoppingCart,
+  Store,
+  MessageCircle,
 } from 'lucide-react';
 
 const navigation = [
+  { name: 'Shop', href: '/dashboard/shop', icon: Store },
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Quick Quote', href: '/dashboard/quick-quote', icon: Zap },
   { name: 'My Quotes', href: '/dashboard/quotes', icon: FileText },
@@ -52,6 +55,17 @@ export function CustomerSidebar() {
           );
         })}
       </nav>
+      <div className="px-3 py-4 border-t dark:border-gray-700">
+        <a
+          href="https://wa.me/968"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100 transition-colors"
+        >
+          <MessageCircle className="h-5 w-5 flex-shrink-0 text-green-500" />
+          Chat with us
+        </a>
+      </div>
     </div>
   );
 }

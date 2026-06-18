@@ -88,6 +88,50 @@ export class ProductsService {
     });
   }
 
+  async findPublicCatalog() {
+    const products = await this.prisma.product.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        imageUrl: true,
+        basePrice: true,
+        estimatedMinutes: true,
+        variants: {
+          where: { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, name: true, basePrice: true },
+        },
+      },
+    });
+    // Only return products with a price set
+    return products.filter(p => (p.basePrice ?? 0) > 0 || p.variants.some(v => (v.basePrice ?? 0) > 0));
+  }
+
+  async findOnePublic(id: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        imageUrl: true,
+        basePrice: true,
+        estimatedMinutes: true,
+        estimatedGrams: true,
+        variants: {
+          where: { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, name: true, sku: true, basePrice: true, estimatedMinutes: true, estimatedGrams: true },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
+
   async findOne(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },

@@ -619,9 +619,21 @@ export interface CreateOrderDto {
 
 export interface CreateOrderItemDto {
   productId?: string;
+  variantId?: string;
   description: string;
   quantity: number;
   unitPrice: number;
+}
+
+export interface CustomerCreateOrderItemDto {
+  productId?: string;
+  variantId?: string;
+  quantity: number;
+}
+
+export interface CustomerCreateOrderDto {
+  notes?: string;
+  items: CustomerCreateOrderItemDto[];
 }
 
 export interface UpdateOrderDto {

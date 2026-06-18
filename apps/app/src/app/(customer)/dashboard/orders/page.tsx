@@ -66,6 +66,7 @@ export default function CustomerOrdersPage() {
                 {order.items?.map((item, i) => (
                   <div key={i} className="flex justify-between text-sm py-1">
                     <span className="dark:text-gray-300">{item.description} x{item.quantity}</span>
+                    <span className="text-gray-500 dark:text-gray-400">{(item.unitPrice * item.quantity).toFixed(3)} OMR</span>
                   </div>
                 ))}
                 <div className="flex justify-between font-semibold text-sm mt-2 pt-2 border-t dark:border-gray-700">

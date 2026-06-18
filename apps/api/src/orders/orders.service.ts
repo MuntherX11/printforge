@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, Optional, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateOrderDto, UpdateOrderDto, OrderStatus } from '@printforge/types';
+import { CreateOrderDto, UpdateOrderDto, OrderStatus, CustomerCreateOrderDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
 import { EmailNotificationService } from '../communications/email-notification.service';
@@ -37,6 +37,7 @@ export class OrdersService {
 
     const items = dto.items.map(item => ({
       productId: item.productId,
+      variantId: item.variantId,
       description: item.description,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
@@ -253,6 +254,79 @@ export class OrdersService {
         createdAt: true,
         items: { select: { description: true, quantity: true, unitPrice: true } },
       },
+    });
+  }
+
+  async createForCustomer(customerId: string, dto: CustomerCreateOrderDto) {
+    if (!dto.items?.length) throw new BadRequestException('Order must have at least one item');
+
+    // Resolve prices from DB — never trust client-supplied prices
+    const resolvedItems = await Promise.all(
+      dto.items.map(async item => {
+        if (item.variantId) {
+          const variant = await this.prisma.productVariant.findFirst({
+            where: { id: item.variantId, isActive: true },
+            select: { id: true, name: true, basePrice: true, product: { select: { id: true, name: true } } },
+          });
+          if (!variant) throw new BadRequestException('Selected option is no longer available');
+          const variantPrice = variant.basePrice ?? 0;
+          if (variantPrice <= 0) throw new BadRequestException(`"${variant.name}" has no price set — please contact us for a quote`);
+          return {
+            productId: variant.product.id,
+            variantId: variant.id,
+            description: `${variant.product.name} — ${variant.name}`,
+            quantity: item.quantity,
+            unitPrice: variantPrice,
+            totalPrice: item.quantity * variantPrice,
+          };
+        } else if (item.productId) {
+          const product = await this.prisma.product.findFirst({
+            where: { id: item.productId, isActive: true },
+            select: { id: true, name: true, basePrice: true },
+          });
+          if (!product) throw new BadRequestException('Selected product is no longer available');
+          if (product.basePrice <= 0) throw new BadRequestException(`"${product.name}" has no price set — please contact us for a quote`);
+          return {
+            productId: product.id,
+            variantId: undefined,
+            description: product.name,
+            quantity: item.quantity,
+            unitPrice: product.basePrice,
+            totalPrice: item.quantity * product.basePrice,
+          };
+        }
+        throw new BadRequestException('Each item must have variantId or productId');
+      }),
+    );
+
+    let orderNumber: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
+        break;
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
+      }
+    }
+    if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
+
+    const subtotal = resolvedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
+    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
+    const tax = subtotal * taxRate;
+    const total = subtotal + tax;
+
+    return this.prisma.order.create({
+      data: {
+        orderNumber,
+        customerId,
+        notes: dto.notes,
+        subtotal,
+        tax,
+        total,
+        items: { create: resolvedItems },
+      },
+      include: { items: true },
     });
   }
 

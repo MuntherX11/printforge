@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
+import { CustomerGuard } from '../auth/guards/customer.guard';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -42,8 +43,21 @@ export class ProductsController {
   }
 
   @Get('active')
+  @UseGuards(StaffGuard)
   findAllActive() {
     return this.productsService.findAllActive();
+  }
+
+  @Get('customer/catalog')
+  @UseGuards(CustomerGuard)
+  findPublicCatalog() {
+    return this.productsService.findPublicCatalog();
+  }
+
+  @Get('customer/:id')
+  @UseGuards(CustomerGuard)
+  findOnePublic(@Param('id') id: string) {
+    return this.productsService.findOnePublic(id);
   }
 
   @Post('upload-bom')

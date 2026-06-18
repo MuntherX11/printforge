@@ -5,7 +5,7 @@ import { StaffGuard } from '../auth/guards/staff.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CreateOrderDto, UpdateOrderDto } from '@printforge/types';
+import { CreateOrderDto, UpdateOrderDto, CustomerCreateOrderDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 @Controller('orders')
@@ -30,6 +30,12 @@ export class OrdersController {
   @UseGuards(CustomerGuard)
   findForCustomer(@Req() req: any) {
     return this.ordersService.findForCustomer(req.user.id);
+  }
+
+  @Post('customer')
+  @UseGuards(CustomerGuard)
+  createForCustomer(@Req() req: any, @Body() dto: CustomerCreateOrderDto) {
+    return this.ordersService.createForCustomer(req.user.id, dto);
   }
 
   @Get(':id')

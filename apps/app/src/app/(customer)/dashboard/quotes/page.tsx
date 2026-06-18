@@ -20,6 +20,14 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' 
   EXPIRED: 'warning',
 };
 
+const statusLabel: Record<string, string> = {
+  DRAFT: 'Pending Review',
+  SENT: 'Quote Ready',
+  ACCEPTED: 'Accepted',
+  REJECTED: 'Rejected',
+  EXPIRED: 'Expired',
+};
+
 export default function CustomerQuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +72,7 @@ export default function CustomerQuotesPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">My Quotes</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">My Quotes</h1>
 
       {quotes.length === 0 ? (
         <EmptyState
@@ -81,7 +89,7 @@ export default function CustomerQuotesPage() {
                   <div>
                     <div className="flex items-center gap-3">
                       <span className="font-semibold text-gray-900">{q.quoteNumber}</span>
-                      <Badge variant={statusVariant[q.status] || 'default'}>{q.status}</Badge>
+                      <Badge variant={statusVariant[q.status] || 'default'}>{statusLabel[q.status] ?? q.status}</Badge>
                     </div>
                     <div className="text-sm text-gray-500 mt-1">
                       {q._count?.items || 0} item(s)
