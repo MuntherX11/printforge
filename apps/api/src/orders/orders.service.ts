@@ -7,6 +7,7 @@ import { EmailNotificationService } from '../communications/email-notification.s
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { DiscordNotificationService } from '../communications/discord-notification.service';
 import { SettingsService } from '../settings/settings.service';
+import { RedisCacheService } from '../common/redis/redis-cache.service';
 
 /** Minimal shape of a customer row returned via Prisma include. */
 interface CustomerRecord {
@@ -23,6 +24,7 @@ export class OrdersService {
     @Optional() private whatsapp?: WhatsAppService,
     @Optional() private settingsService?: SettingsService,
     @Optional() private discord?: DiscordNotificationService,
+    @Optional() private cache?: RedisCacheService,
   ) {}
 
   async create(dto: CreateOrderDto) {
@@ -52,7 +54,7 @@ export class OrdersService {
     const tax = subtotal * taxRate;
     const total = subtotal + tax;
 
-    return this.prisma.order.create({
+    const order = await this.prisma.order.create({
       data: {
         orderNumber,
         customerId: dto.customerId,
@@ -66,6 +68,8 @@ export class OrdersService {
       },
       include: { customer: true, items: true },
     });
+    this.cache?.invalidate('dashboard:kpis').catch(() => {});
+    return order;
   }
 
   async findAll(query: PaginationDto, status?: string) {
@@ -396,6 +400,7 @@ export class OrdersService {
       }
     }
 
+    this.cache?.invalidate('dashboard:kpis').catch(() => {});
     return updated;
   }
 }
