@@ -10,8 +10,10 @@ export interface Params {
   overlayThickness: number
   pocketDepth: number
   englishScale: number
-  nudgeX: number
-  nudgeY: number
+  arNudgeX: number
+  arNudgeY: number
+  enNudgeX: number
+  enNudgeY: number
   plinth: boolean
   plinthHeight: number
   keel: number
@@ -442,8 +444,8 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
       const arBB = bboxOf(ar)
       const enRaw = prepareFloating(shaped.english, p.size * p.englishScale, 'width')
       const enBB = bboxOf(enRaw)
-      const cx = (arBB.minX + arBB.maxX) / 2 + p.nudgeX
-      const cy = (arBB.minY + arBB.maxY) / 2 + p.nudgeY
+      const cx = (arBB.minX + arBB.maxX) / 2 + p.enNudgeX
+      const cy = (arBB.minY + arBB.maxY) / 2 + p.enNudgeY
       const en = ctx.t(enRaw.translate([cx - (enBB.minX + enBB.maxX) / 2, cy - (enBB.minY + enBB.maxY) / 2]))
 
       const pocket = ctx.t(en.intersect(ar))
@@ -468,8 +470,8 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
       // Arabic stands grounded; English stands in front, centered under the
       // Arabic's lower mass so their silhouettes bond (Sulaiman/Tamim style)
       let ar = prepareStanding(shaped.arabic, p.size, 'max')
-      if (p.nudgeY !== 0) {
-        ar = clipGround(ctx, ctx.t(ar.translate([0, p.nudgeY])))
+      if (p.arNudgeX !== 0 || p.arNudgeY !== 0) {
+        ar = clipGround(ctx, ctx.t(ar.translate([p.arNudgeX, p.arNudgeY])))
       }
 
       const en0 = prepareStanding(shaped.english, p.size * p.englishScale, 'width')
@@ -478,7 +480,10 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
       const band = ctx.t(ctx.t(wasm.CrossSection.square([100000, bandH], true)).translate([0, bandH / 2]))
       const lowSlice = ctx.t(ar.intersect(band))
       const cx = lowSlice.area() > 1 ? centroidOf(lowSlice)[0] : 0
-      const en = ctx.t(en0.translate([cx + p.nudgeX, 0]))
+      let en = ctx.t(en0.translate([cx + p.enNudgeX, p.enNudgeY]))
+      if (p.enNudgeY < 0) en = clipGround(ctx, en)
+      if (p.enNudgeY > 1)
+        warnings.push('The English name is lifted off the ground — it will hang on the glue joint instead of standing.')
 
       const overlap = ctx.t(ar.intersect(en))
       if (overlap.area() < 40)
@@ -534,8 +539,8 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
 
     const arRaw = prepareFloating(shaped.arabic, (lBB.maxX - lBB.minX) * 1.2, 'max')
     const aBB = bboxOf(arRaw)
-    const cx = (lBB.minX + lBB.maxX) / 2 + p.nudgeX
-    const cy = (lBB.minY + lBB.maxY) / 2 + p.nudgeY
+    const cx = (lBB.minX + lBB.maxX) / 2 + p.arNudgeX
+    const cy = (lBB.minY + lBB.maxY) / 2 + p.arNudgeY
     const ar = ctx.t(arRaw.translate([cx - (aBB.minX + aBB.maxX) / 2, cy - (aBB.minY + aBB.maxY) / 2]))
 
     const pocket = ctx.t(ar.intersect(letter))
