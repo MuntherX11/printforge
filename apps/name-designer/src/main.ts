@@ -34,6 +34,7 @@ function readParams(): Params {
     plinth: ($('plinth') as HTMLInputElement).checked,
     plinthHeight: num('plinthHeight'),
     keel: num('keel'),
+    joinArea: num('joinArea'),
     baseColor: val('baseColor'),
     accentColor: val('accentColor'),
   }
@@ -100,7 +101,8 @@ function renderResult(res: BuildResult): void {
   $('stats').innerHTML =
     `Footprint: <b>${res.stats.widthMm.toFixed(0)} × ${res.stats.heightMm.toFixed(0)} mm</b> (bed limit 235)<br>` +
     `Parts: ${res.parts.length} (${partList})` +
-    (res.stats.bridges ? `<br>Auto-bridges added for floating dots: ${res.stats.bridges}` : '')
+    (res.stats.joins ? `<br>Letter groups &amp; dots pulled together: ${res.stats.joins}` : '') +
+    (res.stats.bridges ? `<br>Fallback connectors (could not join by sliding): ${res.stats.bridges}` : '')
   ;($('exportStl') as HTMLButtonElement).disabled = false
   ;($('export3mf') as HTMLButtonElement).disabled = false
 }

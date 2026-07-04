@@ -15,6 +15,7 @@ export interface Params {
   plinth: boolean
   plinthHeight: number
   keel: number
+  joinArea: number
   baseColor: string
   accentColor: string
 }
@@ -33,7 +34,7 @@ export interface BuiltPart {
 export interface BuildResult {
   parts: BuiltPart[]
   warnings: string[]
-  stats: { widthMm: number; heightMm: number; bridges: number }
+  stats: { widthMm: number; heightMm: number; bridges: number; joins: number }
 }
 
 export interface ShapedSets {
@@ -204,12 +205,56 @@ function bridgeQuad(a: Pt, b: Pt, w: number): Pt[] {
   ]
 }
 
+function nearestBetween(aPts: Pt[], bPts: Pt[]): { pa: Pt; pb: Pt; d: number } {
+  let best = Infinity
+  let pa: Pt = aPts[0]
+  let pb: Pt = bPts[0]
+  for (const p of bPts)
+    for (const q of aPts) {
+      const d = dist2(p, q)
+      if (d < best) {
+        best = d
+        pa = q
+        pb = p
+      }
+    }
+  return { pa, pb, d: Math.sqrt(best) }
+}
+
 /**
- * Make the cross-section a single connected piece: keep the largest component,
- * bridge every other component (Arabic dots, hamzas, i-dots…) to it with a
- * small rectangular strut. Tiny debris is discarded.
+ * Slide `moving` toward `fixed` along the nearest-gap vector until their
+ * silhouettes overlap by at least `joinArea` mm².
  */
-function weld(ctx: Ctx, cs: any, bridgeW = BRIDGE_W): { cs: any; bridges: number } {
+function slideToJoin(
+  ctx: Ctx,
+  fixed: any,
+  moving: any,
+  joinArea: number,
+  maxExtra: number,
+): { cs: any; shift: Pt; ok: boolean } {
+  if (ctx.t(moving.intersect(fixed)).area() >= joinArea * 0.6) return { cs: moving, shift: [0, 0], ok: true }
+  const { pa, pb, d } = nearestBetween(allPts(fixed.toPolygons()), allPts(moving.toPolygons()))
+  let dx = pa[0] - pb[0]
+  let dy = pa[1] - pb[1]
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-6) {
+    dx = -1
+    dy = 0
+  } else {
+    dx /= len
+    dy /= len
+  }
+  const step = 0.5
+  for (let extra = step; extra <= maxExtra; extra += step) {
+    const t = d + extra
+    const cand = ctx.t(moving.translate([dx * t, dy * t]))
+    if (ctx.t(cand.intersect(fixed)).area() >= joinArea) return { cs: cand, shift: [dx * t, dy * t], ok: true }
+  }
+  return { cs: moving, shift: [0, 0], ok: false }
+}
+
+/** Last-resort strut welding for components whose position must not change. */
+function strutFix(ctx: Ctx, cs: any, bridgeW = BRIDGE_W): { cs: any; bridges: number } {
   let comps: any[]
   try {
     comps = cs.decompose()
@@ -218,8 +263,7 @@ function weld(ctx: Ctx, cs: any, bridgeW = BRIDGE_W): { cs: any; bridges: number
   }
   comps.forEach((c) => ctx.t(c))
   if (comps.length <= 1) return { cs, bridges: 0 }
-  comps.sort((p, q) => q.area() - p.area())
-
+  comps.sort((a, b) => b.area() - a.area())
   let acc = comps[0]
   let accPts = allPts(acc.toPolygons())
   let bridges = 0
@@ -227,24 +271,82 @@ function weld(ctx: Ctx, cs: any, bridgeW = BRIDGE_W): { cs: any; bridges: number
     const comp = comps[i]
     if (comp.area() < 0.5) continue // debris
     const pts = allPts(comp.toPolygons())
-    let best = Infinity
-    let pa: Pt = accPts[0]
-    let pb: Pt = pts[0]
-    for (const p of pts)
-      for (const q of accPts) {
-        const d = dist2(p, q)
-        if (d < best) {
-          best = d
-          pa = q
-          pb = p
-        }
-      }
+    const { pa, pb } = nearestBetween(accPts, pts)
     const strut = ctx.t(new wasm.CrossSection([bridgeQuad(pa, pb, bridgeW)], 'EvenOdd'))
     acc = ctx.t(ctx.t(acc.add(comp)).add(strut))
     accPts = accPts.concat(pts)
     bridges++
   }
   return { cs: acc, bridges }
+}
+
+/**
+ * Join a word into one connected piece by pulling separated letter groups
+ * closer and nestling floating dots into the strokes — no visible connector
+ * struts. A strut is added only when sliding cannot reach.
+ */
+function weld(ctx: Ctx, cs: any, joinArea = 12): { cs: any; joins: number; bridges: number } {
+  let comps: any[]
+  try {
+    comps = cs.decompose()
+  } catch {
+    return { cs, joins: 0, bridges: 0 }
+  }
+  comps.forEach((c) => ctx.t(c))
+  comps = comps.filter((c) => c.area() >= 0.5)
+  if (comps.length <= 1) return { cs: comps[0] ?? cs, joins: 0, bridges: 0 }
+
+  const maxA = Math.max(...comps.map((c) => c.area()))
+  const chunks = comps.filter((c) => c.area() >= maxA * 0.1)
+  const marks = comps.filter((c) => c.area() < maxA * 0.1)
+  chunks.sort((a, b) => bboxOf(a).minX - bboxOf(b).minX)
+
+  // Remember which letter group each mark (dot/hamza) belongs to, pre-shift
+  const chunkPts = chunks.map((c) => allPts(c.toPolygons()))
+  const markBase = marks.map((m) => {
+    const mPts = allPts(m.toPolygons())
+    let best = Infinity
+    let bi = 0
+    for (let i = 0; i < chunks.length; i++) {
+      const { d } = nearestBetween(chunkPts[i], mPts)
+      if (d < best) {
+        best = d
+        bi = i
+      }
+    }
+    return bi
+  })
+
+  let joins = 0
+  let bridges = 0
+  const shifts: Pt[] = [[0, 0]]
+  let acc = chunks[0]
+  for (let i = 1; i < chunks.length; i++) {
+    const r = slideToJoin(ctx, acc, chunks[i], joinArea, 18)
+    shifts.push(r.shift)
+    if (r.ok) {
+      if (r.shift[0] !== 0 || r.shift[1] !== 0) joins++
+    } else {
+      const { pa, pb } = nearestBetween(allPts(acc.toPolygons()), allPts(r.cs.toPolygons()))
+      acc = ctx.t(acc.add(ctx.t(new wasm.CrossSection([bridgeQuad(pa, pb, BRIDGE_W)], 'EvenOdd'))))
+      bridges++
+    }
+    acc = ctx.t(acc.add(r.cs))
+  }
+  for (let j = 0; j < marks.length; j++) {
+    const s = shifts[markBase[j]] ?? [0, 0]
+    const m0 = ctx.t(marks[j].translate(s))
+    const r = slideToJoin(ctx, acc, m0, Math.min(5, joinArea), 24)
+    if (r.ok) {
+      if (r.shift[0] !== 0 || r.shift[1] !== 0) joins++
+    } else {
+      const { pa, pb } = nearestBetween(allPts(acc.toPolygons()), allPts(r.cs.toPolygons()))
+      acc = ctx.t(acc.add(ctx.t(new wasm.CrossSection([bridgeQuad(pa, pb, BRIDGE_W)], 'EvenOdd'))))
+      bridges++
+    }
+    acc = ctx.t(acc.add(r.cs))
+  }
+  return { cs: acc, joins, bridges }
 }
 
 /** Width of ground contact and number of contact patches, measured in a thin slice above y=0. */
@@ -309,10 +411,23 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
   const warnings: string[] = []
   const parts: BuiltPart[] = []
   let bridges = 0
+  let joins = 0
 
-  const prepare = (sr: ShapeResult, target: number, by: 'width' | 'height' | 'max'): any => {
-    const cs = normalize(ctx, csFromShaped(ctx, sr), target, by)
-    return ground(ctx, cs, p.keel)
+  /** normalize → pull letter groups/dots together → re-fit to size. */
+  const prepareFloating = (sr: ShapeResult, target: number, by: 'width' | 'height' | 'max'): any => {
+    const n1 = normalize(ctx, csFromShaped(ctx, sr), target, by)
+    const j = weld(ctx, n1, p.joinArea)
+    joins += j.joins
+    bridges += j.bridges
+    return normalize(ctx, j.cs, target, by)
+  }
+
+  /** prepareFloating + keel-grounding (+ strut fixup if the keel cut orphaned a tail). */
+  const prepareStanding = (sr: ShapeResult, target: number, by: 'width' | 'height' | 'max'): any => {
+    const g = ground(ctx, prepareFloating(sr, target, by), p.keel)
+    const fix = strutFix(ctx, g)
+    bridges += fix.bridges
+    return fix.cs
   }
 
   let overallBB: BBox = { minX: 0, minY: 0, maxX: 0, maxY: 0 }
@@ -322,19 +437,14 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
 
     if (p.placement === 'overlay') {
       // Arabic stands on its own; English is a thin plate glued onto its face
-      const arW = weld(ctx, prepare(shaped.arabic, p.size, 'max'))
-      bridges += arW.bridges
-      let ar = arW.cs
+      let ar = prepareStanding(shaped.arabic, p.size, 'max')
       if (p.plinth) ar = addPlinth(ctx, ar, p.plinthHeight)
       const arBB = bboxOf(ar)
-      const enRaw = normalize(ctx, csFromShaped(ctx, shaped.english), p.size * p.englishScale, 'width')
+      const enRaw = prepareFloating(shaped.english, p.size * p.englishScale, 'width')
       const enBB = bboxOf(enRaw)
       const cx = (arBB.minX + arBB.maxX) / 2 + p.nudgeX
       const cy = (arBB.minY + arBB.maxY) / 2 + p.nudgeY
-      const enMoved = ctx.t(enRaw.translate([cx - (enBB.minX + enBB.maxX) / 2, cy - (enBB.minY + enBB.maxY) / 2]))
-      const enWelded = weld(ctx, enMoved)
-      bridges += enWelded.bridges
-      const en = enWelded.cs
+      const en = ctx.t(enRaw.translate([cx - (enBB.minX + enBB.maxX) / 2, cy - (enBB.minY + enBB.maxY) / 2]))
 
       const pocket = ctx.t(en.intersect(ar))
       if (pocket.area() < en.area() * 0.45)
@@ -357,22 +467,18 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
     } else {
       // Arabic stands grounded; English stands in front, centered under the
       // Arabic's lower mass so their silhouettes bond (Sulaiman/Tamim style)
-      const arW = weld(ctx, prepare(shaped.arabic, p.size, 'max'))
-      bridges += arW.bridges
-      let ar = arW.cs
+      let ar = prepareStanding(shaped.arabic, p.size, 'max')
       if (p.nudgeY !== 0) {
         ar = clipGround(ctx, ctx.t(ar.translate([0, p.nudgeY])))
       }
 
-      const enPrep = prepare(shaped.english, p.size * p.englishScale, 'width')
-      const enWelded = weld(ctx, enPrep)
-      bridges += enWelded.bridges
-      const enBB0 = bboxOf(enWelded.cs)
+      const en0 = prepareStanding(shaped.english, p.size * p.englishScale, 'width')
+      const enBB0 = bboxOf(en0)
       const bandH = Math.max(20, enBB0.maxY - enBB0.minY)
       const band = ctx.t(ctx.t(wasm.CrossSection.square([100000, bandH], true)).translate([0, bandH / 2]))
       const lowSlice = ctx.t(ar.intersect(band))
       const cx = lowSlice.area() > 1 ? centroidOf(lowSlice)[0] : 0
-      const en = ctx.t(enWelded.cs.translate([cx + p.nudgeX, 0]))
+      const en = ctx.t(en0.translate([cx + p.nudgeX, 0]))
 
       const overlap = ctx.t(ar.intersect(en))
       if (overlap.area() < 40)
@@ -384,7 +490,7 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
         warnings.push('The Arabic piece does not reach the ground — it will be carried entirely by the glue joint to the English name.')
 
       if (p.placement === 'inline') {
-        const merged = weld(ctx, ctx.t(ar.add(en)))
+        const merged = strutFix(ctx, ctx.t(ar.add(en)))
         bridges += merged.bridges
         let mergedCS = merged.cs
         if (p.plinth) mergedCS = addPlinth(ctx, mergedCS, p.plinthHeight)
@@ -423,19 +529,14 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
     }
   } else if (p.mode === 'm1') {
     if (!shaped.letter || !shaped.arabic) throw new Error('Letter and Arabic name are required')
-    const letterW = weld(ctx, prepare(shaped.letter, p.size, 'height'))
-    bridges += letterW.bridges
-    const letter = letterW.cs
+    const letter = prepareStanding(shaped.letter, p.size, 'height')
     const lBB = bboxOf(letter)
 
-    const arRaw = normalize(ctx, csFromShaped(ctx, shaped.arabic), (lBB.maxX - lBB.minX) * 1.2, 'max')
+    const arRaw = prepareFloating(shaped.arabic, (lBB.maxX - lBB.minX) * 1.2, 'max')
     const aBB = bboxOf(arRaw)
     const cx = (lBB.minX + lBB.maxX) / 2 + p.nudgeX
     const cy = (lBB.minY + lBB.maxY) / 2 + p.nudgeY
-    const arMoved = ctx.t(arRaw.translate([cx - (aBB.minX + aBB.maxX) / 2, cy - (aBB.minY + aBB.maxY) / 2]))
-    const arWelded = weld(ctx, arMoved)
-    bridges += arWelded.bridges
-    const ar = arWelded.cs
+    const ar = ctx.t(arRaw.translate([cx - (aBB.minX + aBB.maxX) / 2, cy - (aBB.minY + aBB.maxY) / 2]))
 
     const pocket = ctx.t(ar.intersect(letter))
     if (pocket.area() < ar.area() * 0.35)
@@ -464,9 +565,7 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
   } else {
     // m3: Arabic only
     if (!shaped.arabic) throw new Error('Arabic name is required')
-    const arW = weld(ctx, prepare(shaped.arabic, p.size, 'max'))
-    bridges += arW.bridges
-    let cs = arW.cs
+    let cs = prepareStanding(shaped.arabic, p.size, 'max')
     if (p.plinth) cs = addPlinth(ctx, cs, p.plinthHeight)
 
     const solid = extrudeAt(ctx, cs, p.baseDepth, 0)
@@ -485,6 +584,7 @@ function buildInner(ctx: Ctx, shaped: ShapedSets, p: Params): BuildResult {
       widthMm: overallBB.maxX - overallBB.minX,
       heightMm: overallBB.maxY - overallBB.minY,
       bridges,
+      joins,
     },
   }
 }
