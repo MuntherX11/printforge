@@ -30,10 +30,13 @@ async function bootstrap() {
     crossOriginEmbedderPolicy: false, // allow loading images
   }));
 
-  // CORS — allow frontend origin only; never fall back to wildcard
-  const allowedOrigin = process.env.CORS_ORIGIN || 'https://printforge.mctx.tech';
+  // CORS — allow listed frontend origins only (comma-separated); never fall back to wildcard
+  const allowedOrigin = (process.env.CORS_ORIGIN || 'https://printforge.mctx.tech')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: allowedOrigin,
+    origin: allowedOrigin.length === 1 ? allowedOrigin[0] : allowedOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
