@@ -90,7 +90,7 @@ export class AddonsController {
   @Post('upload')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
   upload(@UploadedFile() file: Express.Multer.File) {
     return this.addons.install(file);
   }

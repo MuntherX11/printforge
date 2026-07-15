@@ -29,6 +29,7 @@ import {
   Sparkles,
   Wrench,
   Calculator,
+  Shirt,
   Image as ImageIcon,
   X,
   type LucideIcon,
@@ -38,7 +39,7 @@ import {
 // small vs. importing all of lucide). Unknown names fall back to Puzzle.
 const ADDON_ICONS: Record<string, LucideIcon> = {
   Puzzle, Type, PenTool, Ruler, Shapes, Sparkles, Wrench, Calculator,
-  Palette, Box, Boxes, Package, FileText, Image: ImageIcon,
+  Palette, Box, Boxes, Package, FileText, Shirt, Image: ImageIcon,
 };
 
 interface NavItem {
