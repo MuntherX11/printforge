@@ -43,6 +43,15 @@ export default function AddonHostPage() {
     );
   }
 
+  // Clears the loading overlay once the iframe document has loaded. Runs on the
+  // native onLoad, so generic addons that never send `printforge:ready` still
+  // reveal. `printforge:ready` remains an optional enhancement for bridge-aware
+  // addons (it also triggers the init handshake).
+  function handleLoaded() {
+    setReady(true);
+    sendInit();
+  }
+
   // Listen for messages from the addon (ready / toast / navigate).
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
@@ -92,7 +101,7 @@ export default function AddonHostPage() {
           src={`/api/addons/serve/${meta.slug}/${meta.entry}`}
           className="w-full h-full border-0 block"
           sandbox="allow-scripts allow-same-origin allow-downloads allow-forms allow-modals allow-popups"
-          onLoad={sendInit}
+          onLoad={handleLoaded}
         />
       )}
     </div>
