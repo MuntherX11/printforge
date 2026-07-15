@@ -62,8 +62,10 @@ echo "  Database ready."
 
 # ---- Step 4: Run migrations and seed ----
 echo "[5/5] Running database migrations and seed..."
-docker compose exec -T api npx prisma migrate deploy 2>/dev/null || \
-  docker compose exec -T api npx prisma db push --accept-data-loss
+# Pin the Prisma CLI to v5 — the runtime image prunes devDependencies, so a bare
+# `npx prisma` pulls the latest major (v7+) and breaks on the v5 schema.
+docker compose exec -T api npx prisma@5 migrate deploy 2>/dev/null || \
+  docker compose exec -T api npx prisma@5 db push --accept-data-loss
 docker compose exec -T api node -e "
   const { PrismaClient } = require('@prisma/client');
   const bcrypt = require('bcryptjs');

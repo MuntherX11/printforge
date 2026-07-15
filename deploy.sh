@@ -74,8 +74,10 @@ done
 echo "  Database ready."
 
 # Push schema NOW — before the API container starts — so it never boots against a stale schema
+# Pin the Prisma CLI to v5: the runtime image prunes devDependencies, so a bare
+# `npx prisma` downloads the latest major (v7+), which fails on the v5 schema.
 echo "  Applying database schema..."
-docker compose run --rm api npx prisma db push --accept-data-loss
+docker compose run --rm api npx prisma@5 db push --accept-data-loss
 echo "  Schema applied."
 
 # Bring up all remaining containers (API, app, nginx, workers, etc.)
