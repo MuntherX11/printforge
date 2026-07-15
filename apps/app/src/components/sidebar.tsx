@@ -1,14 +1,17 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 import { useSidebar } from '@/components/sidebar-provider';
 import { useAuth } from '@/lib/auth-context';
 import {
   LayoutDashboard,
   Package,
   Box,
+  Boxes,
   ShoppingCart,
   FileText,
   Printer,
@@ -18,15 +21,38 @@ import {
   Hammer,
   Zap,
   Palette,
+  Puzzle,
+  Type,
+  PenTool,
+  Ruler,
+  Shapes,
+  Sparkles,
+  Wrench,
+  Calculator,
+  Image as ImageIcon,
   X,
   type LucideIcon,
 } from 'lucide-react';
+
+// Curated icon set an addon manifest may reference by name (keeps the bundle
+// small vs. importing all of lucide). Unknown names fall back to Puzzle.
+const ADDON_ICONS: Record<string, LucideIcon> = {
+  Puzzle, Type, PenTool, Ruler, Shapes, Sparkles, Wrench, Calculator,
+  Palette, Box, Boxes, Package, FileText, Image: ImageIcon,
+};
 
 interface NavItem {
   name: string;
   href: string;
   icon: LucideIcon;
   roles?: string[]; // if undefined, visible to all staff
+}
+
+interface AddonNav {
+  id: string;
+  slug: string;
+  name: string;
+  icon?: string | null;
 }
 
 const navigation: NavItem[] = [
@@ -48,11 +74,41 @@ export function Sidebar() {
   const pathname = usePathname();
   const { role } = useAuth();
   const { open, setOpen } = useSidebar();
+  const [addons, setAddons] = useState<AddonNav[]>([]);
+
+  // Load active addons once the staff session is known; they render inline in
+  // the main nav (just before Settings).
+  useEffect(() => {
+    if (!role) return;
+    api.get<AddonNav[]>('/addons')
+      .then((list) => setAddons(Array.isArray(list) ? list : []))
+      .catch(() => setAddons([]));
+  }, [role]);
 
   // null = still loading (from AuthContext), '' = loaded but no role (error), string = loaded
-  const filteredNav = role === null
+  const staticNav = role === null
     ? null
     : navigation.filter(item => !item.roles || item.roles.includes(role));
+
+  // Splice addon items in just before Settings so Settings stays at the bottom.
+  const addonItems: NavItem[] = addons.map((a) => ({
+    name: a.name,
+    href: `/addons/${a.slug}`,
+    icon: (a.icon && ADDON_ICONS[a.icon]) || Puzzle,
+  }));
+  let filteredNav: NavItem[] | null = staticNav;
+  if (staticNav) {
+    const settingsIdx = staticNav.findIndex((i) => i.href === '/settings');
+    if (settingsIdx === -1) {
+      filteredNav = [...staticNav, ...addonItems];
+    } else {
+      filteredNav = [
+        ...staticNav.slice(0, settingsIdx),
+        ...addonItems,
+        ...staticNav.slice(settingsIdx),
+      ];
+    }
+  }
 
   return (
     <>

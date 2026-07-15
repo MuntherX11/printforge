@@ -12,6 +12,7 @@ import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
 import { Upload, Send, Database, Download, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { AddonsManager } from '@/components/settings/addons-manager';
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -361,6 +362,9 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Addon management */}
+      <AddonsManager />
     </div>
   );
 }

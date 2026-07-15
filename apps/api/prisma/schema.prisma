@@ -666,6 +666,27 @@ model SystemSetting {
   value   String
 }
 
+// ============ ADDONS ============
+
+// An operator-uploaded mini-app served in an iframe under /addons/{slug}.
+// Static files live on disk at ${UPLOAD_DIR}/addons/{slug}/; this row is the
+// registry entry that drives the sidebar and the addon host page.
+model Addon {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  icon        String?  // lucide-react icon name, e.g. "Type"
+  version     String   @default("0.0.0")
+  entry       String   @default("index.html")
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
 model Notification {
   id          String           @id @default(cuid())
   type        NotificationType
