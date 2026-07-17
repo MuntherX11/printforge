@@ -119,7 +119,9 @@ export class AddonsController {
   // single addon (e.g. a 3D app) loads a burst of assets that would otherwise
   // trip the global rate limiter and 429 mid-load.
   @Get('serve/:slug/*')
-  @SkipThrottle()
+  // Skip every named throttler — a bare @SkipThrottle() only skips a throttler
+  // named "default", which this app doesn't have (tiers are short/medium/long).
+  @SkipThrottle({ short: true, medium: true, long: true })
   @UseGuards(StaffGuard)
   async serve(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response) {
     const assetPath = (req.params as Record<string, string>)['0'] ?? '';
