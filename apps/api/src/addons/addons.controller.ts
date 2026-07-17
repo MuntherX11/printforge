@@ -14,6 +14,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import * as path from 'path';
 import { AddonsService } from './addons.service';
@@ -114,8 +115,11 @@ export class AddonsController {
 
   // Serve addon static files (the iframe document + its assets). Guarded so only
   // logged-in staff can load proprietary addon code. Uses @Res directly, which
-  // bypasses the global TransformInterceptor envelope.
+  // bypasses the global TransformInterceptor envelope. @SkipThrottle because a
+  // single addon (e.g. a 3D app) loads a burst of assets that would otherwise
+  // trip the global rate limiter and 429 mid-load.
   @Get('serve/:slug/*')
+  @SkipThrottle()
   @UseGuards(StaffGuard)
   async serve(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response) {
     const assetPath = (req.params as Record<string, string>)['0'] ?? '';
