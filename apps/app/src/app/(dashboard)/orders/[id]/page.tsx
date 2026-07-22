@@ -261,6 +261,62 @@ export default function OrderDetailPage() {
         );
       })()}
 
+      {order.partAvailability && order.partAvailability.length > 0 && (() => {
+        const allReady = order.partAvailability.every((p: any) => p.hasEnoughStock);
+        return (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Parts &amp; Hardware
+                {allReady ? (
+                  <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs ml-2">All In Stock</Badge>
+                ) : (
+                  <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 text-xs ml-2">Shortages</Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Part</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Required</TableHead>
+                    <TableHead>In Stock</TableHead>
+                    <TableHead>Reserved</TableHead>
+                    <TableHead>Free</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {order.partAvailability.map((p: any) => (
+                    <TableRow key={p.partId}>
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-400">{p.sku || '-'}</TableCell>
+                      <TableCell className="font-mono">{p.qtyNeeded}</TableCell>
+                      <TableCell className="font-mono">{p.stockQty}</TableCell>
+                      <TableCell className="font-mono text-gray-500">{p.reservedStock || 0}</TableCell>
+                      <TableCell className="font-mono font-medium">{p.freeStock}</TableCell>
+                      <TableCell>
+                        {p.hasEnoughStock ? (
+                          <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                            <CheckCircle className="h-4 w-4" /> OK
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="h-4 w-4" /> Need {Math.max(0, p.qtyNeeded - p.freeStock)} more
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <InvoiceList
         invoices={order.invoices || []}
         orderId={id}

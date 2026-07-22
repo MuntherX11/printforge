@@ -245,7 +245,88 @@ export class OrdersService {
       });
     }
 
-    return { ...order, materialAvailability };
+    const partAvailability = await this.getPartAvailability(id, order.items);
+
+    return { ...order, materialAvailability, partAvailability };
+  }
+
+  /**
+   * Non-printed part requirements for an order, netted against stock already
+   * reserved by other open orders. Mirrors materialAvailability but in whole
+   * pieces rather than grams.
+   */
+  private async getPartAvailability(
+    orderId: string,
+    items: Array<{ productId: string | null; quantity: number }>,
+  ) {
+    const productIds = items.map(i => i.productId).filter((p): p is string => !!p);
+    if (productIds.length === 0) return [];
+
+    const bom = await this.prisma.productPart.findMany({
+      where: { productId: { in: productIds } },
+      include: { part: true },
+    });
+    if (bom.length === 0) return [];
+
+    // What this order needs
+    const needs = new Map<string, { partId: string; name: string; sku: string | null; category: string; unitCost: number; stockQty: number; qtyNeeded: number }>();
+    for (const item of items) {
+      if (!item.productId) continue;
+      for (const line of bom.filter(b => b.productId === item.productId)) {
+        const qty = line.quantity * item.quantity;
+        const existing = needs.get(line.partId);
+        if (existing) {
+          existing.qtyNeeded += qty;
+        } else {
+          needs.set(line.partId, {
+            partId: line.partId,
+            name: line.part.name,
+            sku: line.part.sku,
+            category: line.part.category,
+            unitCost: line.part.unitCost,
+            stockQty: line.part.stockQty,
+            qtyNeeded: qty,
+          });
+        }
+      }
+    }
+
+    // What other open orders have already spoken for
+    const partIds = Array.from(needs.keys());
+    const reservingOrders = await this.prisma.order.findMany({
+      where: { id: { not: orderId }, status: { in: ['CONFIRMED', 'IN_PRODUCTION'] } },
+      select: { items: { select: { productId: true, quantity: true } } },
+    });
+    const reservingProductIds = new Set<string>();
+    for (const ro of reservingOrders) {
+      for (const item of ro.items) if (item.productId) reservingProductIds.add(item.productId);
+    }
+    const reserved = new Map<string, number>();
+    if (reservingProductIds.size > 0) {
+      const reservingBom = await this.prisma.productPart.findMany({
+        where: { productId: { in: Array.from(reservingProductIds) }, partId: { in: partIds } },
+        select: { productId: true, partId: true, quantity: true },
+      });
+      for (const ro of reservingOrders) {
+        for (const item of ro.items) {
+          if (!item.productId) continue;
+          for (const line of reservingBom.filter(b => b.productId === item.productId)) {
+            reserved.set(line.partId, (reserved.get(line.partId) || 0) + line.quantity * item.quantity);
+          }
+        }
+      }
+    }
+
+    return Array.from(needs.values()).map(need => {
+      const reservedQty = reserved.get(need.partId) || 0;
+      const freeStock = Math.max(0, need.stockQty - reservedQty);
+      return {
+        ...need,
+        reservedStock: reservedQty,
+        freeStock,
+        hasEnoughStock: freeStock >= need.qtyNeeded,
+      };
+    });
   }
 
   async findForCustomer(customerId: string) {
