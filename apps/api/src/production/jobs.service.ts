@@ -202,6 +202,33 @@ export class JobsService {
         }
       }
 
+      // Non-printed parts (NFC tags, heat inserts, keyrings…): consume the
+      // product's BOM once per finished unit. Component-level jobs are skipped
+      // so a multi-component product doesn't consume the same parts repeatedly
+      // — the parts belong to the assembled product, not each printed piece.
+      if (job.productId && !job.componentId && job.quantityToProduce > 0) {
+        const bom = await tx.productPart.findMany({
+          where: { productId: job.productId },
+          include: { part: { select: { stockQty: true, unitCost: true } } },
+        });
+        for (const line of bom) {
+          const needed = line.quantity * job.quantityToProduce;
+          if (needed <= 0) continue;
+          await tx.part.update({
+            where: { id: line.partId },
+            data: { stockQty: Math.max(0, line.part.stockQty - needed) },
+          });
+          await tx.jobPart.create({
+            data: {
+              jobId: id,
+              partId: line.partId,
+              quantity: needed,
+              unitCost: line.part.unitCost, // snapshot so past jobs stay accurate
+            },
+          });
+        }
+      }
+
       if (job.printerId && job.printDuration) {
         await tx.printer.update({
           where: { id: job.printerId },

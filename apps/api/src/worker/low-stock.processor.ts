@@ -55,6 +55,50 @@ export class LowStockProcessor {
       }
     }
 
-    return { checked: materials.length, alerts: alertCount };
+    const partResult = await this.checkLowStockParts();
+
+    return {
+      checked: materials.length + partResult.checked,
+      alerts: alertCount + partResult.alerts,
+    };
+  }
+
+  /**
+   * Check non-printed parts (NFC tags, inserts, keyrings…) for low stock.
+   * Low stock = stockQty <= reorderPoint. reorderPoint 0 means "not tracked".
+   */
+  private async checkLowStockParts() {
+    const parts = await this.prisma.part.findMany({
+      where: { isActive: true, reorderPoint: { gt: 0 } },
+    });
+
+    let alerts = 0;
+
+    for (const part of parts) {
+      if (part.stockQty > part.reorderPoint) continue;
+
+      // Don't re-alert on the same part within 24h
+      const recentAlert = await this.prisma.notification.findFirst({
+        where: {
+          type: 'LOW_STOCK',
+          entityType: 'part',
+          entityId: part.id,
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      });
+      if (recentAlert) continue;
+
+      await this.notifications.create({
+        type: 'LOW_STOCK',
+        title: `Low Stock: ${part.name}`,
+        message: `${part.name} has ${part.stockQty} left, at or below the reorder point of ${part.reorderPoint}`,
+        entityType: 'part',
+        entityId: part.id,
+      });
+      alerts++;
+      this.logger.log(`Low stock alert (part): ${part.name} — ${part.stockQty} <= ${part.reorderPoint}`);
+    }
+
+    return { checked: parts.length, alerts };
   }
 }

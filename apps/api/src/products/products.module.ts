@@ -5,9 +5,10 @@ import { ProductOnboardingService } from './product-onboarding.service';
 import { ProductsController } from './products.controller';
 import { CostingModule } from '../costing/costing.module';
 import { FileParserModule } from '../file-parser/file-parser.module';
+import { PartsModule } from '../parts/parts.module';
 
 @Module({
-  imports: [CostingModule, FileParserModule],
+  imports: [CostingModule, FileParserModule, PartsModule],
   controllers: [ProductsController],
   providers: [ProductsService, ProductCostingService, ProductOnboardingService],
   exports: [ProductsService, ProductCostingService],

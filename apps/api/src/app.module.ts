@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { CustomersModule } from './customers/customers.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { ProductsModule } from './products/products.module';
+import { PartsModule } from './parts/parts.module';
 import { PrintersModule } from './printers/printers.module';
 import { ProductionModule } from './production/production.module';
 import { CostingModule } from './costing/costing.module';
@@ -47,6 +48,7 @@ import { HealthController } from './health/health.controller';
     CustomersModule,
     InventoryModule,
     ProductsModule,
+    PartsModule,
     PrintersModule,
     ProductionModule,
     CostingModule,

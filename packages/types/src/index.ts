@@ -296,6 +296,49 @@ export interface CreateMaterialDto {
 
 export interface UpdateMaterialDto extends Partial<CreateMaterialDto> {}
 
+// ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
+
+export type PartCategory =
+  | 'FASTENER'
+  | 'ELECTRONICS'
+  | 'HARDWARE'
+  | 'SWITCH'
+  | 'PACKAGING'
+  | 'ADHESIVE'
+  | 'OTHER';
+
+export const PART_CATEGORIES: PartCategory[] = [
+  'FASTENER', 'ELECTRONICS', 'HARDWARE', 'SWITCH', 'PACKAGING', 'ADHESIVE', 'OTHER',
+];
+
+export interface CreatePartDto {
+  name: string;
+  sku?: string;
+  category?: PartCategory;
+  description?: string;
+  /** Cost per single piece. */
+  unitCost?: number;
+  stockQty?: number;
+  reorderPoint?: number;
+  supplier?: string;
+  locationId?: string;
+  isActive?: boolean;
+}
+
+export interface UpdatePartDto extends Partial<CreatePartDto> {}
+
+/** Relative stock change, e.g. +50 on restock or -3 to correct a miscount. */
+export interface AdjustPartStockDto {
+  delta: number;
+  note?: string;
+}
+
+/** Attach a part to a product's BOM (or change its per-unit quantity). */
+export interface SetProductPartDto {
+  partId: string;
+  quantity: number;
+}
+
 export interface CreateStorageLocationDto {
   name: string;
   description?: string;
@@ -410,6 +453,16 @@ export interface ProductCostResult extends CostBreakdown {
     printMinutes: number;
     quantity: number;
     componentCost: number;
+  }>;
+  /** Total cost of non-printed parts (NFC tags, inserts, keyrings…) per unit. */
+  partsCost: number;
+  parts: Array<{
+    partId: string;
+    name: string;
+    category: PartCategory;
+    quantity: number;
+    unitCost: number;
+    lineCost: number;
   }>;
 }
 

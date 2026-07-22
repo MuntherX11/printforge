@@ -14,12 +14,17 @@ import {
   UpdateProductComponentDto,
   CreateProductVariantDto,
   UpdateProductVariantDto,
+  SetProductPartDto,
 } from '@printforge/types';
+import { PartsService } from '../parts/parts.service';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard)
 export class ProductsController {
-  constructor(private productsService: ProductsService) {}
+  constructor(
+    private productsService: ProductsService,
+    private partsService: PartsService,
+  ) {}
 
   @Post()
   @UseGuards(RolesGuard)
@@ -124,6 +129,28 @@ export class ProductsController {
     @Body() dto: UpdateProductComponentDto,
   ) {
     return this.productsService.updateComponent(componentId, dto);
+  }
+
+  // ---- Non-printed parts on the product BOM (NFC tags, inserts, keyrings…) ----
+
+  @Get(':id/parts')
+  @UseGuards(StaffGuard)
+  listParts(@Param('id') id: string) {
+    return this.partsService.listForProduct(id);
+  }
+
+  @Post(':id/parts')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  setPart(@Param('id') id: string, @Body() dto: SetProductPartDto) {
+    return this.partsService.setProductPart(id, dto);
+  }
+
+  @Delete(':id/parts/:partId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  removePart(@Param('id') id: string, @Param('partId') partId: string) {
+    return this.partsService.removeProductPart(id, partId);
   }
 
   @Post(':id/calculate')

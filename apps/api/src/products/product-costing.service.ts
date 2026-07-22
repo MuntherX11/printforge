@@ -22,6 +22,7 @@ export class ProductCostingService {
           },
           orderBy: { sortOrder: 'asc' },
         },
+        parts: { include: { part: true }, orderBy: { sortOrder: 'asc' } },
       },
     });
     if (!product) throw new NotFoundException('Product not found');
@@ -99,7 +100,22 @@ export class ProductCostingService {
       (await this.prisma.systemSetting.findUnique({ where: { key: 'markup_multiplier' } }))?.value || '2.5',
     );
 
-    const suggestedPrice = fullBreakdown.totalCost * markupMultiplier;
+    // Non-printed parts (NFC tags, heat inserts, keyrings…) are a straight
+    // per-unit cost — no machine time or waste — added before markup.
+    const partResults = (product as any).parts.map((pp: any) => ({
+      partId: pp.partId,
+      name: pp.part.name,
+      category: pp.part.category,
+      quantity: pp.quantity,
+      unitCost: pp.part.unitCost,
+      lineCost: Math.round(pp.part.unitCost * pp.quantity * 1000) / 1000,
+    }));
+    const partsCost = Math.round(
+      partResults.reduce((sum: number, p: any) => sum + p.lineCost, 0) * 1000,
+    ) / 1000;
+
+    const totalCost = Math.round((fullBreakdown.totalCost + partsCost) * 1000) / 1000;
+    const suggestedPrice = totalCost * markupMultiplier;
     await this.prisma.product.update({
       where: { id },
       data: { basePrice: Math.round(suggestedPrice * 1000) / 1000 },
@@ -107,6 +123,9 @@ export class ProductCostingService {
 
     return {
       ...fullBreakdown,
+      totalCost,
+      partsCost,
+      parts: partResults,
       suggestedPrice: Math.round(suggestedPrice * 1000) / 1000,
       markupMultiplier,
       components: componentResults,

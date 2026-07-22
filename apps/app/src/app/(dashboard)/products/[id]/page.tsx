@@ -17,6 +17,7 @@ import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
 import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
+import { ProductPartsCard } from './ProductPartsCard';
 import { useToast } from '@/components/ui/toast';
 
 export default function ProductDetailPage() {
@@ -487,12 +488,26 @@ export default function ProductDetailPage() {
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Machine Cost</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.machineCost)}</dd></div>
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Electricity</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.electricityCost || 0)}</dd></div>
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Waste + Overhead</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.wasteCost + costResult.overheadCost)}</dd></div>
+              {costResult.partsCost > 0 && (
+                <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Parts</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.partsCost)}</dd></div>
+              )}
             </dl>
             <dl className="grid grid-cols-3 divide-x divide-brand-100 dark:divide-gray-800 border-t border-brand-100 dark:border-gray-800">
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Cost</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(costResult.totalCost)}</dd></div>
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Suggested Price</dt><dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(costResult.suggestedPrice)}</dd></div>
               <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Markup</dt><dd className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">{costResult.markupMultiplier}×</dd></div>
             </dl>
+            {costResult.parts?.length > 0 && (
+              <div className="px-4 py-3 border-t border-brand-100 dark:border-gray-800">
+                <p className="text-sm font-medium mb-2 dark:text-gray-200">Parts &amp; Hardware</p>
+                {costResult.parts.map((p: any) => (
+                  <div key={p.partId} className="flex justify-between text-sm py-1 dark:text-gray-300">
+                    <span>{p.name} × {p.quantity}</span>
+                    <span className="font-mono">{formatCurrency(p.lineCost)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {costResult.components?.length > 0 && (
               <div className="px-4 py-3 border-t border-brand-100 dark:border-gray-800">
                 <p className="text-sm font-medium mb-2 dark:text-gray-200">Per-Component Costs</p>
@@ -670,6 +685,9 @@ export default function ProductDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Non-printed parts (NFC tags, inserts, keyrings…) */}
+      <ProductPartsCard productId={String(id)} />
 
       {/* Slicer File Onboarding */}
       <Card>

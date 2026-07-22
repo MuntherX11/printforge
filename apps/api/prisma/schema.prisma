@@ -109,6 +109,7 @@ model StorageLocation {
   createdAt   DateTime @default(now())
 
   spools      Spool[]
+  parts       Part[]
 }
 
 model Spool {
@@ -135,6 +136,75 @@ model Spool {
   @@index([locationId])
 }
 
+// ============ NON-PRINTED PARTS ============
+
+// Bought-in hardware consumed per unit rather than per gram: NFC tags, heat-set
+// inserts, keyrings, keyboard switches, magnets, packaging, etc. Filament stays
+// on the Material/Spool (weight-based) track; this is the discrete-count track.
+model Part {
+  id            String           @id @default(cuid())
+  name          String
+  sku           String?          @unique
+  category      PartCategory     @default(OTHER)
+  description   String?
+  unitCost      Float            @default(0) // cost per piece
+  stockQty      Int              @default(0)
+  reorderPoint  Int              @default(0)
+  supplier      String?
+  locationId    String?
+  location      StorageLocation? @relation(fields: [locationId], references: [id])
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  productParts  ProductPart[]
+  jobParts      JobPart[]
+
+  @@index([isActive])
+  @@index([category])
+  @@index([locationId])
+}
+
+enum PartCategory {
+  FASTENER    // heat-set inserts, screws, nuts
+  ELECTRONICS // NFC tags, LEDs, batteries
+  HARDWARE    // keyrings, chains, magnets
+  SWITCH      // keyboard switches
+  PACKAGING
+  ADHESIVE
+  OTHER
+}
+
+// BOM line: how many of a Part each unit of a Product consumes.
+model ProductPart {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  partId    String
+  part      Part    @relation(fields: [partId], references: [id])
+  quantity  Int     @default(1)
+  sortOrder Int     @default(0)
+
+  @@unique([productId, partId])
+  @@index([productId])
+}
+
+// Parts actually consumed by a production job. unitCost is snapshotted so past
+// job costs stay accurate when part pricing changes later.
+model JobPart {
+  id        String        @id @default(cuid())
+  jobId     String
+  job       ProductionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  partId    String
+  part      Part          @relation(fields: [partId], references: [id])
+  quantity  Int
+  unitCost  Float
+  createdAt DateTime      @default(now())
+
+  @@index([jobId])
+  @@index([partId])
+}
+
 // ============ PRODUCTS (BOM) ============
 
 model Product {
@@ -155,6 +225,7 @@ model Product {
 
   variants          ProductVariant[]
   components        ProductComponent[]
+  parts             ProductPart[]
   productionJobs    ProductionJob[]
 }
 
@@ -333,6 +404,7 @@ model ProductionJob {
   updatedAt       DateTime   @updatedAt
 
   materials       JobMaterial[]
+  parts           JobPart[]
   attachments     Attachment[]
 
   @@index([status])
