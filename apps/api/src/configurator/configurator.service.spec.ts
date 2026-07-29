@@ -171,11 +171,28 @@ describe('ConfiguratorService pipeline', () => {
   describe('§2 artifacts are written only at order-commit', () => {
     it('preview endpoints write nothing to disk', async () => {
       const before = await fs.readdir(ARTIFACT_DIR).catch(() => []);
-      service.info('nameplate', validParams);
-      service.previewSvg('nameplate', validParams);
+      // info/previewSvg are async (they run behind the preview limiter), so
+      // these must be awaited or the assertion races the work it is checking.
+      await service.info('nameplate', validParams);
+      await service.previewSvg('nameplate', validParams);
       service.choices('nameplate');
       const after = await fs.readdir(ARTIFACT_DIR).catch(() => []);
       expect(after.length).toBe(before.length);
+    });
+
+    it('previews still return real content through the limiter', async () => {
+      const info = await service.info('nameplate', validParams);
+      expect(info.dimensions).toEqual({ width: 40, height: 20, depth: 3 });
+      const svg = await service.previewSvg('nameplate', validParams);
+      expect(svg).toContain('<svg');
+    });
+
+    it('preview limiter serialises concurrent calls without dropping any', async () => {
+      const results = await Promise.all(
+        Array.from({ length: 25 }, () => service.info('nameplate', validParams)),
+      );
+      expect(results).toHaveLength(25);
+      expect(results.every((r) => r.dimensions.width === 40)).toBe(true);
     });
 
     it('rejects out-of-range quantity', async () => {

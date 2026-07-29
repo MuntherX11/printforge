@@ -37,6 +37,12 @@ export class ConfiguratorService implements OnModuleInit {
   private readonly genLimiter = new Semaphore(
     Math.max(1, parseInt(process.env.CONFIGURATOR_CONCURRENCY || '3', 10)),
   );
+  // Previews get their own, roomier lane so a queue of order-commits can't
+  // starve the live configurator, and a preview storm can't starve orders.
+  private readonly previewLimiter = new Semaphore(
+    Math.max(1, parseInt(process.env.CONFIGURATOR_PREVIEW_CONCURRENCY || '6', 10)),
+    100,
+  );
 
   constructor(
     private prisma: PrismaService,
@@ -65,14 +71,20 @@ export class ConfiguratorService implements OnModuleInit {
     return getGenerator(key).choices();
   }
 
-  info(key: string, params: unknown) {
+  // Preview calls look cheap but are not: a generator's validate()/info() may
+  // run a full synchronous geometry build (oman-plate measures 75-200 ms), which
+  // blocks the Node event loop. Routing previews through the same limiter as
+  // generate() caps how many can be in flight, so a burst of preview traffic
+  // can't monopolise the box. It bounds concurrency — it does not make an
+  // individual synchronous build non-blocking; that would need a worker thread.
+  async info(key: string, params: unknown) {
     const gen = getGenerator(key);
-    return gen.info(gen.validate(params));
+    return this.previewLimiter.run(async () => gen.info(gen.validate(params)));
   }
 
-  previewSvg(key: string, params: unknown): string {
+  async previewSvg(key: string, params: unknown): Promise<string> {
     const gen = getGenerator(key);
-    return gen.previewSvg(gen.validate(params));
+    return this.previewLimiter.run(async () => gen.previewSvg(gen.validate(params)));
   }
 
   // ---- The one state-changing customer route (spec §2/§3) ----

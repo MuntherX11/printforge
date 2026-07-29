@@ -256,6 +256,48 @@ describe('§4 SVG sanitizer', () => {
     expect(res.reason).toMatch(/limit/i);
   });
 
+  // --- external-reference vectors found by adversarial verification of the
+  // shirt-generator port (SVG signature upload surface) ---
+  it('rejects <image> pulling a remote URL', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil.test/x.png"/></svg>');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/external/i);
+  });
+
+  it('rejects <image> pulling a local file:// path', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/external/i);
+  });
+
+  it('rejects protocol-relative references', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><image href="//evil.test/x.png"/></svg>');
+    expect(res.ok).toBe(false);
+  });
+
+  it('rejects xi:include', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="/etc/passwd"/></svg>');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/xinclude|external/i);
+  });
+
+  it('rejects external url() in a style attribute', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(http://evil.test/x)"/></svg>');
+    expect(res.ok).toBe(false);
+  });
+
+  it('strips animation elements', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><rect><animate attributeName="x" to="9"/></rect></svg>');
+    expect(res.ok).toBe(true);
+    expect(res.svg).not.toMatch(/<animate/i);
+  });
+
+  it('still accepts a clean local SVG', () => {
+    const res = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 10 Z" fill="#333"/></svg>');
+    expect(res.ok).toBe(true);
+    expect(res.svg).toContain('<path');
+  });
+
   it('rejects non-SVG input', () => {
     expect(sanitizeSvg('not an svg at all').ok).toBe(false);
   });

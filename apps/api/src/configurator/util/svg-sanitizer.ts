@@ -34,6 +34,24 @@ export function sanitizeSvg(input: string | Buffer): SvgSanitizeResult {
   if (/<\?xml-stylesheet/i.test(raw)) {
     return { ok: false, reason: 'External stylesheet references are not allowed' };
   }
+  // XInclude can pull in arbitrary documents even without a DOCTYPE.
+  if (/<[a-z0-9]*:?include[\s>]/i.test(raw) || /xmlns:xi\s*=/i.test(raw)) {
+    return { ok: false, reason: 'XInclude is not allowed' };
+  }
+  // Any reference out to the network or the filesystem. Caught before the
+  // attribute-stripping below so the upload is rejected outright rather than
+  // silently altered — an SVG that needs remote data is not one we can print.
+  // Note the `//` alternative deliberately sits OUTSIDE the \b — a
+  // protocol-relative `href="//host/x"` has no word boundary before the slashes,
+  // so requiring one silently let that vector through.
+  const EXTERNAL_REF =
+    /(?:href|xlink:href|src|from|to|values|path|filter|mask|clip-path|fill|stroke|style)\s*=\s*["'][^"']*(?:\b(?:https?:|ftp:|file:)|\/\/)/i;
+  if (EXTERNAL_REF.test(raw)) {
+    return { ok: false, reason: 'External references (http/file URLs) are not allowed' };
+  }
+  if (/url\s*\(\s*["']?\s*(?:https?:|ftp:|file:|\/\/)/i.test(raw)) {
+    return { ok: false, reason: 'External url() references are not allowed' };
+  }
 
   let svg = raw;
 
@@ -50,6 +68,11 @@ export function sanitizeSvg(input: string | Buffer): SvgSanitizeResult {
   svg = svg.replace(/(href|xlink:href|src)\s*=\s*'(?:\s*(?:javascript|data)\s*:)[^']*'/gi, '');
   // <use> can pull external refs; drop it.
   svg = svg.replace(/<use[\s\S]*?(?:\/>|<\/use\s*>)/gi, '');
+  // <image> is only ever a raster pull-in for our purposes; external hrefs are
+  // already rejected above, so anything left is dropped rather than trusted.
+  svg = svg.replace(/<image[\s\S]*?(?:\/>|<\/image\s*>)/gi, '');
+  // Animation elements can drive attribute values at render time.
+  svg = svg.replace(/<(animate|animateTransform|animateMotion|set)[\s\S]*?(?:\/>|<\/\1\s*>)/gi, '');
 
   // If anything scriptable survived, fail closed.
   if (/<script|javascript:|\son[a-z]+\s*=/i.test(svg)) {
