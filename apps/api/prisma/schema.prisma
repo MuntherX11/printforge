@@ -788,6 +788,10 @@ model Addon {
   version     String   @default("0.0.0")
   entry       String   @default("index.html")
   isActive    Boolean  @default(true)
+  // Whether customers can see and open this addon in the portal. Defaults to
+  // false so a newly uploaded addon is staff-only until explicitly published —
+  // internal tools (e.g. 3mf-orca-prep) simply stay off.
+  customerVisible Boolean @default(false)
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

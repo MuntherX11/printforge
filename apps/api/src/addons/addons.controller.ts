@@ -20,6 +20,7 @@ import * as path from 'path';
 import { AddonsService } from './addons.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
+import { CustomerGuard } from '../auth/guards/customer.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -66,11 +67,18 @@ const MIME: Record<string, string> = {
 export class AddonsController {
   constructor(private readonly addons: AddonsService) {}
 
-  // Active addons for the sidebar — any authenticated staff member.
+  // Active addons for the staff sidebar — any authenticated staff member.
   @Get()
   @UseGuards(StaffGuard)
   list() {
     return this.addons.listActive();
+  }
+
+  // Addons published to the customer portal (isActive AND customerVisible).
+  @Get('customer')
+  @UseGuards(CustomerGuard)
+  listForCustomers() {
+    return this.addons.listForCustomers();
   }
 
   // Full registry for the admin management screen.
@@ -101,7 +109,7 @@ export class AddonsController {
   @Roles('ADMIN')
   update(
     @Param('id') id: string,
-    @Body() body: { isActive?: boolean; name?: string; sortOrder?: number },
+    @Body() body: { isActive?: boolean; customerVisible?: boolean; name?: string; sortOrder?: number },
   ) {
     return this.addons.update(id, body);
   }
@@ -122,8 +130,16 @@ export class AddonsController {
   // Skip every named throttler — a bare @SkipThrottle() only skips a throttler
   // named "default", which this app doesn't have (tiers are short/medium/long).
   @SkipThrottle({ short: true, medium: true, long: true })
-  @UseGuards(StaffGuard)
   async serve(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response) {
+    // Staff may load any addon. Customers may load ONLY addons explicitly
+    // published to the portal (isActive AND customerVisible) — internal tools
+    // stay invisible to them even if they guess the slug.
+    const user = (req as any).user;
+    if (user?.userType !== 'staff') {
+      if (user?.userType !== 'customer' || !(await this.addons.isCustomerVisible(slug))) {
+        throw new NotFoundException('Asset not found');
+      }
+    }
     const assetPath = (req.params as Record<string, string>)['0'] ?? '';
     const resolved = await this.addons.resolveAsset(slug, assetPath);
     if (!resolved) throw new NotFoundException('Asset not found');

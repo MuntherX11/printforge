@@ -1,8 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 import {
   LayoutDashboard,
   FileText,
@@ -12,7 +14,34 @@ import {
   ShoppingCart,
   Store,
   MessageCircle,
+  Puzzle,
+  Type,
+  PenTool,
+  Ruler,
+  Shapes,
+  Sparkles,
+  Wrench,
+  Calculator,
+  Shirt,
+  Box,
+  Boxes,
+  Package,
+  Image as ImageIcon,
+  type LucideIcon,
 } from 'lucide-react';
+
+// Same curated set the staff sidebar uses; unknown names fall back to Puzzle.
+const ADDON_ICONS: Record<string, LucideIcon> = {
+  Puzzle, Type, PenTool, Ruler, Shapes, Sparkles, Wrench, Calculator,
+  Palette, Box, Boxes, Package, FileText, Shirt, Image: ImageIcon,
+};
+
+interface CustomerAddon {
+  id: string;
+  slug: string;
+  name: string;
+  icon?: string | null;
+}
 
 const navigation = [
   { name: 'Shop', href: '/dashboard/shop', icon: Store },
@@ -26,6 +55,14 @@ const navigation = [
 
 export function CustomerSidebar() {
   const pathname = usePathname();
+  const [addons, setAddons] = useState<CustomerAddon[]>([]);
+
+  // Only addons an admin has published to the portal come back here.
+  useEffect(() => {
+    api.get<CustomerAddon[]>('/addons/customer')
+      .then((list) => setAddons(Array.isArray(list) ? list : []))
+      .catch(() => setAddons([]));
+  }, []);
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-white dark:bg-gray-900 dark:border-gray-700">
@@ -54,6 +91,35 @@ export function CustomerSidebar() {
             </Link>
           );
         })}
+
+        {/* Addons published to the portal */}
+        {addons.length > 0 && (
+          <div className="pt-3 mt-3 border-t dark:border-gray-700 space-y-1">
+            <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+              Design Tools
+            </p>
+            {addons.map((addon) => {
+              const Icon = (addon.icon && ADDON_ICONS[addon.icon]) || Puzzle;
+              const href = `/dashboard/tools/${addon.slug}`;
+              const isActive = pathname === href;
+              return (
+                <Link
+                  key={addon.id}
+                  href={href}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
+                  )}
+                >
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  {addon.name}
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </nav>
       <div className="px-3 py-4 border-t dark:border-gray-700">
         <a

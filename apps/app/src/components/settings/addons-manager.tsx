@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
-import { Puzzle, Upload, Trash2, ExternalLink } from 'lucide-react';
+import { Puzzle, Upload, Trash2, ExternalLink, Users, Lock } from 'lucide-react';
 
 interface Addon {
   id: string;
@@ -16,6 +16,7 @@ interface Addon {
   icon?: string | null;
   version: string;
   isActive: boolean;
+  customerVisible: boolean;
 }
 
 export function AddonsManager() {
@@ -63,6 +64,21 @@ export function AddonsManager() {
     }
   }
 
+  /** Publish/unpublish an addon to the customer portal. */
+  async function toggleCustomerVisible(a: Addon) {
+    const next = !a.customerVisible;
+    setBusyId(a.id);
+    try {
+      await api.patch(`/addons/${a.id}`, { customerVisible: next });
+      setAddons((prev) => prev.map((x) => (x.id === a.id ? { ...x, customerVisible: next } : x)));
+      toast('success', next ? `"${a.name}" is now visible to customers` : `"${a.name}" is staff-only`);
+    } catch (err: any) {
+      toast('error', err?.message || 'Failed to update');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function remove(a: Addon) {
     if (!confirm(`Remove addon "${a.name}"? Its files will be deleted.`)) return;
     setBusyId(a.id);
@@ -102,7 +118,8 @@ export function AddonsManager() {
       <CardContent>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           Upload a zipped web app containing an <code className="text-xs">addon.json</code> manifest.
-          Active addons appear in the sidebar for all staff.
+          Active addons appear in the sidebar for all staff. Use the toggle to also publish an addon
+          to the customer portal — internal tools stay staff-only.
         </p>
 
         {loading ? (
@@ -132,6 +149,36 @@ export function AddonsManager() {
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.description}</p>
                   )}
                   <p className="text-[11px] text-gray-400 font-mono">/{a.slug}</p>
+
+                  {/* Customer-portal visibility */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={a.customerVisible}
+                      aria-label={`Show ${a.name} in the customer portal`}
+                      disabled={busyId === a.id || !a.isActive}
+                      onClick={() => toggleCustomerVisible(a)}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${
+                        a.customerVisible ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          a.customerVisible ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <span className={`text-xs flex items-center gap-1 ${
+                      a.customerVisible ? 'text-brand-700 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400'
+                    }`}>
+                      {a.customerVisible ? (
+                        <><Users className="h-3 w-3" /> Visible to customers</>
+                      ) : (
+                        <><Lock className="h-3 w-3" /> Staff only</>
+                      )}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {a.isActive && (

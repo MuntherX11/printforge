@@ -25,13 +25,35 @@ export class AddonsService {
 
   constructor(private prisma: PrismaService) {}
 
-  /** Active addons, ordered for the sidebar. */
+  /** Active addons, ordered for the staff sidebar. */
   listActive() {
     return this.prisma.addon.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       select: { id: true, slug: true, name: true, icon: true, entry: true },
     });
+  }
+
+  /**
+   * Addons published to the customer portal. Requires BOTH isActive and
+   * customerVisible, so an internal-only tool never leaks to customers.
+   */
+  listForCustomers() {
+    return this.prisma.addon.findMany({
+      where: { isActive: true, customerVisible: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, slug: true, name: true, icon: true, entry: true, description: true },
+    });
+  }
+
+  /** True when a customer is allowed to load this addon's files. */
+  async isCustomerVisible(slug: string): Promise<boolean> {
+    if (!SLUG_RE.test(slug)) return false;
+    const addon = await this.prisma.addon.findUnique({
+      where: { slug },
+      select: { isActive: true, customerVisible: true },
+    });
+    return !!addon?.isActive && !!addon?.customerVisible;
   }
 
   /** All addons for the admin management screen. */
@@ -152,12 +174,16 @@ export class AddonsService {
     return addon;
   }
 
-  async update(id: string, patch: { isActive?: boolean; name?: string; sortOrder?: number }) {
+  async update(
+    id: string,
+    patch: { isActive?: boolean; customerVisible?: boolean; name?: string; sortOrder?: number },
+  ) {
     await this.getById(id);
     return this.prisma.addon.update({
       where: { id },
       data: {
         isActive: patch.isActive,
+        customerVisible: patch.customerVisible,
         name: patch.name?.slice(0, 120),
         sortOrder: patch.sortOrder,
       },
