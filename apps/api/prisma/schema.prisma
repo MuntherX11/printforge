@@ -528,9 +528,45 @@ model Order {
   productionJobs  ProductionJob[]
   invoices        Invoice[]
   attachments     Attachment[]
+  configOrders    ConfigOrder[]
 
   @@index([status])
   @@index([customerId])
+}
+
+// ============ CONFIGURATOR ARTIFACTS ============
+
+// A parametric-configurator submission tied to an order. The customer sends
+// ONLY params; the server regenerates the artifact from them. params is the
+// source of truth — artifacts are derived data and can be re-generated.
+model ConfigOrder {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  generatorKey String
+  params       Json     // validated parameter set (source of truth)
+  status       String   @default("GENERATED") // GENERATED | FAILED
+  createdAt    DateTime @default(now())
+
+  artifacts    ConfigArtifact[]
+
+  @@index([orderId])
+}
+
+// A single generated file (.stl / .3mf). storageKey is a server-generated
+// opaque token used as the on-disk name — NO customer input ever reaches the
+// path. filename is the human-friendly name for Content-Disposition only.
+model ConfigArtifact {
+  id            String      @id @default(cuid())
+  configOrderId String
+  configOrder   ConfigOrder @relation(fields: [configOrderId], references: [id], onDelete: Cascade)
+  filename      String      // validated, for download header only — never a path
+  mime          String
+  sizeBytes     Int
+  storageKey    String      @unique // opaque random token = on-disk filename
+  createdAt     DateTime    @default(now())
+
+  @@index([configOrderId])
 }
 
 enum OrderStatus {
