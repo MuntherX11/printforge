@@ -29,7 +29,15 @@ import { Roles } from '../auth/decorators/roles.decorator';
 // while still allowing only same-origin framing.
 const ADDON_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob:",
+  // 'unsafe-eval' is required in addition to 'wasm-unsafe-eval': Emscripten-built
+  // WASM toolchains (Manifold in name-designer, and most emcc output) call
+  // `new Function(...)` in their JS glue. 'wasm-unsafe-eval' only permits WASM
+  // *compilation*, so without this the geometry engine dies at init with
+  // "Evaluating a string as JavaScript violates ... CSP".
+  // Acceptable here because addon upload is ADMIN-only and the iframe already
+  // runs same-origin with allow-scripts + 'unsafe-inline' — this is trusted
+  // first-party code, not a sandbox for untrusted addons.
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'unsafe-inline' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
