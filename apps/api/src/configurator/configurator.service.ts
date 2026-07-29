@@ -6,12 +6,13 @@ import {
   InternalServerErrorException,
   ServiceUnavailableException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { DiscordNotificationService } from '../communications/discord-notification.service';
 import { generateNumber } from '../common/utils/number-generator';
-import { getGenerator, listGenerators } from './generators/registry';
+import { getGenerator, listGenerators, refreshAddonGenerators } from './generators/registry';
 import { Semaphore } from './util/semaphore';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
@@ -30,7 +31,7 @@ function round3(n: number): number {
 }
 
 @Injectable()
-export class ConfiguratorService {
+export class ConfiguratorService implements OnModuleInit {
   private readonly logger = new Logger(ConfiguratorService.name);
   // Cap concurrent CPU-bound generation across the shared host (spec §8).
   private readonly genLimiter = new Semaphore(
@@ -42,6 +43,17 @@ export class ConfiguratorService {
     @Optional() private settings?: SettingsService,
     @Optional() private discord?: DiscordNotificationService,
   ) {}
+
+  /** Discover addon-supplied generators once the API is up. */
+  async onModuleInit() {
+    const count = await refreshAddonGenerators();
+    if (count > 0) this.logger.log(`Registered ${count} addon generator(s)`);
+  }
+
+  /** Re-scan after an addon is installed or removed (no restart needed). */
+  refreshGenerators() {
+    return refreshAddonGenerators();
+  }
 
   // ---- Preview surface (read-only, NEVER writes to disk) ----
 
