@@ -1,5 +1,5 @@
 import { Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
-import { Generator, GeneratedFile, GeneratorInfo } from './generator.interface';
+import { Generator, GeneratedFile, GeneratorInfo, GeneratorUpload, UploadSlot } from './generator.interface';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { pathToFileURL } from 'url';
@@ -14,11 +14,13 @@ export const GENERATOR_API_VERSION = 1;
 /** Shape an addon's server module must export (see docs/ADDON_GENERATORS.md). */
 interface AddonGeneratorModule {
   apiVersion?: number;
+  /** Upload slots the module accepts; the host enforces these before calling it. */
+  uploads?: UploadSlot[];
   choices?: () => Record<string, unknown>;
-  validate: (raw: unknown) => unknown;
+  validate: (raw: unknown, uploads?: GeneratorUpload[]) => unknown;
   info: (spec: any) => GeneratorInfo;
   previewSvg?: (spec: any) => string;
-  generate: (spec: any) => Promise<GeneratedFile[]> | GeneratedFile[];
+  generate: (spec: any, uploads?: GeneratorUpload[]) => Promise<GeneratedFile[]> | GeneratedFile[];
 }
 
 const REQUIRED_FNS: Array<keyof AddonGeneratorModule> = ['validate', 'info', 'generate'];
@@ -50,6 +52,11 @@ export class AddonGenerator implements Generator {
     private readonly mod: AddonGeneratorModule,
   ) {}
 
+  /** Upload slots declared by the addon module, if any. */
+  get uploads(): UploadSlot[] | undefined {
+    return Array.isArray(this.mod.uploads) ? this.mod.uploads : undefined;
+  }
+
   choices(): Record<string, unknown> {
     try {
       return this.mod.choices ? this.mod.choices() : {};
@@ -59,10 +66,10 @@ export class AddonGenerator implements Generator {
     }
   }
 
-  validate(raw: unknown): unknown {
+  validate(raw: unknown, uploads?: GeneratorUpload[]): unknown {
     let spec: unknown;
     try {
-      spec = this.mod.validate(raw);
+      spec = this.mod.validate(raw, uploads);
     } catch (err: any) {
       // Any throw from an addon's validator is a client error, never a 500.
       throw new BadRequestException(shortMessage(err));
@@ -107,10 +114,10 @@ export class AddonGenerator implements Generator {
     }
   }
 
-  async generate(spec: any): Promise<GeneratedFile[]> {
+  async generate(spec: any, uploads?: GeneratorUpload[]): Promise<GeneratedFile[]> {
     let files: GeneratedFile[];
     try {
-      files = await this.mod.generate(spec);
+      files = await this.mod.generate(spec, uploads);
     } catch (err: any) {
       this.logger.error(`[${this.key}] generate() failed: ${err?.message}`);
       throw new InternalServerErrorException('Could not generate the model');
