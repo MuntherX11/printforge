@@ -154,7 +154,7 @@ URLs for both `fetch` and `XMLHttpRequest` (three.js loaders use XHR):
 Addon responses carry their own CSP:
 
 ```
-default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob:;
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'unsafe-inline' blob:;
 style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:;
 connect-src 'self' blob: data:; worker-src 'self' blob:; child-src 'self' blob:;
 object-src 'none'; frame-ancestors 'self'
@@ -163,7 +163,11 @@ object-src 'none'; frame-ancestors 'self'
 **Practical implications:**
 
 - ❌ **No external CDNs, Google Fonts, or third-party APIs.** `default-src`/`connect-src` are `'self'`. Bundle every dependency into the zip.
-- ✅ **WebAssembly works** (`wasm-unsafe-eval`) — Manifold, HarfBuzz, ffmpeg.wasm etc. are fine.
+- ✅ **WebAssembly works** — Manifold, HarfBuzz, ffmpeg.wasm etc. are fine. Note this needs
+  **both** `'wasm-unsafe-eval'` *and* `'unsafe-eval'`: the first allows WASM compilation, but
+  Emscripten's JS glue also calls `new Function(...)`. With only the first, an emcc-built engine
+  dies at init with *"Evaluating a string as JavaScript violates the following CSP directive"* —
+  and it won't reproduce locally, because a plain dev server sends no CSP at all.
 - ✅ Web Workers and `blob:` URLs work.
 - ✅ Inline `<script>` and inline styles work.
 - ✅ Data URIs work for images and fonts.
