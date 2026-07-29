@@ -31,10 +31,16 @@ export class ConfiguratorController {
   }
 
   @Get(':key/preview.svg')
-  preview(@Param('key') key: string, @Query() query: Record<string, unknown>, @Res() res: Response) {
-    const svg = this.configurator.previewSvg(key, query);
+  async preview(@Param('key') key: string, @Query() query: Record<string, unknown>, @Res() res: Response) {
+    // MUST await: previewSvg runs behind the preview limiter and returns a
+    // promise. Sending it unawaited shipped a stringified Promise to the client.
+    const svg = await this.configurator.previewSvg(key, query);
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'no-store');
+    // Defence in depth — the SVG is server-built, but never let a browser treat
+    // it as anything else, and block any script if one ever slipped in.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
     res.send(svg);
   }
 

@@ -46,6 +46,7 @@ interface CustomerAddon {
 const navigation = [
   { name: 'Shop', href: '/dashboard/shop', icon: Store },
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Design & Order', href: '/dashboard/configurator', icon: Sparkles },
   { name: 'Quick Quote', href: '/dashboard/quick-quote', icon: Zap },
   { name: 'My Quotes', href: '/dashboard/quotes', icon: FileText },
   { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart },

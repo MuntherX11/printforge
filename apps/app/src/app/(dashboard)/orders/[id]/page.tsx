@@ -18,6 +18,7 @@ import { AlertTriangle, CheckCircle, Factory } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { useOrder } from './useOrder';
 import { InvoiceList } from './InvoiceList';
+import { ConfigArtifactsCard } from './ConfigArtifactsCard';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -316,6 +317,9 @@ export default function OrderDetailPage() {
           </Card>
         );
       })()}
+
+      {/* Configurator-generated production files (renders nothing for plain orders) */}
+      <ConfigArtifactsCard orderId={String(id)} />
 
       <InvoiceList
         invoices={order.invoices || []}
