@@ -1,29 +1,45 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreatePartDto, UpdatePartDto, SetProductPartDto } from '@printforge/types';
+import { CreatePartDto, UpdatePartDto, SetProductPartDto, PART_CATEGORIES } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import { optionalNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
+
+/** Bounds for a bought-in part. Deliberately generous but finite. */
+const LIMITS = {
+  unitCost: { min: 0, max: 100_000 },
+  stockQty: { min: 0, max: 10_000_000, integer: true },
+  reorderPoint: { min: 0, max: 10_000_000, integer: true },
+};
 
 @Injectable()
 export class PartsService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreatePartDto) {
-    if (!dto.name?.trim()) throw new BadRequestException('Name is required');
-    return this.prisma.part.create({
-      data: {
-        name: dto.name.trim(),
-        sku: dto.sku?.trim() || null,
-        category: (dto.category as any) ?? 'OTHER',
-        description: dto.description?.trim() || null,
-        unitCost: dto.unitCost ?? 0,
-        stockQty: dto.stockQty ?? 0,
-        reorderPoint: dto.reorderPoint ?? 0,
-        supplier: dto.supplier?.trim() || null,
-        locationId: dto.locationId || null,
-        isActive: dto.isActive ?? true,
-      },
-      include: { location: { select: { id: true, name: true } } },
-    });
+    const data = {
+      name: requiredText(dto.name, 'Name', 120),
+      sku: dto.sku?.trim() || null,
+      category: !dto.category
+        ? 'OTHER'
+        : requiredEnum(dto.category, 'category', PART_CATEGORIES),
+      description: dto.description?.trim().slice(0, 500) || null,
+      unitCost: optionalNumber(dto.unitCost, 'unitCost', LIMITS.unitCost) ?? 0,
+      stockQty: optionalNumber(dto.stockQty, 'stockQty', LIMITS.stockQty) ?? 0,
+      reorderPoint: optionalNumber(dto.reorderPoint, 'reorderPoint', LIMITS.reorderPoint) ?? 0,
+      supplier: dto.supplier?.trim().slice(0, 200) || null,
+      locationId: dto.locationId || null,
+      isActive: dto.isActive ?? true,
+    };
+    try {
+      return await this.prisma.part.create({
+        data: data as any,
+        include: { location: { select: { id: true, name: true } } },
+      });
+    } catch (e: any) {
+      // A duplicate SKU is user error, not a server fault.
+      if (e?.code === 'P2002') throw new BadRequestException(`SKU "${data.sku}" is already used by another part`);
+      throw e;
+    }
   }
 
   /** Flat array when no explicit page is requested (matches the materials route). */
@@ -64,22 +80,29 @@ export class PartsService {
 
   async update(id: string, dto: UpdatePartDto) {
     await this.ensureExists(id);
-    return this.prisma.part.update({
-      where: { id },
-      data: {
-        name: dto.name?.trim(),
-        sku: dto.sku !== undefined ? dto.sku?.trim() || null : undefined,
-        category: dto.category as any,
-        description: dto.description !== undefined ? dto.description?.trim() || null : undefined,
-        unitCost: dto.unitCost,
-        stockQty: dto.stockQty,
-        reorderPoint: dto.reorderPoint,
-        supplier: dto.supplier !== undefined ? dto.supplier?.trim() || null : undefined,
-        locationId: dto.locationId !== undefined ? dto.locationId || null : undefined,
-        isActive: dto.isActive,
-      },
-      include: { location: { select: { id: true, name: true } } },
-    });
+    try {
+      return await this.prisma.part.update({
+        where: { id },
+        data: {
+          name: dto.name !== undefined ? requiredText(dto.name, 'Name', 120) : undefined,
+          sku: dto.sku !== undefined ? dto.sku?.trim() || null : undefined,
+          category: dto.category !== undefined
+            ? (requiredEnum(dto.category, 'category', PART_CATEGORIES) as any)
+            : undefined,
+          description: dto.description !== undefined ? dto.description?.trim().slice(0, 500) || null : undefined,
+          unitCost: optionalNumber(dto.unitCost, 'unitCost', LIMITS.unitCost),
+          stockQty: optionalNumber(dto.stockQty, 'stockQty', LIMITS.stockQty),
+          reorderPoint: optionalNumber(dto.reorderPoint, 'reorderPoint', LIMITS.reorderPoint),
+          supplier: dto.supplier !== undefined ? dto.supplier?.trim().slice(0, 200) || null : undefined,
+          locationId: dto.locationId !== undefined ? dto.locationId || null : undefined,
+          isActive: dto.isActive,
+        },
+        include: { location: { select: { id: true, name: true } } },
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') throw new BadRequestException('That SKU is already used by another part');
+      throw e;
+    }
   }
 
   async remove(id: string) {

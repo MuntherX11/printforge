@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSpoolDto, UpdateSpoolDto, AdjustSpoolWeightDto } from '@printforge/types';
+import { optionalNumber, requiredNumber } from '../common/utils/validate-number';
+
+/** Physical bounds for a filament spool, in grams. */
+const W = { min: 0, max: 100_000 };
 import * as QRCode from 'qrcode';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PDFDocument = require('pdfkit');
@@ -27,17 +31,24 @@ export class SpoolsService {
     const material = await this.prisma.material.findUnique({ where: { id: dto.materialId } });
     if (!material) throw new NotFoundException('Material not found');
 
+    // Bound every weight/price: a mistyped spool weight silently skews stock
+    // levels, low-stock alerts and job costing.
+    const initialWeight = requiredNumber(dto.initialWeight, 'initialWeight', { min: 1, max: W.max });
+    const currentWeight = optionalNumber(dto.currentWeight, 'currentWeight', W) ?? initialWeight;
+    const spoolWeight = optionalNumber(dto.spoolWeight, 'spoolWeight', { min: 0, max: 10_000 }) ?? 200;
+    const purchasePrice = optionalNumber(dto.purchasePrice, 'purchasePrice', { min: 0, max: 100_000 });
+
     const printforgeId = await this.generatePrintforgeId();
 
     return this.prisma.spool.create({
       data: {
         printforgeId,
         materialId: dto.materialId,
-        initialWeight: dto.initialWeight,
-        currentWeight: dto.currentWeight ?? dto.initialWeight,
-        spoolWeight: dto.spoolWeight ?? 200,
+        initialWeight,
+        currentWeight,
+        spoolWeight,
         lotNumber: dto.lotNumber,
-        purchasePrice: dto.purchasePrice,
+        purchasePrice,
         purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : undefined,
         locationId: dto.locationId || undefined,
       },
@@ -72,16 +83,32 @@ export class SpoolsService {
 
   async update(id: string, dto: UpdateSpoolDto) {
     await this.findOne(id);
+    // The DTO used to be passed straight through, so PATCH could write a
+    // NEGATIVE currentWeight (verified live: it stored -50 g). Bound the
+    // numeric fields and let everything else through untouched.
+    const d: any = { ...dto };
+    const bounded: Array<[string, { min: number; max: number }]> = [
+      ['currentWeight', W],
+      ['initialWeight', { min: 1, max: W.max }],
+      ['spoolWeight', { min: 0, max: 10_000 }],
+      ['purchasePrice', { min: 0, max: 100_000 }],
+    ];
+    for (const [field, range] of bounded) {
+      if (d[field] !== undefined) d[field] = optionalNumber(d[field], field, range);
+    }
     return this.prisma.spool.update({
       where: { id },
-      data: dto,
+      data: d,
       include: { material: true },
     });
   }
 
   async adjustWeight(id: string, dto: AdjustSpoolWeightDto) {
     const spool = await this.findOne(id);
-    const newWeight = spool.currentWeight + dto.adjustment;
+    // Reject NaN/Infinity before the arithmetic, or currentWeight becomes NaN
+    // and every downstream stock total silently breaks.
+    const adjustment = requiredNumber(dto.adjustment, 'adjustment', { min: -W.max, max: W.max });
+    const newWeight = spool.currentWeight + adjustment;
 
     if (newWeight < 0) throw new BadRequestException('Weight cannot be negative');
 

@@ -2,6 +2,20 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
 import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
+import { optionalNumber, requiredNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
+
+const MATERIAL_TYPES = ['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'] as const;
+
+/** Bounds for filament pricing/stock figures. */
+const LIMITS = {
+  costPerGram: { min: 0, max: 1000 },
+  spoolPrice: { min: 0, max: 100_000 },
+  // A spool must have real weight — 0 previously fell back to 1000 g silently,
+  // quietly producing the wrong cost per gram.
+  spoolWeightGrams: { min: 1, max: 100_000 },
+  density: { min: 0.1, max: 30 },
+  reorderPoint: { min: 0, max: 10_000_000 },
+};
 
 /** Derive costPerGram from spool-level pricing fields when they are supplied. */
 function resolveCostPerGram(
@@ -20,11 +34,38 @@ function resolveCostPerGram(
 export class MaterialsService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Validate the numeric/text fields shared by create and update.
+   * Every value is bounded — a mistyped "-5" or "1e12" during inventory entry
+   * must fail loudly rather than land in the database and skew product costing.
+   */
+  private validateFields(dto: any, { partial = false } = {}) {
+    const out: any = {};
+    if (!partial || dto.name !== undefined) out.name = requiredText(dto.name, 'Name', 120);
+    if (!partial || dto.type !== undefined) out.type = requiredEnum(dto.type, 'type', MATERIAL_TYPES);
+    if (dto.color !== undefined) out.color = dto.color?.trim().slice(0, 60) || null;
+    if (dto.brand !== undefined) out.brand = dto.brand?.trim().slice(0, 100) || null;
+
+    const spoolPrice = optionalNumber(dto.spoolPrice, 'spoolPrice', LIMITS.spoolPrice);
+    const spoolWeightGrams = optionalNumber(dto.spoolWeightGrams, 'spoolWeightGrams', LIMITS.spoolWeightGrams);
+    const costPerGram = optionalNumber(dto.costPerGram, 'costPerGram', LIMITS.costPerGram);
+    const density = optionalNumber(dto.density, 'density', LIMITS.density);
+    const reorderPoint = optionalNumber(dto.reorderPoint, 'reorderPoint', LIMITS.reorderPoint);
+    if (density !== undefined) out.density = density;
+    if (reorderPoint !== undefined) out.reorderPoint = reorderPoint;
+
+    return { fields: out, spoolPrice, spoolWeightGrams, costPerGram };
+  }
+
   async create(dto: CreateMaterialDto) {
-    const { spoolPrice, spoolWeightGrams, costPerGram: rawCpg, ...rest } = dto as any;
-    const costPerGram = resolveCostPerGram(spoolPrice, spoolWeightGrams, rawCpg);
+    const { fields, spoolPrice, spoolWeightGrams, costPerGram } = this.validateFields(dto);
     return this.prisma.material.create({
-      data: { ...rest, spoolPrice: spoolPrice ?? null, spoolWeightGrams: spoolWeightGrams ?? null, costPerGram },
+      data: {
+        ...fields,
+        spoolPrice: spoolPrice ?? null,
+        spoolWeightGrams: spoolWeightGrams ?? null,
+        costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, costPerGram),
+      },
     });
   }
 
@@ -73,11 +114,14 @@ export class MaterialsService {
 
   async update(id: string, dto: UpdateMaterialDto) {
     await this.findOne(id);
-    const { spoolPrice, spoolWeightGrams, costPerGram: rawCpg, ...rest } = dto as any;
+    const v = this.validateFields(dto, { partial: true });
+    const spoolPrice = v.spoolPrice;
+    const spoolWeightGrams = v.spoolWeightGrams;
+    const rawCpg = v.costPerGram;
 
     // Re-derive costPerGram whenever spool pricing fields are changed.
     // If the caller doesn't send spoolPrice at all, fall back to the explicit costPerGram.
-    const updateData: any = { ...rest };
+    const updateData: any = { ...v.fields };
     if (spoolPrice !== undefined || spoolWeightGrams !== undefined) {
       updateData.spoolPrice = spoolPrice ?? null;
       updateData.spoolWeightGrams = spoolWeightGrams ?? null;
@@ -124,30 +168,65 @@ export class MaterialsService {
         results.skipped++;
         continue;
       }
-      const spoolPrice = hasSpoolPricing ? Number(row.spoolPrice) : null;
-      const spoolWeightGrams = row.spoolWeightGrams ? Number(row.spoolWeightGrams) : (hasSpoolPricing ? 1000 : null);
+      // Bound every numeric cell — a stray "-8" or "1e12" in a spreadsheet must
+      // fail its row, not poison costing for that filament.
+      let spoolPrice: number | null, spoolWeightGrams: number | null, costPerGram: number, density: number, reorderPoint: number;
+      try {
+        spoolPrice = hasSpoolPricing
+          ? requiredNumber(row.spoolPrice, 'spoolPrice', LIMITS.spoolPrice) : null;
+        spoolWeightGrams = row.spoolWeightGrams
+          ? requiredNumber(row.spoolWeightGrams, 'spoolWeightGrams', LIMITS.spoolWeightGrams)
+          : (hasSpoolPricing ? 1000 : null);
+        const explicitCpg = row.costPerGram
+          ? requiredNumber(row.costPerGram, 'costPerGram', LIMITS.costPerGram) : null;
+        costPerGram = resolveCostPerGram(spoolPrice, spoolWeightGrams, explicitCpg);
+        density = row.density ? requiredNumber(row.density, 'density', LIMITS.density) : 1.24;
+        reorderPoint = row.reorderPoint ? requiredNumber(row.reorderPoint, 'reorderPoint', LIMITS.reorderPoint) : 500;
+      } catch (e: any) {
+        results.errors.push(`Row ${rowNum}: ${e?.response?.message ?? e.message}`);
+        results.skipped++;
+        continue;
+      }
+
       validRows.push({
-        name: row.name,
+        name: String(row.name).trim().slice(0, 120),
         type: type as MaterialType,
         color: row.color || null,
         brand: row.brand || null,
-        costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, row.costPerGram ? Number(row.costPerGram) : null),
+        costPerGram,
         spoolPrice,
         spoolWeightGrams,
-        density: row.density ? Number(row.density) : 1.24,
-        reorderPoint: row.reorderPoint ? Number(row.reorderPoint) : 500,
+        density,
+        reorderPoint,
       });
     }
 
     if (validRows.length > 0) {
       try {
-        const inserted = await this.prisma.material.createMany({
-          data: validRows,
-          skipDuplicates: true,
-        });
-        results.created = inserted.count;
-        // Rows silently skipped by skipDuplicates count as skipped
-        results.skipped += validRows.length - inserted.count;
+        // Material.name carries no unique constraint, so `skipDuplicates` had
+        // nothing to key on — re-uploading the same sheet silently created a
+        // second copy of every material (verified live). Dedupe explicitly,
+        // both within the sheet and against what is already stored.
+        const existing = await this.prisma.material.findMany({ select: { name: true, type: true } });
+        const seen = new Set(existing.map((m) => `${m.name.trim().toLowerCase()}|${m.type}`));
+
+        const toInsert: typeof validRows = [];
+        for (const row of validRows) {
+          const key = `${row.name.trim().toLowerCase()}|${row.type}`;
+          if (seen.has(key)) {
+            results.errors.push(`"${row.name}" (${row.type}) already exists — skipped`);
+            results.skipped++;
+            continue;
+          }
+          seen.add(key);
+          toInsert.push(row);
+        }
+
+        if (toInsert.length > 0) {
+          const inserted = await this.prisma.material.createMany({ data: toInsert });
+          results.created = inserted.count;
+          results.skipped += toInsert.length - inserted.count;
+        }
       } catch (err: unknown) {
         results.errors.push(`Bulk insert failed: ${(err as Error).message}`);
         results.skipped += validRows.length;
