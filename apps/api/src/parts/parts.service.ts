@@ -107,12 +107,26 @@ export class PartsService {
 
   async remove(id: string) {
     await this.ensureExists(id);
-    const inUse = await this.prisma.productPart.count({ where: { partId: id } });
-    if (inUse > 0) {
+
+    const [onBom, consumed] = await Promise.all([
+      this.prisma.productPart.count({ where: { partId: id } }),
+      // Historical consumption also pins the row via a foreign key. Checking it
+      // here turns what was a raw 500 from Prisma into a clear explanation.
+      this.prisma.jobPart.count({ where: { partId: id } }),
+    ]);
+
+    if (onBom > 0) {
       throw new BadRequestException(
-        `This part is used by ${inUse} product${inUse === 1 ? '' : 's'} — remove it from those BOMs first, or mark it inactive.`,
+        `This part is used by ${onBom} product${onBom === 1 ? '' : 's'} — remove it from those BOMs first, or mark it inactive.`,
       );
     }
+    if (consumed > 0) {
+      throw new BadRequestException(
+        `This part has been consumed by ${consumed} production job${consumed === 1 ? '' : 's'}, so it is kept for cost history. ` +
+        `Mark it inactive instead — it will disappear from pickers but past job costs stay accurate.`,
+      );
+    }
+
     await this.prisma.part.delete({ where: { id } });
     return { deleted: true };
   }
