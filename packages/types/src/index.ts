@@ -489,12 +489,20 @@ export interface UpdatePrinterDto extends Partial<CreatePrinterDto> {
 export interface CreateProductionJobDto {
   name: string;
   productId?: string;
+  variantId?: string;
+  componentId?: string;
   printerId?: string;
   assignedToId?: string;
   orderId?: string;
   orderItemId?: string;
   gcodeFilename?: string;
   colorChanges?: number;
+  /**
+   * How many units this job produces. Drives part consumption and component
+   * stock on completion, so it must be persisted — it previously wasn't, and
+   * every job silently recorded 1.
+   */
+  quantityToProduce?: number;
 }
 
 export interface UpdateProductionJobDto {

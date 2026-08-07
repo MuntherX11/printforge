@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { requiredNumber } from '../common/utils/validate-number';
 import { CostingService } from '../costing/costing.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { JobPlanningService } from './job-planning.service';
@@ -55,16 +56,26 @@ export class JobsService {
       if (!autoName) autoName = product.name;
     }
 
+    // quantityToProduce was previously never persisted, so every job recorded 1
+    // no matter what was requested — silently under-consuming BOM parts and
+    // under-crediting component stock on completion.
+    const quantityToProduce = dto.quantityToProduce === undefined
+      ? 1
+      : requiredNumber(dto.quantityToProduce, 'quantityToProduce', { min: 1, max: 100_000, integer: true });
+
     return this.prisma.productionJob.create({
       data: {
         name: autoName || 'Untitled Job',
         productId: dto.productId,
+        variantId: dto.variantId,
+        componentId: dto.componentId,
         printerId: dto.printerId,
         assignedToId: dto.assignedToId,
         orderId: dto.orderId,
         orderItemId: dto.orderItemId,
         gcodeFilename: dto.gcodeFilename,
         colorChanges: dto.colorChanges || 0,
+        quantityToProduce,
       },
       include: { printer: true, assignedTo: { select: { id: true, name: true } } },
     });
