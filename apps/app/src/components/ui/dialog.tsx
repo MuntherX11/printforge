@@ -17,6 +17,17 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
   const previousFocus = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
+  // Callers pass an inline arrow (`onClose={() => setOpen(false)}`), so its
+  // identity changes on EVERY render. Keeping it in a ref means the focus
+  // effect below can depend on `open` alone.
+  //
+  // Previously the effect listed `onClose` as a dependency, so every keystroke
+  // re-ran it: the cleanup restored focus to whatever was focused before the
+  // dialog opened, then the effect moved focus to the first field. Typing in
+  // any dialog therefore lost focus after each character.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
 
@@ -24,7 +35,7 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -61,7 +72,10 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
       document.removeEventListener('keydown', handleKeyDown);
       previousFocus.current?.focus();
     };
-  }, [open, onClose]);
+    // `open` ONLY — see the onCloseRef note above. Adding onClose back here
+    // re-introduces focus loss on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
