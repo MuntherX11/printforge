@@ -202,29 +202,60 @@ export default function MaterialDetailPage() {
     }
   }
 
-  /** Each selected spool's QR as its own PNG, zipped. */
+  /** Save one blob to disk as a real file. */
+  function saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  /**
+   * Download each selected spool's QR as its own PNG — loose files, not a zip.
+   *
+   * A zip made every single-label download an unzip step for no reason. One
+   * HTTP response can only carry one file, so several PNGs means several
+   * requests; the browser is fine with that, it just needs a small stagger or
+   * it drops the later ones. Past ~25 files Chrome starts throttling hard, so
+   * beyond that the zip endpoint is genuinely the kinder option.
+   */
+  const ZIP_THRESHOLD = 25;
+
   async function handleDownloadQrImages() {
-    if (selectedSpoolIds.size === 0) return;
+    const ids = Array.from(selectedSpoolIds);
+    if (ids.length === 0) return;
     setDownloadingImages(true);
     try {
-      const res = await fetch('/api/spools/qr-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ spoolIds: Array.from(selectedSpoolIds), size: 600 }),
-      });
-      if (!res.ok) throw new Error('Failed to generate QR images');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `spool-qr-images-${selectedSpoolIds.size}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Revoke on the next tick so the download has started.
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      toast('success', `${selectedSpoolIds.size} QR image${selectedSpoolIds.size === 1 ? '' : 's'} downloaded`);
+      if (ids.length > ZIP_THRESHOLD) {
+        const res = await fetch('/api/spools/qr-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ spoolIds: ids, size: 600 }),
+        });
+        if (!res.ok) throw new Error('Failed to generate QR images');
+        saveBlob(await res.blob(), `spool-qr-images-${ids.length}.zip`);
+        toast('success', `${ids.length} QR images downloaded as a zip (too many for separate files)`);
+        return;
+      }
+
+      let saved = 0;
+      for (const id of ids) {
+        const res = await fetch(`/api/spools/${id}/qr.png?size=600`, { credentials: 'include' });
+        if (!res.ok) continue;
+        // Use the filename the server chose (PF-XXXX_TYPE_COLOUR.png).
+        const disp = res.headers.get('Content-Disposition') || '';
+        const match = /filename="?([^";]+)"?/i.exec(disp);
+        saveBlob(await res.blob(), match?.[1] || `spool-${id}.png`);
+        saved++;
+        if (ids.length > 1) await new Promise((r) => setTimeout(r, 250));
+      }
+      if (saved === 0) throw new Error('No QR images could be generated');
+      toast('success', `${saved} QR image${saved === 1 ? '' : 's'} downloaded`);
     } catch (err: unknown) {
       toast('error', (err as Error).message);
     } finally {
