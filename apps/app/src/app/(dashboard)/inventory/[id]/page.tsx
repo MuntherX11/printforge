@@ -385,10 +385,32 @@ export default function MaterialDetailPage() {
           </div>
         )}
         <form onSubmit={(e) => { handleAddSpool(e); setScannedFields(null); }} className="space-y-4">
-          <Input name="initialWeight" label="Net Filament Weight (g)" type="number" step="0.1" defaultValue={scannedFields?.weight || ''} required />
+          {/* Net weight defaults to the material's spool size (1000 g unless the
+              material says otherwise) — override only for an odd-sized spool. */}
+          <Input
+            name="initialWeight"
+            label="Net Filament Weight (g)"
+            type="number"
+            step="0.1"
+            defaultValue={scannedFields?.weight || (material as any).spoolWeightGrams || 1000}
+            required
+          />
           <Input name="currentWeight" label="Current Weight (g) — leave blank if new spool" type="number" step="0.1" />
           <Input name="spoolWeight" label="Empty Spool Weight (g)" type="number" defaultValue="200" />
-          <Input name="purchasePrice" label="Purchase Price" type="number" step="0.001" />
+          {/* Inherits what this filament costs per spool; change it here if this
+              particular spool was bought at a different price. */}
+          <Input
+            name="purchasePrice"
+            label="Purchase Price (defaults to this filament's spool price)"
+            type="number"
+            step="0.001"
+            defaultValue={
+              (material as any).spoolPrice ??
+              (material.costPerGram
+                ? Number((material.costPerGram * ((material as any).spoolWeightGrams ?? 1000)).toFixed(3))
+                : '')
+            }
+          />
           <Input name="lotNumber" label="Lot Number" />
           {locations.length > 0 && (
             <div className="space-y-1">

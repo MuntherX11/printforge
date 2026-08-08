@@ -185,9 +185,9 @@ export default function InventoryPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Material</TableHead>
-                  <TableHead>Type</TableHead>
                   <TableHead>Color</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Brand</TableHead>
                   <TableHead>Spool Price</TableHead>
                   <TableHead>Active Spools</TableHead>
                   <TableHead>Total Stock (g)</TableHead>
@@ -200,14 +200,18 @@ export default function InventoryPage() {
                   const isLow = totalStock < m.reorderPoint;
                   return (
                     <TableRow key={m.id}>
+                      {/* Colour leads: on the shelf a spool is identified by its
+                          colour first, then material type, then brand. */}
                       <TableCell>
                         <Link href={`/inventory/${m.id}`} className="font-medium text-brand-600 hover:underline">
-                          {m.name}
+                          {m.color || m.name}
                         </Link>
-                        {m.brand && <p className="text-xs text-gray-500">{m.brand}</p>}
+                        {m.color && m.name !== m.color && (
+                          <p className="text-xs text-gray-500">{m.name}</p>
+                        )}
                       </TableCell>
                       <TableCell><Badge className="bg-gray-100 text-gray-700">{m.type}</Badge></TableCell>
-                      <TableCell>{m.color || '-'}</TableCell>
+                      <TableCell>{m.brand || '-'}</TableCell>
                       <TableCell>
                         {(m as any).spoolPrice != null
                           ? <>{formatCurrency((m as any).spoolPrice)}<span className="text-xs text-gray-400 ml-1">/ {(m as any).spoolWeightGrams ?? 1000}g</span></>
