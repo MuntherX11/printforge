@@ -14,7 +14,7 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
-import { AlertTriangle, CheckCircle, Factory } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Factory, FileDown } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { useOrder } from './useOrder';
 import { InvoiceList } from './InvoiceList';
@@ -317,6 +317,37 @@ export default function OrderDetailPage() {
           </Card>
         );
       })()}
+
+      {/* The slicer files for this order, so the operator doesn't have to go
+          find them in the product catalogue. */}
+      {order.printFiles && order.printFiles.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Print Files</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y dark:divide-gray-700">
+              {order.printFiles.map((f: any, i: number) => (
+                <div key={`${f.attachmentId}-${f.orderItemId}-${i}`} className="flex items-center gap-3 px-4 py-3">
+                  <FileDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate dark:text-gray-100">{f.filename}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {f.productName} · {f.component} · ×{f.quantity}
+                      {f.colorChanges > 0 && <> · {f.colorChanges} colour changes</>}
+                      {f.sizeBytes > 0 && <> · {(f.sizeBytes / 1024 / 1024).toFixed(1)} MB</>}
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/attachments/${f.attachmentId}/download`}
+                    className="text-sm text-blue-600 hover:underline dark:text-blue-400 flex-shrink-0"
+                  >
+                    Download
+                  </a>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Configurator-generated production files (renders nothing for plain orders) */}
       <ConfigArtifactsCard orderId={String(id)} />

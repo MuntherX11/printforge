@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useLineItems } from '@/hooks/use-line-items';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function NewOrderPage() {
@@ -22,12 +22,35 @@ export default function NewOrderPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const [shortages, setShortages] = useState<any[]>([]);
+  const [ackShortages, setAckShortages] = useState(false);
+
   const { items, addItem, removeItem, updateItem, handleProductSelect, handleVariantSelect, subtotal } = useLineItems(products);
 
   useEffect(() => {
     api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch((err: any) => toast('error', err?.message || 'Failed to load'));
     api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
   }, []);
+
+  // Check filament stock as the order is built, so a shortage shows up before
+  // the order is placed rather than on the shop floor.
+  const stockKey = JSON.stringify(
+    items.filter(i => i.productId).map(i => [i.productId, i.quantity]),
+  );
+  useEffect(() => {
+    const lines = items
+      .filter(i => i.productId && i.quantity > 0)
+      .map(i => ({ productId: i.productId, quantity: i.quantity }));
+    if (lines.length === 0) { setShortages([]); return; }
+
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.post<any>('/orders/check-stock', { items: lines })
+        .then(r => { if (!cancelled) { setShortages(r?.shortages || []); setAckShortages(false); } })
+        .catch(() => { if (!cancelled) setShortages([]); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [stockKey]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -36,6 +59,12 @@ export default function NewOrderPage() {
     const validItems = items.filter(i => i.description.trim());
     if (validItems.length === 0) {
       setError('Add at least one item with a description before saving.');
+      return;
+    }
+
+    if (shortages.length > 0 && !ackShortages) {
+      setAckShortages(true);
+      setError('Not enough filament in stock for this order — check the warning above, then save again to place it anyway.');
       return;
     }
 
@@ -71,6 +100,28 @@ export default function NewOrderPage() {
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">New Order</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         {error && <div role="alert" className="rounded-md bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
+
+        {shortages.length > 0 && (
+          <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-3">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              Not enough filament for this order
+            </p>
+            <ul className="mt-2 space-y-1">
+              {shortages.map((s: any) => (
+                <li key={s.materialId} className="text-sm text-amber-800 dark:text-amber-300">
+                  {[s.color, s.type].filter(Boolean).join(' ') || s.name}: needs {s.gramsNeeded}g,
+                  {' '}{s.freeStock}g free
+                  {s.reservedStock > 0 && <> ({s.reservedStock}g reserved by other orders)</>}
+                  {' '}— short {Math.round(s.gramsNeeded - s.freeStock)}g
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              You can still place the order. Buy or load filament before it goes into production.
+            </p>
+          </div>
+        )}
 
         <Card>
           <CardContent className="pt-6 space-y-4">

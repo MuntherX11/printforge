@@ -69,7 +69,11 @@ export class OrdersService {
       include: { customer: true, items: true },
     });
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
-    return order;
+
+    // Advisory only. The order stands; staff just need to know they have to
+    // buy filament before this one can be printed.
+    const stock = await this.checkStock(items).catch(() => null);
+    return { ...order, stockWarnings: stock?.shortages ?? [] };
   }
 
   async findAll(query: PaginationDto, status?: string) {
@@ -106,8 +110,27 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException('Order not found');
 
+    const materialAvailability = await this.computeMaterialAvailability(order.items, id);
+    const partAvailability = await this.getPartAvailability(id, order.items);
+    const printFiles = await this.getPrintFiles(order.items);
+
+    return { ...order, materialAvailability, partAvailability, printFiles };
+  }
+
+  /**
+   * Filament needed by a set of order lines, netted against what is actually
+   * free: total active spool weight minus what other open orders and queued
+   * jobs have already spoken for.
+   *
+   * `excludeOrderId` keeps an order from reserving against itself. Pass null
+   * when checking an order that does not exist yet.
+   */
+  private async computeMaterialAvailability(
+    items: Array<{ productId: string | null; quantity: number }>,
+    excludeOrderId: string | null,
+  ) {
     // Aggregate material requirements across all order items via their products' BOM
-    const productIds = order.items
+    const productIds = items
       .map((item) => item.productId)
       .filter((pid): pid is string => !!pid);
 
@@ -120,7 +143,7 @@ export class OrdersService {
       });
       const productMap = new Map(products.map(p => [p.id, p]));
 
-      for (const item of order.items) {
+      for (const item of items) {
         if (!item.productId) continue;
         const product = productMap.get(item.productId);
         if (!product?.components) continue;
@@ -164,7 +187,7 @@ export class OrdersService {
       // 2. Calculate reserved stock from other open orders (CONFIRMED, IN_PRODUCTION)
       const reservingOrders = await this.prisma.order.findMany({
         where: {
-          id: { not: id },
+          ...(excludeOrderId ? { id: { not: excludeOrderId } } : {}),
           status: { in: ['CONFIRMED', 'IN_PRODUCTION'] },
         },
         select: {
@@ -211,7 +234,7 @@ export class OrdersService {
         where: {
           status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] },
           // Exclude jobs tied to the current order
-          NOT: { orderId: id },
+          ...(excludeOrderId ? { NOT: { orderId: excludeOrderId } } : {}),
         },
         select: {
           orderId: true,
@@ -245,9 +268,71 @@ export class OrdersService {
       });
     }
 
-    const partAvailability = await this.getPartAvailability(id, order.items);
+    return materialAvailability;
+  }
 
-    return { ...order, materialAvailability, partAvailability };
+  /**
+   * Preflight for the New Order screen: what would be short if this order were
+   * placed right now. Advisory, not a block — a print farm takes the order and
+   * buys filament, it does not turn the customer away.
+   */
+  async checkStock(items: Array<{ productId?: string | null; quantity: number }>) {
+    const normalised = (items || [])
+      .filter(i => i && Number.isFinite(i.quantity) && i.quantity > 0)
+      .map(i => ({ productId: i.productId ?? null, quantity: i.quantity }));
+    if (normalised.length === 0) return { materials: [], shortages: [], ok: true };
+
+    const materials = await this.computeMaterialAvailability(normalised, null);
+    const shortages = materials.filter(m => !m.hasEnoughStock);
+    return { materials, shortages, ok: shortages.length === 0 };
+  }
+
+  /**
+   * The slicer files needed to actually print this order, so the operator does
+   * not have to go hunting through the product catalogue for them. One entry
+   * per component that was onboarded from a 3MF/G-code upload.
+   */
+  private async getPrintFiles(items: Array<{ id: string; productId: string | null; quantity: number }>) {
+    const productIds = Array.from(
+      new Set(items.map(i => i.productId).filter((p): p is string => !!p)),
+    );
+    if (productIds.length === 0) return [];
+
+    const components = await this.prisma.productComponent.findMany({
+      where: { productId: { in: productIds }, attachmentId: { not: null } },
+      select: {
+        id: true, productId: true, description: true, gcodeFilename: true,
+        colorChanges: true, attachmentId: true,
+        product: { select: { name: true } },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+    if (components.length === 0) return [];
+
+    // The attachment may have been deleted out from under the component; only
+    // offer links that will actually resolve.
+    const attachments = await this.prisma.attachment.findMany({
+      where: { id: { in: components.map(c => c.attachmentId!) } },
+      select: { id: true, originalName: true, sizeBytes: true },
+    });
+    const byId = new Map(attachments.map(a => [a.id, a]));
+
+    return components.flatMap(c => {
+      const file = byId.get(c.attachmentId!);
+      if (!file) return [];
+      return items
+        .filter(i => i.productId === c.productId)
+        .map(i => ({
+          orderItemId: i.id,
+          productName: c.product?.name ?? 'Product',
+          component: c.description,
+          quantity: i.quantity,
+          attachmentId: c.attachmentId!,
+          filename: c.gcodeFilename || file.originalName,
+          sizeBytes: file.sizeBytes,
+          colorChanges: c.colorChanges,
+        }));
+    });
   }
 
   /**

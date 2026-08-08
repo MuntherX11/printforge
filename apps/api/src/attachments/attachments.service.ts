@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -69,6 +69,33 @@ export class AttachmentsService {
   async findOne(id: string) {
     const attachment = await this.prisma.attachment.findUnique({ where: { id } });
     if (!attachment) throw new NotFoundException('Attachment not found');
+    return attachment;
+  }
+
+  /**
+   * Attachment ids are guessable enough that "logged in" is not authorisation.
+   * Staff see everything. A customer only sees files hanging off their own
+   * quote, order or design project — never product or component files, which
+   * are internal print data.
+   */
+  async assertCanRead(id: string, user: any) {
+    const attachment = await this.findOne(id);
+    if (user?.userType === 'staff') return attachment;
+
+    if (user?.userType !== 'customer') throw new ForbiddenException('Not allowed');
+
+    const owns = await this.prisma.attachment.findFirst({
+      where: {
+        id,
+        OR: [
+          { order: { customerId: user.id } },
+          { quote: { customerId: user.id } },
+          { designProject: { customerId: user.id } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!owns) throw new ForbiddenException('Not allowed');
     return attachment;
   }
 

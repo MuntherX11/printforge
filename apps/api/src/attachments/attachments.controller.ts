@@ -31,8 +31,8 @@ export class AttachmentsController {
   }
 
   @Get(':id/download')
-  async download(@Param('id') id: string, @Res() res: Response) {
-    const attachment = await this.attachmentsService.findOne(id);
+  async download(@Param('id') id: string, @Res() res: Response, @CurrentUser() user: any) {
+    const attachment = await this.attachmentsService.assertCanRead(id, user);
     const filePath = await this.attachmentsService.getFilePath(id);
 
     const fileBuffer = await fs.readFile(filePath);

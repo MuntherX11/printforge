@@ -21,6 +21,15 @@ export class OrdersController {
     return this.ordersService.create(dto);
   }
 
+  // Preflight for the New Order screen — what would be short if this were
+  // placed now. Never blocks the order; it only tells staff what to buy.
+  @Post('check-stock')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  checkStock(@Body() body: { items?: Array<{ productId?: string | null; quantity: number }> }) {
+    return this.ordersService.checkStock(body?.items ?? []);
+  }
+
   @Get()
   @UseGuards(StaffGuard)
   findAll(@Query() query: PaginationDto, @Query('status') status?: string) {
