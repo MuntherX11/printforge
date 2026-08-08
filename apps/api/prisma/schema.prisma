@@ -627,6 +627,7 @@ model Invoice {
   updatedAt       DateTime      @updatedAt
 
   attachments     Attachment[]
+  transactions    AccountTransaction[]
 
   @@index([status, paidAt])
 }
@@ -659,11 +660,87 @@ model Expense {
   date         DateTime
   recurring    Boolean         @default(false)
   notes        String?
+  // Which account the money left. Optional so historical expenses recorded
+  // before accounts existed stay valid.
+  accountId    String?
+  account      Account?        @relation(fields: [accountId], references: [id])
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
+  transactions AccountTransaction[]
+
   @@index([categoryId])
   @@index([date])
+  @@index([accountId])
+}
+
+// ============ ACCOUNTS ============
+
+// A place money actually sits — a bank account, the cash box, a card.
+// `balance` is a running total kept in step with AccountTransaction, so the
+// current figure is one read rather than a sum over all history.
+model Account {
+  id          String      @id @default(cuid())
+  name        String
+  type        AccountType @default(BANK)
+  // Free-text: IBAN, last 4 digits, whatever identifies it.
+  reference   String?
+  balance     Float       @default(0)
+  // Where invoice payments land unless told otherwise. Only one may be true.
+  isDefault   Boolean     @default(false)
+  isActive    Boolean     @default(true)
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  transactions AccountTransaction[]
+  expenses     Expense[]
+
+  @@index([isActive])
+}
+
+enum AccountType {
+  BANK
+  CASH
+  CARD
+  OTHER
+}
+
+// Every movement of money, positive in and negative out.
+//
+// `balanceAfter` snapshots the running balance at the time, so a statement
+// reads correctly even after later edits, and a drifted Account.balance can be
+// spotted against it.
+model AccountTransaction {
+  id           String          @id @default(cuid())
+  accountId    String
+  account      Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // Positive credits the account, negative debits it.
+  amount       Float
+  balanceAfter Float
+  type         TransactionType
+  description  String
+  // Human reference — invoice number, receipt number.
+  reference    String?
+  invoiceId    String?
+  invoice      Invoice?        @relation(fields: [invoiceId], references: [id])
+  expenseId    String?
+  expense      Expense?        @relation(fields: [expenseId], references: [id])
+  occurredAt   DateTime        @default(now())
+  createdAt    DateTime        @default(now())
+
+  @@index([accountId, occurredAt])
+  @@index([invoiceId])
+  @@index([expenseId])
+}
+
+enum TransactionType {
+  INVOICE_PAYMENT
+  EXPENSE
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+  OPENING_BALANCE
 }
 
 // ============ FILE MANAGEMENT ============

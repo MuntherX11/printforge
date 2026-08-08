@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateExpenseDto, CreateExpenseCategoryDto } from '@printforge/types';
+import { requiredNumber } from '../common/utils/validate-number';
+import { AccountsService } from './accounts.service';
 
 @Injectable()
 export class ExpensesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private accounts?: AccountsService,
+  ) {}
 
   async createCategory(dto: CreateExpenseCategoryDto) {
     return this.prisma.expenseCategory.create({ data: dto });
@@ -17,17 +22,40 @@ export class ExpensesService {
     });
   }
 
-  async create(dto: CreateExpenseDto) {
-    return this.prisma.expense.create({
-      data: {
-        categoryId: dto.categoryId,
-        description: dto.description,
-        amount: dto.amount,
-        date: new Date(dto.date),
-        recurring: dto.recurring,
-        notes: dto.notes,
-      },
-      include: { category: true },
+  async create(dto: CreateExpenseDto & { accountId?: string }) {
+    const amount = requiredNumber(dto.amount, 'amount', { min: 0, max: 100_000_000 });
+    const date = new Date(dto.date);
+    if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
+
+    // Money going out reduces an account, so the balance reflects both
+    // directions. accountId is optional — an expense can still be recorded
+    // without saying where it was paid from.
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.create({
+        data: {
+          categoryId: dto.categoryId,
+          description: dto.description,
+          amount,
+          date,
+          recurring: dto.recurring,
+          notes: dto.notes,
+          accountId: dto.accountId || null,
+        },
+        include: { category: true },
+      });
+
+      if (dto.accountId && this.accounts && amount > 0) {
+        await this.accounts.post({
+          tx,
+          accountId: dto.accountId,
+          amount: -amount,
+          type: 'EXPENSE',
+          description: `${expense.category?.name ? expense.category.name + ' — ' : ''}${dto.description}`,
+          expenseId: expense.id,
+          occurredAt: date,
+        });
+      }
+      return expense;
     });
   }
 

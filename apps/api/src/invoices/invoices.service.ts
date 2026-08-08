@@ -1,12 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto, InvoiceStatus } from '@printforge/types';
 import { generateNumber } from '../common/utils/number-generator';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import { AccountsService } from '../accounting/accounts.service';
 
 @Injectable()
 export class InvoicesService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(InvoicesService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private accounts?: AccountsService,
+  ) {}
 
   async create(dto: CreateInvoiceDto) {
     const order = await this.prisma.order.findUnique({
@@ -106,11 +112,37 @@ export class InvoicesService {
         data,
         include: { order: { include: { customer: true, items: true } } },
       });
-      if (dto.status === 'PAID' && existing.status !== 'PAID' && existing.orderId) {
-        await tx.order.update({
-          where: { id: existing.orderId },
-          data: { paidAmount: { increment: existing.total } },
-        });
+      if (dto.status === 'PAID' && existing.status !== 'PAID') {
+        if (existing.orderId) {
+          await tx.order.update({
+            where: { id: existing.orderId },
+            data: { paidAmount: { increment: existing.total } },
+          });
+        }
+
+        // Money actually arrived somewhere — credit the default account so the
+        // bank balance reflects it. Inside the same transaction, so an invoice
+        // can never be marked paid without the matching deposit.
+        if (this.accounts) {
+          const account = await this.accounts.defaultAccount(tx);
+          if (account) {
+            await this.accounts.post({
+              tx,
+              accountId: account.id,
+              amount: existing.total,
+              type: 'INVOICE_PAYMENT',
+              description: `Invoice ${existing.invoiceNumber}`
+                + (updated.order?.customer?.name ? ` — ${updated.order.customer.name}` : ''),
+              reference: existing.invoiceNumber,
+              invoiceId: existing.id,
+            });
+          } else {
+            // No account set up yet: don't block getting paid, just don't post.
+            this.logger.warn(
+              `Invoice ${existing.invoiceNumber} marked paid but no account exists to credit`,
+            );
+          }
+        }
       }
       return updated;
     });

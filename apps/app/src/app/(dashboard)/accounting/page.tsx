@@ -17,6 +17,8 @@ import type { ApiPnlReport, ApiMonthlyTrend, ApiProductMargin } from '@/lib/type
 import { useFormatCurrency } from '@/lib/locale-context';
 import { BarChart2, Package } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { AccountsPanel } from './AccountsPanel';
+import { InvoicesPanel } from './InvoicesPanel';
 
 export default function AccountingPage() {
   const formatCurrency = useFormatCurrency();
@@ -59,6 +61,12 @@ export default function AccountingPage() {
           <Button variant="outline">Manage Expenses</Button>
         </Link>
       </div>
+
+      {/* Where the money actually sits */}
+      <AccountsPanel />
+
+      {/* Invoices — previously had no list view anywhere in the app */}
+      <InvoicesPanel />
 
       {/* Date range picker */}
       <Card>
