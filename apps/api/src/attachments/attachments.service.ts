@@ -74,29 +74,56 @@ export class AttachmentsService {
 
   /**
    * Attachment ids are guessable enough that "logged in" is not authorisation.
-   * Staff see everything. A customer only sees files hanging off their own
-   * quote, order or design project — never product or component files, which
-   * are internal print data.
+   * Staff see everything. A customer only sees files hanging off something they
+   * own — never product, job, printer or material files, which are internal
+   * print data.
+   *
+   * Ownership resolves through entityType/entityId, not the orderId/quoteId/
+   * designProjectId columns on Attachment: nothing writes those, so a check
+   * against them would deny every customer, including for their own files.
+   * Anything not listed here is internal and denied by default, so a new
+   * entityType has to be opted in deliberately rather than leaking by omission.
    */
   async assertCanRead(id: string, user: any) {
     const attachment = await this.findOne(id);
     if (user?.userType === 'staff') return attachment;
-
     if (user?.userType !== 'customer') throw new ForbiddenException('Not allowed');
 
-    const owns = await this.prisma.attachment.findFirst({
-      where: {
-        id,
-        OR: [
-          { order: { customerId: user.id } },
-          { quote: { customerId: user.id } },
-          { designProject: { customerId: user.id } },
-        ],
-      },
-      select: { id: true },
-    });
+    const owns = await this.customerOwns(attachment, user.id);
     if (!owns) throw new ForbiddenException('Not allowed');
     return attachment;
+  }
+
+  private async customerOwns(
+    attachment: { entityType: string; entityId: string },
+    customerId: string,
+  ): Promise<boolean> {
+    const type = (attachment.entityType || '').toLowerCase();
+    const entityId = attachment.entityId;
+    if (!entityId) return false;
+
+    switch (type) {
+      case 'order':
+        return !!(await this.prisma.order.findFirst({
+          where: { id: entityId, customerId }, select: { id: true },
+        }));
+      case 'quote':
+        return !!(await this.prisma.quote.findFirst({
+          where: { id: entityId, customerId }, select: { id: true },
+        }));
+      case 'designproject':
+      case 'design_project':
+        return !!(await this.prisma.designProject.findFirst({
+          where: { id: entityId, customerId }, select: { id: true },
+        }));
+      case 'invoice':
+        // Invoices hang off an order rather than the customer directly.
+        return !!(await this.prisma.invoice.findFirst({
+          where: { id: entityId, order: { customerId } }, select: { id: true },
+        }));
+      default:
+        return false;
+    }
   }
 
   async getFilePath(id: string): Promise<string> {

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { requiredNumber } from '../common/utils/validate-number';
+import { requiredNumber, requiredEnum } from '../common/utils/validate-number';
 import { CostingService } from '../costing/costing.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { JobPlanningService } from './job-planning.service';
@@ -10,6 +10,9 @@ import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagina
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+
+// Mirrors the JobPurpose enum in schema.prisma.
+const JOB_PURPOSES = ['CUSTOMER', 'TEST', 'SAMPLE', 'WASTE'] as const;
 
 /** Minimal shape of a customer row returned via Prisma include. */
 interface CustomerRecord {
@@ -32,7 +35,12 @@ export class JobsService {
   ) {}
 
   async create(dto: CreateProductionJobDto) {
-    const purpose = dto.purpose ?? 'CUSTOMER';
+    // CreateProductionJobDto is a plain interface, so ValidationPipe never runs
+    // on it — an unrecognised purpose would otherwise reach Prisma and come
+    // back as a 500 instead of telling the caller what was wrong.
+    const purpose = dto.purpose === undefined
+      ? 'CUSTOMER'
+      : requiredEnum(dto.purpose, 'purpose', JOB_PURPOSES);
     const isInternal = purpose !== 'CUSTOMER';
 
     // Test/sample/waste prints are deliberately not tied to an order or a
