@@ -374,6 +374,10 @@ model ProductionJob {
   componentId     String?
   component       ProductComponent? @relation(fields: [componentId], references: [id])
   quantityToProduce Int      @default(1)
+  // Why this job exists. TEST/SAMPLE/WASTE prints still consume filament and
+  // parts, but are excluded from revenue and cost-of-sales reporting so they
+  // don't distort margins.
+  purpose         JobPurpose @default(CUSTOMER)
 
   printDuration   Float?
   filamentUsedMm  Float?
@@ -423,6 +427,13 @@ enum JobStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+enum JobPurpose {
+  CUSTOMER // real work — counts toward cost of sales
+  TEST     // calibration / test print
+  SAMPLE   // giveaway or showcase piece
+  WASTE    // reprint of a failure, purge, etc.
 }
 
 model JobMaterial {

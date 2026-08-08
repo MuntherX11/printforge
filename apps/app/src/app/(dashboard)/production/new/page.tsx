@@ -7,10 +7,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
-import { ShoppingCart, Package } from 'lucide-react';
+import { JOB_PURPOSES } from '@printforge/types';
+import { ShoppingCart, Package, FlaskConical } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
-type Mode = 'order' | 'stock';
+type Mode = 'order' | 'stock' | 'test';
+
+interface SpoolOption {
+  id: string;
+  currentWeight: number;
+  material: { type: string; color?: string | null; brand?: string | null };
+}
+
+/** Colour → type → brand, the way a spool is identified on the shelf. */
+function spoolLabel(s: SpoolOption): string {
+  const bits = [s.material?.color, s.material?.type, s.material?.brand].filter(Boolean);
+  return `${bits.join(' · ')} — ${Math.round(s.currentWeight)}g left`;
+}
 
 export default function NewJobPage() {
   const router = useRouter();
@@ -23,6 +36,10 @@ export default function NewJobPage() {
   const [jobName, setJobName] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedVariantId, setSelectedVariantId] = useState('');
+  const [spools, setSpools] = useState<SpoolOption[]>([]);
+  const [testSpoolId, setTestSpoolId] = useState('');
+  const [testGrams, setTestGrams] = useState('');
+  const [testPurpose, setTestPurpose] = useState<'TEST' | 'SAMPLE' | 'WASTE'>('TEST');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,6 +59,12 @@ export default function NewJobPage() {
     }
     if (mode === 'stock') {
       api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+    }
+    if (mode === 'test') {
+      setJobName('Test print');
+      api.get<SpoolOption[]>('/spools')
+        .then((r) => setSpools((Array.isArray(r) ? r : []).filter((s) => s.currentWeight > 0)))
+        .catch((err: any) => toast('error', err?.message || 'Failed to load spools'));
     }
   }, [mode]);
 
@@ -90,12 +113,28 @@ export default function NewJobPage() {
 
     if (mode === 'order') {
       payload.orderId = form.get('orderId') || undefined;
+    } else if (mode === 'test') {
+      // No order, no product — it just consumes filament.
+      payload.purpose = testPurpose;
+      const grams = parseFloat(testGrams);
+      if (!testSpoolId || !Number.isFinite(grams) || grams <= 0) {
+        setError('Pick a spool and enter how many grams it will use.');
+        setLoading(false);
+        return;
+      }
+      const spool = spools.find((s) => s.id === testSpoolId);
+      if (spool && grams > spool.currentWeight) {
+        setError(`That spool only has ${Math.round(spool.currentWeight)}g left.`);
+        setLoading(false);
+        return;
+      }
+      payload.materials = [{ spoolId: testSpoolId, gramsUsed: grams }];
     } else {
       payload.productId = form.get('productId') || undefined;
       if (selectedVariantId) payload.variantId = selectedVariantId;
     }
 
-    if (!payload.orderId && !payload.productId) {
+    if (mode !== 'test' && !payload.orderId && !payload.productId) {
       setError(mode === 'order' ? 'Select an order.' : 'Select a product.');
       setLoading(false);
       return;
@@ -139,6 +178,20 @@ export default function NewJobPage() {
               <p className="text-xs text-gray-500 mt-1">Produce a product for on-hand inventory</p>
             </div>
           </button>
+          <button
+            type="button"
+            onClick={() => setMode('test')}
+            className="col-span-2 flex items-center gap-4 p-6 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+          >
+            <FlaskConical className="h-8 w-8 text-amber-600 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-gray-900 dark:text-white">Test Print</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Calibration, sample or waste print. Deducts filament from a spool, with no order or
+                product attached — and stays out of your cost-of-sales figures.
+              </p>
+            </div>
+          </button>
         </div>
       </div>
     );
@@ -149,7 +202,7 @@ export default function NewJobPage() {
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => setMode(null)} className="text-sm text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">← Back</button>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {mode === 'order' ? 'New Job — For Order' : 'New Job — Build Stock'}
+          {mode === 'order' ? 'New Job — For Order' : mode === 'test' ? 'New Job — Test Print' : 'New Job — Build Stock'}
         </h1>
       </div>
       <Card>
@@ -168,6 +221,38 @@ export default function NewJobPage() {
                 ]}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleOrderChange(e.target.value)}
               />
+            ) : mode === 'test' ? (
+              <>
+                <Select
+                  label="Kind of print *"
+                  value={testPurpose}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTestPurpose(e.target.value as any)}
+                  options={JOB_PURPOSES.map((p) => ({ value: p.value, label: p.label }))}
+                />
+                {/* Colour · type · brand · grams left — how a spool is identified on the shelf */}
+                <Select
+                  label="Spool to use *"
+                  value={testSpoolId}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTestSpoolId(e.target.value)}
+                  options={[
+                    { value: '', label: spools.length ? 'Select a spool...' : 'No spools with filament left' },
+                    ...spools.map((s) => ({ value: s.id, label: spoolLabel(s) })),
+                  ]}
+                />
+                <Input
+                  label="Filament used (g) *"
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={testGrams}
+                  onChange={(e) => setTestGrams(e.target.value)}
+                  placeholder="e.g. 25"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  The spool is deducted when you mark this job complete, exactly like a customer job.
+                  It won&apos;t appear in revenue or cost-of-sales reports.
+                </p>
+              </>
             ) : (
               <>
                 <Select

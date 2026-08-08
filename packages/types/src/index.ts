@@ -503,7 +503,22 @@ export interface CreateProductionJobDto {
    * every job silently recorded 1.
    */
   quantityToProduce?: number;
+  /**
+   * Defaults to CUSTOMER. Anything else is an internal print: it may skip the
+   * order/product link, and is excluded from cost-of-sales reporting.
+   */
+  purpose?: JobPurpose;
+  /** Filament consumed directly — how a test print declares what it burns. */
+  materials?: Array<{ spoolId: string; gramsUsed: number }>;
 }
+
+export type JobPurpose = 'CUSTOMER' | 'TEST' | 'SAMPLE' | 'WASTE';
+
+export const JOB_PURPOSES: Array<{ value: JobPurpose; label: string }> = [
+  { value: 'TEST', label: 'Test / calibration print' },
+  { value: 'SAMPLE', label: 'Sample or giveaway' },
+  { value: 'WASTE', label: 'Waste / failed reprint' },
+];
 
 export interface UpdateProductionJobDto {
   status?: JobStatus;

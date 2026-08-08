@@ -32,8 +32,17 @@ export class JobsService {
   ) {}
 
   async create(dto: CreateProductionJobDto) {
-    if (!dto.orderId && !dto.productId) {
+    const purpose = dto.purpose ?? 'CUSTOMER';
+    const isInternal = purpose !== 'CUSTOMER';
+
+    // Test/sample/waste prints are deliberately not tied to an order or a
+    // product — they still burn filament, so they carry their own material
+    // lines instead.
+    if (!isInternal && !dto.orderId && !dto.productId) {
       throw new BadRequestException('A production job must be linked to an order or a product');
+    }
+    if (isInternal && !dto.productId && !(dto.materials?.length)) {
+      throw new BadRequestException('A test print needs at least one filament line (spool + grams)');
     }
 
     let autoName = dto.name?.trim() || '';
@@ -63,21 +72,70 @@ export class JobsService {
       ? 1
       : requiredNumber(dto.quantityToProduce, 'quantityToProduce', { min: 1, max: 100_000, integer: true });
 
-    return this.prisma.productionJob.create({
-      data: {
-        name: autoName || 'Untitled Job',
-        productId: dto.productId,
-        variantId: dto.variantId,
-        componentId: dto.componentId,
-        printerId: dto.printerId,
-        assignedToId: dto.assignedToId,
-        orderId: dto.orderId,
-        orderItemId: dto.orderItemId,
-        gcodeFilename: dto.gcodeFilename,
-        colorChanges: dto.colorChanges || 0,
-        quantityToProduce,
-      },
-      include: { printer: true, assignedTo: { select: { id: true, name: true } } },
+    // Validate any inline filament lines BEFORE creating anything, so a bad
+    // spool id can't leave a job with no materials attached.
+    const materialLines: Array<{
+      spoolId: string; materialId: string; gramsUsed: number; costPerGram: number;
+    }> = [];
+    for (const [i, line] of (dto.materials ?? []).entries()) {
+      const grams = requiredNumber(line?.gramsUsed, `materials[${i}].gramsUsed`, { min: 0.1, max: 100_000 });
+      const spool = await this.prisma.spool.findUnique({
+        where: { id: String(line?.spoolId ?? '') },
+        select: { id: true, materialId: true, currentWeight: true, material: { select: { costPerGram: true } } },
+      });
+      if (!spool) throw new BadRequestException(`Filament line ${i + 1}: spool not found`);
+      if (spool.currentWeight < grams) {
+        throw new BadRequestException(
+          `Filament line ${i + 1}: only ${spool.currentWeight.toFixed(0)} g left on that spool, ${grams} g requested`,
+        );
+      }
+      materialLines.push({
+        spoolId: spool.id,
+        materialId: spool.materialId,
+        gramsUsed: grams,
+        // Snapshot, so a later price change doesn't rewrite this job's cost.
+        costPerGram: spool.material?.costPerGram ?? 0,
+      });
+    }
+
+    if (isInternal && !autoName) {
+      autoName = purpose === 'TEST' ? 'Test print' : purpose === 'SAMPLE' ? 'Sample print' : 'Waste / reprint';
+    }
+
+    // One transaction so a job never exists without the filament lines it was
+    // created to consume.
+    return this.prisma.$transaction(async (tx) => {
+      const job = await tx.productionJob.create({
+        data: {
+          name: autoName || 'Untitled Job',
+          productId: dto.productId,
+          variantId: dto.variantId,
+          componentId: dto.componentId,
+          printerId: dto.printerId,
+          assignedToId: dto.assignedToId,
+          orderId: dto.orderId,
+          orderItemId: dto.orderItemId,
+          gcodeFilename: dto.gcodeFilename,
+          colorChanges: dto.colorChanges || 0,
+          quantityToProduce,
+          purpose: purpose as any,
+        },
+      });
+
+      if (materialLines.length) {
+        await tx.jobMaterial.createMany({
+          data: materialLines.map((l) => ({ ...l, jobId: job.id })),
+        });
+      }
+
+      return tx.productionJob.findUnique({
+        where: { id: job.id },
+        include: {
+          printer: true,
+          assignedTo: { select: { id: true, name: true } },
+          materials: { include: { material: true, spool: true } },
+        },
+      });
     });
   }
 

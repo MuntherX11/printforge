@@ -9,8 +9,19 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
-import { Plus, MapPin, Trash2, ArrowLeft } from 'lucide-react';
+import { Plus, MapPin, Trash2, ArrowLeft, Pencil, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+
+interface AssignableSpool {
+  id: string;
+  printforgeId: string | null;
+  color: string | null;
+  type: string | null;
+  brand: string | null;
+  materialName: string | null;
+  gramsRemaining: number;
+  assignedHere: boolean;
+}
 
 export default function LocationsPage() {
   const { toast } = useToast();
@@ -20,6 +31,49 @@ export default function LocationsPage() {
   const [adding, setAdding] = useState(false);
   const [showDelete, setShowDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // --- spool assignment ---
+  const [spoolTarget, setSpoolTarget] = useState<any | null>(null);
+  const [spoolOptions, setSpoolOptions] = useState<AssignableSpool[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [loadingSpools, setLoadingSpools] = useState(false);
+  const [savingSpools, setSavingSpools] = useState(false);
+  const [spoolFilter, setSpoolFilter] = useState('');
+
+  async function openSpoolPicker(location: any) {
+    setSpoolTarget(location);
+    setSpoolFilter('');
+    setLoadingSpools(true);
+    try {
+      const rows = await api.get<AssignableSpool[]>(`/locations/${location.id}/assignable-spools`);
+      const list = Array.isArray(rows) ? rows : [];
+      setSpoolOptions(list);
+      setPicked(new Set(list.filter((s) => s.assignedHere).map((s) => s.id)));
+    } catch (err: any) {
+      toast('error', err?.message || 'Could not load spools');
+      setSpoolTarget(null);
+    } finally {
+      setLoadingSpools(false);
+    }
+  }
+
+  async function saveSpools() {
+    if (!spoolTarget) return;
+    setSavingSpools(true);
+    try {
+      const res = await api.put<{ assigned: number; removed: number }>(
+        `/locations/${spoolTarget.id}/spools`,
+        { spoolIds: Array.from(picked) },
+      );
+      toast('success', `${res.assigned} spool${res.assigned === 1 ? '' : 's'} in ${spoolTarget.name}`);
+      setSpoolTarget(null);
+      load();
+    } catch (err: any) {
+      toast('error', err?.message || 'Could not save');
+    } finally {
+      setSavingSpools(false);
+    }
+  }
 
   const load = () => api.get<any[]>('/locations').then(setLocations).catch((err: any) => {
     toast('error', err?.message || 'Failed to load');
@@ -56,6 +110,15 @@ export default function LocationsPage() {
       setDeleting(null);
     }
   }
+
+  const spoolQuery = spoolFilter.trim().toLowerCase();
+  const visibleSpools = spoolQuery
+    ? spoolOptions.filter((s) =>
+        [s.color, s.type, s.brand, s.materialName, s.printforgeId]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(spoolQuery)),
+      )
+    : spoolOptions;
 
   if (loading) return <Loading />;
 
@@ -97,9 +160,14 @@ export default function LocationsPage() {
                     <TableCell className="text-gray-500">{l.description || '-'}</TableCell>
                     <TableCell>{l._count?.spools || 0}</TableCell>
                     <TableCell>
-                      <button onClick={() => setShowDelete(l.id)} className="text-red-400 hover:text-red-600">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openSpoolPicker(l)}>
+                          <Pencil className="h-3.5 w-3.5 mr-1.5" /> Spools
+                        </Button>
+                        <button onClick={() => setShowDelete(l.id)} className="text-red-400 hover:text-red-600">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -118,6 +186,93 @@ export default function LocationsPage() {
             <Button type="submit" disabled={adding}>{adding ? 'Adding...' : 'Add Location'}</Button>
           </div>
         </form>
+      </Dialog>
+
+      {/* Which spools live in this location. Identified by colour, type, brand
+          and grams remaining — the way you'd recognise one on the shelf. */}
+      <Dialog
+        open={!!spoolTarget}
+        onClose={() => setSpoolTarget(null)}
+        title={`Spools in ${spoolTarget?.name ?? ''}`}
+        className="max-w-2xl"
+      >
+        {loadingSpools ? (
+          <p className="py-8 text-center text-sm text-gray-500">Loading spools…</p>
+        ) : spoolOptions.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-500">
+            No unassigned spools available. Every spool is already stored somewhere else.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                value={spoolFilter}
+                onChange={(e) => setSpoolFilter(e.target.value)}
+                placeholder="Filter by colour, type or brand…"
+                className="w-full h-10 pl-9 pr-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <span>{picked.size} selected</span>
+              <div className="flex gap-3">
+                <button type="button" className="hover:underline" onClick={() => setPicked(new Set(visibleSpools.map((s) => s.id)))}>Select all shown</button>
+                <button type="button" className="hover:underline" onClick={() => setPicked(new Set())}>Clear</button>
+              </div>
+            </div>
+
+            <div className="max-h-80 overflow-y-auto rounded-md border dark:border-gray-700 divide-y dark:divide-gray-700">
+              {visibleSpools.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-500">Nothing matches that filter.</p>
+              ) : visibleSpools.map((s) => {
+                const on = picked.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => {
+                        setPicked((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                          return next;
+                        });
+                      }}
+                      className="rounded border-gray-300 text-brand-600"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="text-sm font-medium dark:text-gray-100">
+                        {s.color || s.materialName || 'Unnamed'}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                        {[s.type, s.brand].filter(Boolean).join(' · ') || '—'}
+                      </span>
+                      {s.printforgeId && (
+                        <span className="block text-[11px] text-gray-400 font-mono">{s.printforgeId}</span>
+                      )}
+                    </span>
+                    <span className="text-sm tabular-nums text-gray-600 dark:text-gray-300 flex-shrink-0">
+                      {s.gramsRemaining}g
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-400">
+              Unticking a spool removes it from this location without deleting it.
+            </p>
+          </div>
+        )}
+        <div className="flex gap-3 justify-end pt-4">
+          <Button type="button" variant="outline" onClick={() => setSpoolTarget(null)}>Cancel</Button>
+          <Button type="button" onClick={saveSpools} disabled={savingSpools || loadingSpools}>
+            {savingSpools ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       </Dialog>
 
       <Dialog open={!!showDelete} onClose={() => setShowDelete(null)} title="Delete Location">

@@ -25,7 +25,7 @@ export class ReportsService {
         }),
         // COGS: sum of production costs for completed jobs in period
         this.prisma.productionJob.findMany({
-          where: { status: 'COMPLETED', completedAt: { gte: start, lte: end } },
+          where: { status: 'COMPLETED', purpose: 'CUSTOMER', completedAt: { gte: start, lte: end } },
           select: { totalCost: true },
         }),
         // Expenses in period
@@ -84,7 +84,7 @@ export class ReportsService {
           select: { paidAt: true, paidAmount: true },
         }),
         this.prisma.productionJob.findMany({
-          where: { status: 'COMPLETED', completedAt: { gte: startDate, lte: endDate } },
+          where: { status: 'COMPLETED', purpose: 'CUSTOMER', completedAt: { gte: startDate, lte: endDate } },
           select: { completedAt: true, totalCost: true },
         }),
       ]);
@@ -128,7 +128,7 @@ export class ReportsService {
   async getProductMargins() {
     return this.cache.getOrSet('reports:margins', 300, async () => {
       const jobs = await this.prisma.productionJob.findMany({
-        where: { status: 'COMPLETED', totalCost: { not: null } },
+        where: { status: 'COMPLETED', purpose: 'CUSTOMER', totalCost: { not: null } },
         select: {
           totalCost: true,
           product: { select: { id: true, name: true, basePrice: true } },
@@ -196,7 +196,7 @@ export class ReportsService {
           select: { paidAmount: true },
         }),
         this.prisma.productionJob.findMany({
-          where: { status: 'COMPLETED', completedAt: { gte: monthStart } },
+          where: { status: 'COMPLETED', purpose: 'CUSTOMER', completedAt: { gte: monthStart } },
           select: { totalCost: true },
         }),
         this.prisma.printer.findMany({ where: { isActive: true } }),
