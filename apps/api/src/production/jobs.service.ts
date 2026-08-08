@@ -166,14 +166,111 @@ export class JobsService {
         assignedTo: { select: { id: true, name: true, email: true } },
         order: { select: { id: true, orderNumber: true, customer: { select: { id: true, name: true } } } },
         orderItem: true,
-        materials: { include: { material: true, spool: true } },
+        materials: {
+          include: {
+            material: true,
+            // Location matters as much as the spool id — the operator has to
+            // physically go and fetch it.
+            spool: { include: { location: { select: { id: true, name: true } } } },
+          },
+        },
         reprintOf: { select: { id: true, name: true, status: true } },
         reprints: { select: { id: true, name: true, status: true }, orderBy: { createdAt: 'desc' } },
         attachments: true,
       },
     });
     if (!job) throw new NotFoundException('Production job not found');
-    return job;
+
+    return { ...job, filamentPlan: await this.buildFilamentPlan(job) };
+  }
+
+  /**
+   * What to load into the printer, as a picking list.
+   *
+   * Two cases. If filament has already been assigned to the job, report exactly
+   * that — with the spool's PrintForge id and where it lives. If it hasn't
+   * (a job created straight from a product), derive the requirement from the
+   * product's BOM and suggest a spool for each material: the one with least
+   * remaining that still covers the job, so part-used spools get finished
+   * first rather than opening a new one.
+   */
+  private async buildFilamentPlan(job: any) {
+    const fmt = (m: any, spool: any, grams: number, assigned: boolean, enough: boolean) => ({
+      materialId: m?.id ?? null,
+      colour: m?.color ?? null,
+      type: m?.type ?? null,
+      brand: m?.brand ?? null,
+      // "White · PLA · eSUN" — how it reads on the shelf
+      label: [m?.color, m?.type, m?.brand].filter(Boolean).join(' · ') || m?.name || 'Unknown filament',
+      gramsNeeded: Math.round(grams * 10) / 10,
+      spoolId: spool?.id ?? null,
+      spoolRef: spool?.printforgeId ?? null,
+      location: spool?.location?.name ?? null,
+      spoolRemaining: spool ? Math.round(spool.currentWeight) : null,
+      assigned,
+      hasEnough: enough,
+    });
+
+    // Filament already assigned to this job.
+    if (job.materials?.length) {
+      return job.materials.map((jm: any) =>
+        fmt(jm.material, jm.spool, jm.gramsUsed, true,
+          jm.spool ? jm.spool.currentWeight >= jm.gramsUsed : false),
+      );
+    }
+
+    if (!job.productId) return [];
+
+    // Otherwise work out what the product needs and suggest spools.
+    const components = await this.prisma.productComponent.findMany({
+      where: { productId: job.productId },
+      include: { material: true, materials: { include: { material: true } } },
+    });
+
+    const needed = new Map<string, { material: any; grams: number }>();
+    // Components that have a weight but no filament picked yet. Silently
+    // dropping them would show an empty list on a job that clearly needs
+    // filament, so they get surfaced as an unresolved line instead.
+    let unassignedGrams = 0;
+    const qty = job.quantityToProduce || 1;
+    for (const c of components) {
+      if (!c.materialId && !((c as any).materials ?? []).length && c.gramsUsed) {
+        unassignedGrams += c.gramsUsed * c.quantity * qty;
+      }
+      if (c.materialId && c.material) {
+        const prev = needed.get(c.materialId);
+        const grams = c.gramsUsed * c.quantity * qty;
+        needed.set(c.materialId, { material: c.material, grams: (prev?.grams ?? 0) + grams });
+      }
+      // Multicolour components carry their materials on the join table.
+      for (const cm of (c as any).materials ?? []) {
+        if (!cm.materialId || !cm.material) continue;
+        const prev = needed.get(cm.materialId);
+        const grams = cm.gramsUsed * c.quantity * qty;
+        needed.set(cm.materialId, { material: cm.material, grams: (prev?.grams ?? 0) + grams });
+      }
+    }
+    const unresolved = unassignedGrams > 0
+      ? [fmt({ name: 'Filament not set on product' }, null, unassignedGrams, false, false)]
+      : [];
+    if (needed.size === 0) return unresolved;
+
+    const spools = await this.prisma.spool.findMany({
+      where: { materialId: { in: Array.from(needed.keys()) }, isActive: true, currentWeight: { gt: 0 } },
+      include: { location: { select: { id: true, name: true } } },
+      orderBy: { currentWeight: 'asc' },
+    });
+
+    const planned = Array.from(needed.values()).map(({ material, grams }) => {
+      const candidates = spools.filter((s) => s.materialId === material.id);
+      // Smallest spool that still covers the job; otherwise the fullest one.
+      const pick = candidates.find((s) => s.currentWeight >= grams)
+        ?? candidates[candidates.length - 1]
+        ?? null;
+      return fmt(material, pick, grams, false, !!pick && pick.currentWeight >= grams);
+    });
+
+    return [...planned, ...unresolved];
   }
 
   async update(id: string, dto: UpdateProductionJobDto) {

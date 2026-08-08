@@ -387,28 +387,61 @@ export default function JobDetailPage() {
         </Card>
       )}
 
+      {/* Picking list: which filament, which spool, and where it is. */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Materials Used</CardTitle>
+            <CardTitle>Filament Required</CardTitle>
             <Button variant="outline" size="sm" onClick={openAddMaterial}><Plus className="h-4 w-4 mr-1" /> Add</Button>
           </div>
         </CardHeader>
-        <CardContent>
-          {(job.materials || []).length === 0 ? (
-            <p className="text-sm text-gray-500">No materials added yet</p>
+        <CardContent className="p-0">
+          {(job.filamentPlan || []).length === 0 ? (
+            <p className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">
+              No filament recorded for this job yet.
+            </p>
           ) : (
-            <div className="space-y-2">
-              {job.materials.map((m: any) => (
-                <div key={m.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                  <div>
-                    <p className="text-sm font-medium">{m.material?.name} (T{m.colorIndex})</p>
-                    <p className="text-xs text-gray-500">{m.gramsUsed}g @ {formatCurrency(m.costPerGram)}/g</p>
+            <>
+              <div className="divide-y dark:divide-gray-700">
+                {job.filamentPlan.map((f: any, i: number) => (
+                  <div key={f.materialId ?? i} className="flex items-center gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium dark:text-gray-100">{f.label}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {f.spoolRef ? (
+                          <>
+                            <span className="font-mono">{f.spoolRef}</span>
+                            {f.location ? <> · {f.location}</> : <> · <span className="text-amber-600 dark:text-amber-400">no location set</span></>}
+                            {f.spoolRemaining != null && <> · {f.spoolRemaining}g on spool</>}
+                          </>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400">No spool available in stock</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-semibold tabular-nums dark:text-gray-100">{f.gramsNeeded}g</p>
+                      {f.hasEnough ? (
+                        <span className="text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1 justify-end">
+                          <CheckCircle className="h-3 w-3" /> {f.assigned ? 'loaded' : 'in stock'}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 justify-end">
+                          <AlertTriangle className="h-3 w-3" /> short
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm font-medium">{formatCurrency(m.gramsUsed * m.costPerGram)}</p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {!job.filamentPlan.some((f: any) => f.assigned) && (
+                <p className="px-4 py-2.5 text-xs text-gray-400 border-t dark:border-gray-700">
+                  Suggested from the product&apos;s bill of materials — the smallest spool that still
+                  covers the job, so part-used spools get finished first. Nothing is deducted until
+                  the job is completed.
+                </p>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
