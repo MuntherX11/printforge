@@ -43,6 +43,43 @@ export class SpoolsController {
     res.end(pdfBuffer);
   }
 
+  /** Every selected spool's QR as its own PNG, delivered as a zip. */
+  @Post('qr-images')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  async generateQrImages(
+    @Body() body: { spoolIds: string[]; size?: number },
+    @Res() res: Response,
+  ) {
+    const { buffer, count } = await this.spoolsService.generateQrImagesZip(body.spoolIds, {
+      size: body.size,
+    });
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="spool-qr-images-${count}.zip"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
+  /** A single spool's QR as a standalone PNG. */
+  @Get(':id/qr.png')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  async generateQrPng(
+    @Param('id') id: string,
+    @Query('size') size: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { png, filename } = await this.spoolsService.generateQrPng(id, size ? Number(size) : 600);
+    res.set({
+      'Content-Type': 'image/png',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': png.length,
+    });
+    res.end(png);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.spoolsService.findOne(id);

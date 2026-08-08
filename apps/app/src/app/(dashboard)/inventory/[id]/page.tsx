@@ -14,7 +14,7 @@ import type { ApiMaterialDetail, ApiLocation, ApiSpool } from '@/lib/types/api';
 import type { ScannedFields } from '@/components/spool-label-scanner';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Pencil, Trash2, ScanLine, QrCode } from 'lucide-react';
+import { Plus, Pencil, Trash2, ScanLine, QrCode, Image as ImageIcon } from 'lucide-react';
 import dynamic from 'next/dynamic';
 const SpoolLabelScanner = dynamic(
   () => import('@/components/spool-label-scanner').then(m => ({ default: m.SpoolLabelScanner })),
@@ -39,6 +39,7 @@ export default function MaterialDetailPage() {
   const [saving, setSaving] = useState(false);
   const [selectedSpoolIds, setSelectedSpoolIds] = useState<Set<string>>(new Set());
   const [printingLabels, setPrintingLabels] = useState(false);
+  const [downloadingImages, setDownloadingImages] = useState(false);
   const [scannedFields, setScannedFields] = useState<ScannedFields | null>(null);
   const [showDeleteMaterial, setShowDeleteMaterial] = useState(false);
   const [deletingMaterial, setDeletingMaterial] = useState(false);
@@ -201,6 +202,36 @@ export default function MaterialDetailPage() {
     }
   }
 
+  /** Each selected spool's QR as its own PNG, zipped. */
+  async function handleDownloadQrImages() {
+    if (selectedSpoolIds.size === 0) return;
+    setDownloadingImages(true);
+    try {
+      const res = await fetch('/api/spools/qr-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ spoolIds: Array.from(selectedSpoolIds), size: 600 }),
+      });
+      if (!res.ok) throw new Error('Failed to generate QR images');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spool-qr-images-${selectedSpoolIds.size}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke on the next tick so the download has started.
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('success', `${selectedSpoolIds.size} QR image${selectedSpoolIds.size === 1 ? '' : 's'} downloaded`);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
+    } finally {
+      setDownloadingImages(false);
+    }
+  }
+
   if (loading) return <Loading />;
   if (!material) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Material not found</div>;
 
@@ -235,7 +266,16 @@ export default function MaterialDetailPage() {
                 disabled={selectedSpoolIds.size === 0 || printingLabels}
               >
                 <QrCode className="h-4 w-4 mr-2" />
-                {printingLabels ? 'Generating...' : `Print QR Labels (${selectedSpoolIds.size})`}
+                {printingLabels ? 'Generating...' : `Print QR Sheet (${selectedSpoolIds.size})`}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleDownloadQrImages}
+                disabled={selectedSpoolIds.size === 0 || downloadingImages}
+                title="Download each selected spool's QR as its own PNG"
+              >
+                <ImageIcon className="h-4 w-4 mr-2" />
+                {downloadingImages ? 'Preparing...' : `QR Images (${selectedSpoolIds.size})`}
               </Button>
               <Button onClick={() => setShowAddSpool(true)}>
                 <Plus className="h-4 w-4 mr-2" /> Add Spool

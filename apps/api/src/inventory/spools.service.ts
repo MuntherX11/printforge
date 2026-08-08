@@ -6,6 +6,7 @@ import { optionalNumber, requiredNumber } from '../common/utils/validate-number'
 /** Physical bounds for a filament spool, in grams. */
 const W = { min: 0, max: 100_000 };
 import * as QRCode from 'qrcode';
+import JSZip from 'jszip';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PDFDocument = require('pdfkit');
 
@@ -175,6 +176,86 @@ export class SpoolsService {
     // Strip internal fields for public access
     const { materialId, locationId, ...safe } = spool as any;
     return safe;
+  }
+
+  /** Filesystem-safe fragment built only from validated/known fields. */
+  private safeFrag(s?: string | null): string {
+    return String(s ?? '').trim().replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  /**
+   * One PNG per spool, delivered as a zip.
+   *
+   * The PDF sheet is right for printing a whole page of labels at once; this is
+   * for when you want the codes as individual images — dropping one into a
+   * label printer, a document, or a product listing.
+   *
+   * Each file is named for the spool it belongs to (ID, material, colour,
+   * brand) so the identity travels with the image, and the QR is rendered at
+   * print resolution rather than the ~60pt used on the sheet.
+   */
+  async generateQrImagesZip(
+    spoolIds: string[],
+    opts: { size?: number } = {},
+  ): Promise<{ buffer: Buffer; count: number }> {
+    const spools = await this.prisma.spool.findMany({
+      where: { id: { in: spoolIds } },
+      include: { material: true },
+    });
+    if (spools.length === 0) throw new NotFoundException('No spools found');
+
+    // 600 px is roughly 25 mm at 600 dpi — comfortable for a label printer.
+    const size = Math.max(128, Math.min(2048, Math.floor(opts.size ?? 600)));
+    const baseUrl = process.env.APP_BASE_URL || 'https://printforge.mctx.tech';
+
+    const zip = new JSZip();
+    const used = new Set<string>();
+
+    for (const spool of spools) {
+      const png = await QRCode.toBuffer(`${baseUrl}/inventory/spool/${spool.printforgeId}`, {
+        type: 'png',
+        width: size,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+      });
+
+      const parts = [
+        this.safeFrag(spool.printforgeId) || 'spool',
+        this.safeFrag(spool.material?.type),
+        this.safeFrag(spool.material?.color),
+        this.safeFrag(spool.material?.brand),
+      ].filter(Boolean);
+
+      let name = `${parts.join('_')}.png`;
+      // Two spools of the same filament would otherwise collide in the zip.
+      let n = 2;
+      while (used.has(name)) name = `${parts.join('_')}_${n++}.png`;
+      used.add(name);
+
+      zip.file(name, png);
+    }
+
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' }); // PNG is already compressed
+    return { buffer, count: spools.length };
+  }
+
+  /** A single spool's QR as a standalone PNG — handy for reprinting one label. */
+  async generateQrPng(id: string, size = 600): Promise<{ png: Buffer; filename: string }> {
+    const spool = await this.prisma.spool.findUnique({ where: { id }, include: { material: true } });
+    if (!spool) throw new NotFoundException('Spool not found');
+    const baseUrl = process.env.APP_BASE_URL || 'https://printforge.mctx.tech';
+    const png = await QRCode.toBuffer(`${baseUrl}/inventory/spool/${spool.printforgeId}`, {
+      type: 'png',
+      width: Math.max(128, Math.min(2048, Math.floor(size))),
+      margin: 2,
+      errorCorrectionLevel: 'M',
+    });
+    const parts = [
+      this.safeFrag(spool.printforgeId) || 'spool',
+      this.safeFrag(spool.material?.type),
+      this.safeFrag(spool.material?.color),
+    ].filter(Boolean);
+    return { png, filename: `${parts.join('_')}.png` };
   }
 
   async generateQrLabelsPdf(spoolIds: string[]): Promise<Buffer> {
