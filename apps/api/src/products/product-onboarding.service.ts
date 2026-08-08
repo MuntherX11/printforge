@@ -125,6 +125,51 @@ export class ProductOnboardingService {
     }
   }
 
+  /**
+   * Keep the uploaded slicer file, not just what we parsed out of it.
+   *
+   * The onboarding flow previously read the header and discarded the bytes, so
+   * there was nothing to hand an operator at print time. Storing it means the
+   * exact file that produced a component can be downloaded from the product,
+   * and from any order that includes it.
+   *
+   * Returns the attachment id, or null — a storage failure must never abort an
+   * import that otherwise succeeded.
+   */
+  private async storeSourceFile(
+    productId: string,
+    file: { buffer: Buffer; originalname?: string; mimetype?: string },
+  ): Promise<string | null> {
+    try {
+      const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+      const now = new Date();
+      const dateDir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+      const fullDir = path.join(uploadDir, dateDir);
+      if (!fs.existsSync(fullDir)) fs.mkdirSync(fullDir, { recursive: true });
+
+      const original = file.originalname || 'model.gcode';
+      // Never build a path from the client's name.
+      const safe = original.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+      const stored = `${Date.now()}-${safe}`;
+      fs.writeFileSync(path.join(fullDir, stored), file.buffer);
+
+      const attachment = await this.prisma.attachment.create({
+        data: {
+          entityType: 'product',
+          entityId: productId,
+          filename: stored,
+          originalName: original.slice(0, 200),
+          mimeType: file.mimetype || 'application/octet-stream',
+          sizeBytes: file.buffer.length,
+          storagePath: path.join(dateDir, stored),
+        },
+      });
+      return attachment.id;
+    } catch {
+      return null;
+    }
+  }
+
   async onboardFromGcode(productId: string, files: any[]) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
@@ -138,6 +183,8 @@ export class ProductOnboardingService {
     for (const file of files) {
       const analysis = this.gcodeParser.parseHeader(file.buffer);
       const fileName = file.originalname || 'unknown.gcode';
+      // Keep the file itself so it can be downloaded at print time.
+      const sourceAttachmentId = await this.storeSourceFile(productId, file);
 
       if (analysis.tools && analysis.tools.length > 1) {
         const activeTools = analysis.tools.filter(t => (t.filamentGrams || 0) > 0);
@@ -161,6 +208,9 @@ export class ProductOnboardingService {
             quantity: 1,
             sortOrder: 0,
             isMultiColor: true,
+            gcodeFilename: fileName,
+            colorChanges: Math.max(0, activeTools.length - 1),
+            attachmentId: sourceAttachmentId,
           },
         });
 
@@ -199,6 +249,9 @@ export class ProductOnboardingService {
             printMinutes: analysis.estimatedTimeSeconds ? Math.round(analysis.estimatedTimeSeconds / 60) : 0,
             quantity: 1,
             sortOrder: 0,
+            gcodeFilename: fileName,
+            colorChanges: 0,
+            attachmentId: sourceAttachmentId,
           },
         });
         results.push({ fileName, componentsCreated: 1 });

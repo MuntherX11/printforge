@@ -15,7 +15,7 @@ import { api } from '@/lib/api';
 import type { ApiProduct, ApiMaterial, ApiPrinter } from '@/lib/types/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw, Download } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { ProductPartsCard } from './ProductPartsCard';
 import { useToast } from '@/components/ui/toast';
@@ -545,6 +545,7 @@ export default function ProductDetailPage() {
                   <TableHead>Qty</TableHead>
                   <TableHead>Material Stock</TableHead>
                   <TableHead>On Hand</TableHead>
+                  <TableHead>File</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -672,6 +673,22 @@ export default function ProductDetailPage() {
                           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                         }}
                       />
+                    </TableCell>
+                    {/* The slicer file this component came from — what the
+                        operator actually needs to send to the printer. */}
+                    <TableCell>
+                      {(c as any).attachmentId ? (
+                        <a
+                          href={`/api/attachments/${(c as any).attachmentId}/download`}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          title={(c as any).gcodeFilename || 'Download print file'}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          {(c as any).colorChanges > 0 ? `${(c as any).colorChanges}c` : 'File'}
+                        </a>
+                      ) : (
+                        <span className="text-xs text-gray-400" title="Re-import this component to store its file">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <button onClick={() => setShowDeleteComponent(c.id)} className="text-red-400 hover:text-red-600">

@@ -262,6 +262,12 @@ model ProductComponent {
   sortOrder       Int      @default(0)
   stockOnHand     Int      @default(0)
   isMultiColor    Boolean  @default(false)
+  // The slicer file this component was onboarded from. Kept so a production
+  // job can pre-fill its filename and colour changes, and so the operator can
+  // download the exact file to print. attachmentId points at the stored bytes.
+  gcodeFilename   String?
+  colorChanges    Int      @default(0)
+  attachmentId    String?
   createdAt       DateTime @default(now())
 
   materials       ComponentMaterial[]

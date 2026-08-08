@@ -40,6 +40,8 @@ export default function NewJobPage() {
   const [testSpoolId, setTestSpoolId] = useState('');
   const [testGrams, setTestGrams] = useState('');
   const [testPurpose, setTestPurpose] = useState<'TEST' | 'SAMPLE' | 'WASTE'>('TEST');
+  const [gcodeFilename, setGcodeFilename] = useState('');
+  const [colorChanges, setColorChanges] = useState('0');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -83,6 +85,30 @@ export default function NewJobPage() {
     setSelectedProductId(productId);
     setSelectedVariantId('');
     setJobName(product?.name ?? '');
+    applyFileDefaults(productId);
+  }
+
+  /**
+   * Pull the slicer filename and colour changes off the product rather than
+   * making the operator retype what was already captured at import.
+   *
+   * The list endpoint doesn't carry components, so fetch the product detail.
+   * A product built from several files has no single filename — in that case
+   * only the colour-change total is filled, and the field is left for the
+   * operator to choose.
+   */
+  async function applyFileDefaults(productId: string) {
+    if (!productId) { setGcodeFilename(''); setColorChanges('0'); return; }
+    try {
+      const full = await api.get<any>(`/products/${productId}`);
+      const comps: any[] = full?.components ?? [];
+      const named = comps.filter((c) => c.gcodeFilename);
+      setGcodeFilename(named.length === 1 ? named[0].gcodeFilename : '');
+      const changes = comps.reduce((sum, c) => sum + (c.colorChanges || 0), 0);
+      setColorChanges(String(changes || full?.colorChanges || 0));
+    } catch {
+      // Non-fatal: the operator can still type them in.
+    }
   }
 
   function handleVariantChange(variantId: string) {
@@ -291,7 +317,13 @@ export default function NewJobPage() {
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobName(e.target.value)}
               placeholder={mode === 'order' ? 'Auto-filled from order — you can edit' : 'Auto-filled from product — you can edit'}
             />
-            <Input name="gcodeFilename" label="G-code Filename" />
+            <Input
+              name="gcodeFilename"
+              label="G-code Filename"
+              value={gcodeFilename}
+              onChange={(e) => setGcodeFilename(e.target.value)}
+              placeholder={mode === 'stock' ? 'Auto-filled from the product' : ''}
+            />
             <Select
               name="printerId"
               label="Printer"
@@ -302,7 +334,14 @@ export default function NewJobPage() {
               label="Assigned To"
               options={[{ value: '', label: 'Unassigned' }, ...users.map(u => ({ value: u.id, label: u.name }))]}
             />
-            <Input name="colorChanges" label="Color Changes" type="number" defaultValue="0" min="0" />
+            <Input
+              name="colorChanges"
+              label="Color Changes"
+              type="number"
+              min="0"
+              value={colorChanges}
+              onChange={(e) => setColorChanges(e.target.value)}
+            />
 
             <div className="flex gap-3">
               <Button type="submit" disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</Button>
