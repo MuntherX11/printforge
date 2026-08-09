@@ -4,6 +4,12 @@ import { deltaE } from '../common/utils/colour';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const FILAMENT_BRANDS_KEY = 'filament_brands_enabled';
+
+// The brands this workshop buys. Everything else in the catalogue starts off,
+// so the dropdowns open on a short list rather than 150 names.
+const DEFAULT_ENABLED_BRANDS = ['eSUN', 'Polymaker', 'Bambu Lab'];
+
 /**
  * The bundled filamentcolors.xyz swatch list (CC BY 4.0).
  *
@@ -78,6 +84,74 @@ export class FilamentCatalogService implements OnModuleInit {
    * Typeahead for the Add Filament form. Matches brand or colour, so both
    * "esun" and "fire engine" find the same swatch.
    */
+  /**
+   * Brands the workshop actually buys. The catalogue lists 150-odd, and a
+   * dropdown of all of them is worse than useless when three are ever used —
+   * so the list is opt-in, seeded with the three in use here.
+   */
+  private async enabledBrands(): Promise<string[]> {
+    const raw = await this.prisma.systemSetting.findUnique({
+      where: { key: FILAMENT_BRANDS_KEY },
+    });
+    if (!raw?.value) return [...DEFAULT_ENABLED_BRANDS];
+    try {
+      const parsed = JSON.parse(raw.value);
+      // An explicitly empty list means "none", which is a real choice; only a
+      // malformed value falls back to the defaults.
+      return Array.isArray(parsed) ? parsed.map(String) : [...DEFAULT_ENABLED_BRANDS];
+    } catch {
+      return [...DEFAULT_ENABLED_BRANDS];
+    }
+  }
+
+  /** Every brand in the catalogue, flagged with whether it is switched on. */
+  async brandSettings() {
+    const [rows, enabled] = await Promise.all([
+      this.prisma.filamentCatalog.findMany({
+        distinct: ['brand'], select: { brand: true }, orderBy: { brand: 'asc' },
+      }),
+      this.enabledBrands(),
+    ]);
+    const on = new Set(enabled.map((b) => b.toLowerCase()));
+    const counts = await this.prisma.filamentCatalog.groupBy({
+      by: ['brand'], _count: { _all: true },
+    });
+    const countBy = new Map(counts.map((c) => [c.brand, c._count._all]));
+
+    return {
+      brands: rows.map((r) => ({
+        brand: r.brand,
+        enabled: on.has(r.brand.toLowerCase()),
+        swatches: countBy.get(r.brand) ?? 0,
+      })),
+      defaults: DEFAULT_ENABLED_BRANDS,
+    };
+  }
+
+  async setEnabledBrands(brands: string[]) {
+    const known = await this.prisma.filamentCatalog.findMany({
+      distinct: ['brand'], select: { brand: true },
+    });
+    const byLower = new Map(known.map((k) => [k.brand.toLowerCase(), k.brand]));
+
+    // Store the catalogue's own spelling, and drop anything unrecognised so a
+    // stale name can't silently sit in the setting forever.
+    const clean = Array.from(
+      new Set(
+        (brands ?? [])
+          .map((b) => byLower.get(String(b).trim().toLowerCase()))
+          .filter((b): b is string => !!b),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+
+    await this.prisma.systemSetting.upsert({
+      where: { key: FILAMENT_BRANDS_KEY },
+      update: { value: JSON.stringify(clean) },
+      create: { key: FILAMENT_BRANDS_KEY, value: JSON.stringify(clean) },
+    });
+    return { enabled: clean };
+  }
+
   async search(query?: string, type?: string, limit = 25, brand?: string) {
     const q = (query ?? '').trim();
     // The New Material form pulls the whole catalogue once and narrows it locally,
@@ -95,6 +169,10 @@ export class FilamentCatalogService implements OnModuleInit {
     // name happens to contain it.
     if (brand) where.brand = { equals: brand, mode: 'insensitive' };
     if (type) where.type = { contains: type, mode: 'insensitive' };
+    // Disabled brands are invisible to the form, not merely deprioritised.
+    // Kept as its own AND clause so it cannot collide with the brand filter
+    // above — two conditions on one field would overwrite each other.
+    where.AND = [{ brand: { in: await this.enabledBrands() } }];
 
     const results = await this.prisma.filamentCatalog.findMany({
       where,
@@ -116,6 +194,7 @@ export class FilamentCatalogService implements OnModuleInit {
   async brands() {
     const [cat, mine] = await Promise.all([
       this.prisma.filamentCatalog.findMany({
+        where: { brand: { in: await this.enabledBrands() } },
         distinct: ['brand'], select: { brand: true }, orderBy: { brand: 'asc' },
       }),
       this.prisma.material.findMany({

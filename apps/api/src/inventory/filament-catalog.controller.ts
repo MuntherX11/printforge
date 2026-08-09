@@ -30,6 +30,19 @@ export class FilamentCatalogController {
     return this.catalog.brands();
   }
 
+  /** Every catalogue brand with an on/off flag, for the Settings screen. */
+  @Get('brand-settings')
+  brandSettings() {
+    return this.catalog.brandSettings();
+  }
+
+  @Post('brand-settings')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  setBrandSettings(@Body() body: { brands?: string[] }) {
+    return this.catalog.setEnabledBrands(body?.brands ?? []);
+  }
+
   @Get('nearest')
   nearest(@Query('hex') hex: string, @Query('limit') limit?: string) {
     return this.catalog.nearest(hex, Number(limit) || 5);

@@ -13,6 +13,7 @@ import { api } from '@/lib/api';
 import { Upload, Send, Database, Download, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { AddonsManager } from '@/components/settings/addons-manager';
+import { FilamentBrandsManager } from '@/components/settings/filament-brands-manager';
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -364,6 +365,8 @@ export default function SettingsPage() {
       </Card>
 
       {/* Addon management */}
+      <FilamentBrandsManager />
+
       <AddonsManager />
     </div>
   );
