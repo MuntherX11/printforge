@@ -36,6 +36,10 @@ RUN cd packages/types && npx tsc
 # Copy API source and Prisma schema
 COPY apps/api/src/ ./apps/api/src/
 COPY apps/api/prisma/ ./apps/api/prisma/
+# Bundled reference data (filament swatch catalogue). nest build only emits
+# dist/, so this has to be carried across explicitly or the catalogue ships
+# empty and swatch lookup silently does nothing.
+COPY apps/api/data/ ./apps/api/data/
 
 # Generate Prisma client + build API
 RUN cd apps/api && npx prisma generate
@@ -59,6 +63,7 @@ RUN groupadd -g 1001 printforge && \
 COPY --from=builder /app/apps/api/dist ./dist
 COPY --from=builder /app/apps/api/package.json ./
 COPY --from=builder /app/apps/api/prisma ./prisma
+COPY --from=builder /app/apps/api/data ./data
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/types/dist ./node_modules/@printforge/types/dist
 COPY --from=builder /app/packages/types/package.json ./node_modules/@printforge/types/package.json

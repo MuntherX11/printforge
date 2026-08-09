@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { requiredNumber, requiredEnum } from '../common/utils/validate-number';
-import { colourDistance } from '../common/utils/colour';
+import { filamentColourDistance } from '../common/utils/colour';
 import { CostingService } from '../costing/costing.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { JobPlanningService } from './job-planning.service';
@@ -337,14 +337,30 @@ export class JobsService {
       let substituted = false;
 
       if (!spool) {
-        // Same type, ranked by how close the colour is, then by finishing
+        // Same type, ranked by how close the colour looks, then by finishing
         // part-used spools first.
-        const sameType = spools
+        //
+        // Hex-based (Delta E) and name-based distances are different scales, so
+        // they are never ranked against each other: if any candidate can be
+        // compared by hex, only those are considered. Mixing them would let a
+        // coarse name match outrank a measured one.
+        const scored = spools
           .filter((s) => !taken.has(s.id) && s.material?.type === material.type)
-          .map((s) => ({ s, d: colourDistance(material.color, s.material?.color) }))
-          .filter((x) => x.d !== null)
-          .sort((a, b) => (a.d! - b.d!) || (a.s.currentWeight - b.s.currentWeight))
+          .map((s) => ({
+            s,
+            d: filamentColourDistance(
+              { colour: material.color, hex: material.colorHex },
+              { colour: s.material?.color, hex: s.material?.colorHex },
+            ),
+          }))
+          .filter((x) => x.d !== null);
+
+        const byHex = scored.filter((x) => x.d!.basis === 'hex');
+        const pool = byHex.length > 0 ? byHex : scored;
+        const sameType = pool
+          .sort((a, b) => (a.d!.distance - b.d!.distance) || (a.s.currentWeight - b.s.currentWeight))
           .map((x) => x.s);
+
         spool = smallestThatCovers(sameType, grams);
         substituted = !!spool;
       }

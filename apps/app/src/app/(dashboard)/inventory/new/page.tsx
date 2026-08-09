@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
+import { FilamentBrandColour } from '@/components/filament-swatch-picker';
 
 const materialTypes = [
   { value: 'PLA', label: 'PLA' },
@@ -23,6 +24,13 @@ export default function NewMaterialPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Brand and colour are suggested from the filament catalogue, and the hex
+  // rides along with a recognised colour, so these are held here rather than
+  // read off the form at submit time.
+  const [type, setType] = useState('PLA');
+  const [brand, setBrand] = useState('');
+  const [color, setColor] = useState('');
+  const [hex, setHex] = useState('');
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -32,9 +40,10 @@ export default function NewMaterialPage() {
     const form = new FormData(e.currentTarget);
     const data = {
       name: form.get('name') as string,
-      type: form.get('type') as string,
-      color: form.get('color') as string || undefined,
-      brand: form.get('brand') as string || undefined,
+      type,
+      color: color || undefined,
+      brand: brand || undefined,
+      colorHex: hex.replace('#', '') || undefined,
       spoolPrice: parseFloat(form.get('spoolPrice') as string),
       spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
       density: parseFloat(form.get('density') as string) || 1.24,
@@ -59,11 +68,22 @@ export default function NewMaterialPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">{error}</div>}
             <Input name="name" label="Name" placeholder="e.g. PLA White" required />
-            <Select name="type" label="Material Type" options={materialTypes} />
-            <div className="grid grid-cols-2 gap-4">
-              <Input name="color" label="Color" placeholder="e.g. White" />
-              <Input name="brand" label="Brand" placeholder="e.g. eSUN" />
-            </div>
+            <Select
+              name="type" label="Material Type" options={materialTypes}
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+            />
+            <FilamentBrandColour
+              materialType={type}
+              brand={brand}
+              colour={color}
+              hex={hex}
+              onChange={(next) => {
+                if (next.brand !== undefined) setBrand(next.brand);
+                if (next.colour !== undefined) setColor(next.colour);
+                if (next.hex !== undefined) setHex(next.hex);
+              }}
+            />
             <div className="grid grid-cols-2 gap-4">
               <Input name="spoolPrice" label="Spool Price" type="number" step="0.001" min="0" placeholder="e.g. 3.500" required />
               <Input name="spoolWeightGrams" label="Spool Weight (g)" type="number" step="1" min="1" defaultValue="1000" required />

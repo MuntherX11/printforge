@@ -5,10 +5,12 @@ import { SpoolsController } from './spools.controller';
 import { SpoolsService } from './spools.service';
 import { LocationsController } from './locations.controller';
 import { LocationsService } from './locations.service';
+import { FilamentCatalogController } from './filament-catalog.controller';
+import { FilamentCatalogService } from './filament-catalog.service';
 
 @Module({
-  controllers: [MaterialsController, SpoolsController, LocationsController],
-  providers: [MaterialsService, SpoolsService, LocationsService],
-  exports: [MaterialsService, SpoolsService, LocationsService],
+  controllers: [MaterialsController, SpoolsController, LocationsController, FilamentCatalogController],
+  providers: [MaterialsService, SpoolsService, LocationsService, FilamentCatalogService],
+  exports: [MaterialsService, SpoolsService, LocationsService, FilamentCatalogService],
 })
 export class InventoryModule {}

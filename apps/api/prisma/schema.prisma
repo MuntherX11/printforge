@@ -10,18 +10,18 @@ datasource db {
 // ============ AUTH & USERS ============
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String
-  name          String
-  role          Role     @default(OPERATOR)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(OPERATOR)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  auditLogs            AuditLog[]
-  assignedJobs         ProductionJob[]
-  designAssignments    DesignProject[] @relation("DesignAssignments")
+  auditLogs         AuditLog[]
+  assignedJobs      ProductionJob[]
+  designAssignments DesignProject[] @relation("DesignAssignments")
 }
 
 enum Role {
@@ -48,20 +48,20 @@ model AuditLog {
 // ============ CUSTOMERS ============
 
 model Customer {
-  id            String   @id @default(cuid())
-  name          String
-  email         String?  @unique
-  phone         String?
-  address       String?
-  notes         String?
-  portalAccess  Boolean  @default(false)
-  passwordHash  String?
-  isApproved    Boolean  @default(false)
-  isActive      Boolean  @default(true)
-  lastLoginAt   DateTime?
-  refreshToken  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  name         String
+  email        String?   @unique
+  phone        String?
+  address      String?
+  notes        String?
+  portalAccess Boolean   @default(false)
+  passwordHash String?
+  isApproved   Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  refreshToken String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   orders         Order[]
   quotes         Quote[]
@@ -75,6 +75,10 @@ model Material {
   name             String
   type             MaterialType
   color            String?
+  // Six hex digits, no leading hash. Set from the swatch catalogue or by hand.
+  // Colour substitution compares these perceptually, so "Fire Engine Red" and
+  // "Red" are a real distance apart instead of both reading as pure red.
+  colorHex         String?
   brand            String?
   costPerGram      Float
   // Spool-level pricing (user-facing). costPerGram is derived from these when provided.
@@ -85,10 +89,10 @@ model Material {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  spools              Spool[]
-  jobMaterials        JobMaterial[]
-  productComponents   ProductComponent[]
-  componentMaterials  ComponentMaterial[]
+  spools             Spool[]
+  jobMaterials       JobMaterial[]
+  productComponents  ProductComponent[]
+  componentMaterials ComponentMaterial[]
 }
 
 enum MaterialType {
@@ -108,28 +112,28 @@ model StorageLocation {
   description String?
   createdAt   DateTime @default(now())
 
-  spools      Spool[]
-  parts       Part[]
+  spools Spool[]
+  parts  Part[]
 }
 
 model Spool {
-  id              String           @id @default(cuid())
-  printforgeId    String?          @unique
-  materialId      String
-  material        Material         @relation(fields: [materialId], references: [id])
-  initialWeight   Float
-  currentWeight   Float
-  spoolWeight     Float            @default(200)
-  lotNumber       String?
-  purchasePrice   Float?
-  purchaseDate    DateTime?
-  locationId      String?
-  location        StorageLocation? @relation(fields: [locationId], references: [id])
-  isActive        Boolean          @default(true)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id            String           @id @default(cuid())
+  printforgeId  String?          @unique
+  materialId    String
+  material      Material         @relation(fields: [materialId], references: [id])
+  initialWeight Float
+  currentWeight Float
+  spoolWeight   Float            @default(200)
+  lotNumber     String?
+  purchasePrice Float?
+  purchaseDate  DateTime?
+  locationId    String?
+  location      StorageLocation? @relation(fields: [locationId], references: [id])
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  jobMaterials    JobMaterial[]
+  jobMaterials JobMaterial[]
 
   @@index([materialId])
   @@index([isActive])
@@ -142,23 +146,23 @@ model Spool {
 // inserts, keyrings, keyboard switches, magnets, packaging, etc. Filament stays
 // on the Material/Spool (weight-based) track; this is the discrete-count track.
 model Part {
-  id            String           @id @default(cuid())
-  name          String
-  sku           String?          @unique
-  category      PartCategory     @default(OTHER)
-  description   String?
-  unitCost      Float            @default(0) // cost per piece
-  stockQty      Int              @default(0)
-  reorderPoint  Int              @default(0)
-  supplier      String?
-  locationId    String?
-  location      StorageLocation? @relation(fields: [locationId], references: [id])
-  isActive      Boolean          @default(true)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id           String           @id @default(cuid())
+  name         String
+  sku          String?          @unique
+  category     PartCategory     @default(OTHER)
+  description  String?
+  unitCost     Float            @default(0) // cost per piece
+  stockQty     Int              @default(0)
+  reorderPoint Int              @default(0)
+  supplier     String?
+  locationId   String?
+  location     StorageLocation? @relation(fields: [locationId], references: [id])
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
-  productParts  ProductPart[]
-  jobParts      JobPart[]
+  productParts ProductPart[]
+  jobParts     JobPart[]
 
   @@index([isActive])
   @@index([category])
@@ -166,10 +170,10 @@ model Part {
 }
 
 enum PartCategory {
-  FASTENER    // heat-set inserts, screws, nuts
+  FASTENER // heat-set inserts, screws, nuts
   ELECTRONICS // NFC tags, LEDs, batteries
-  HARDWARE    // keyrings, chains, magnets
-  SWITCH      // keyboard switches
+  HARDWARE // keyrings, chains, magnets
+  SWITCH // keyboard switches
   PACKAGING
   ADHESIVE
   OTHER
@@ -208,25 +212,25 @@ model JobPart {
 // ============ PRODUCTS (BOM) ============
 
 model Product {
-  id                String   @id @default(cuid())
-  name              String
-  description       String?
-  sku               String?  @unique
-  estimatedMinutes  Float    @default(0)
-  estimatedGrams    Float    @default(0)
-  colorChanges      Int      @default(0)
-  basePrice         Float    @default(0)
-  imageUrl          String?
-  isActive          Boolean  @default(true)
-  defaultPrinterId  String?
-  defaultPrinter    Printer? @relation(fields: [defaultPrinterId], references: [id])
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String   @id @default(cuid())
+  name             String
+  description      String?
+  sku              String?  @unique
+  estimatedMinutes Float    @default(0)
+  estimatedGrams   Float    @default(0)
+  colorChanges     Int      @default(0)
+  basePrice        Float    @default(0)
+  imageUrl         String?
+  isActive         Boolean  @default(true)
+  defaultPrinterId String?
+  defaultPrinter   Printer? @relation(fields: [defaultPrinterId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  variants          ProductVariant[]
-  components        ProductComponent[]
-  parts             ProductPart[]
-  productionJobs    ProductionJob[]
+  variants       ProductVariant[]
+  components     ProductComponent[]
+  parts          ProductPart[]
+  productionJobs ProductionJob[]
 }
 
 model ProductVariant {
@@ -243,46 +247,46 @@ model ProductVariant {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  orderItems       OrderItem[]
-  productionJobs   ProductionJob[]
+  orderItems     OrderItem[]
+  productionJobs ProductionJob[]
 
   @@index([productId])
 }
 
 model ProductComponent {
-  id              String   @id @default(cuid())
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  materialId      String?
-  material        Material? @relation(fields: [materialId], references: [id])
-  description     String
-  gramsUsed       Float
-  printMinutes    Float    @default(0)
-  quantity        Int      @default(1)
-  sortOrder       Int      @default(0)
-  stockOnHand     Int      @default(0)
-  isMultiColor    Boolean  @default(false)
+  id            String    @id @default(cuid())
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  materialId    String?
+  material      Material? @relation(fields: [materialId], references: [id])
+  description   String
+  gramsUsed     Float
+  printMinutes  Float     @default(0)
+  quantity      Int       @default(1)
+  sortOrder     Int       @default(0)
+  stockOnHand   Int       @default(0)
+  isMultiColor  Boolean   @default(false)
   // The slicer file this component was onboarded from. Kept so a production
   // job can pre-fill its filename and colour changes, and so the operator can
   // download the exact file to print. attachmentId points at the stored bytes.
-  gcodeFilename   String?
-  colorChanges    Int      @default(0)
-  attachmentId    String?
-  createdAt       DateTime @default(now())
+  gcodeFilename String?
+  colorChanges  Int       @default(0)
+  attachmentId  String?
+  createdAt     DateTime  @default(now())
 
-  materials       ComponentMaterial[]
-  productionJobs  ProductionJob[]
+  materials      ComponentMaterial[]
+  productionJobs ProductionJob[]
 }
 
 model ComponentMaterial {
-  id              String           @id @default(cuid())
-  componentId     String
-  component       ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
-  materialId      String
-  material        Material         @relation(fields: [materialId], references: [id])
-  gramsUsed       Float
-  colorIndex      Int              @default(0)
-  sortOrder       Int              @default(0)
+  id          String           @id @default(cuid())
+  componentId String
+  component   ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  materialId  String
+  material    Material         @relation(fields: [materialId], references: [id])
+  gramsUsed   Float
+  colorIndex  Int              @default(0)
+  sortOrder   Int              @default(0)
 
   @@unique([componentId, colorIndex])
 }
@@ -290,27 +294,27 @@ model ComponentMaterial {
 // ============ PRINTERS ============
 
 model Printer {
-  id              String              @id @default(cuid())
-  name            String
-  model           String?
-  connectionType  PrinterConnectionType
-  moonrakerUrl    String?
-  cameraUrl       String?             // MJPEG stream URL (e.g. http://192.168.x.x:8000)
-  hourlyRate      Float               @default(0.40)
-  wattage         Float               @default(200)
-  markupMultiplier Float              @default(2.5)
-  isActive        Boolean             @default(true)
-  status          PrinterStatus       @default(OFFLINE)
-  lastSeen        DateTime?
+  id               String                @id @default(cuid())
+  name             String
+  model            String?
+  connectionType   PrinterConnectionType
+  moonrakerUrl     String?
+  cameraUrl        String? // MJPEG stream URL (e.g. http://192.168.x.x:8000)
+  hourlyRate       Float                 @default(0.40)
+  wattage          Float                 @default(200)
+  markupMultiplier Float                 @default(2.5)
+  isActive         Boolean               @default(true)
+  status           PrinterStatus         @default(OFFLINE)
+  lastSeen         DateTime?
 
   // Maintenance tracking
-  totalPrintHours            Float    @default(0)
-  maintenanceIntervalHours   Float?
-  nextMaintenanceDue         DateTime? // kept for calendar-based reminders; overdue uses print-hour delta
-  lastMaintenancePrintHours  Float    @default(0) // totalPrintHours at time of last completed maintenance
+  totalPrintHours           Float     @default(0)
+  maintenanceIntervalHours  Float?
+  nextMaintenanceDue        DateTime? // kept for calendar-based reminders; overdue uses print-hour delta
+  lastMaintenancePrintHours Float     @default(0) // totalPrintHours at time of last completed maintenance
 
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   productionJobs  ProductionJob[]
   defaultProducts Product[]
@@ -320,9 +324,9 @@ model Printer {
 }
 
 model MaintenanceLog {
-  id              String              @id @default(cuid())
+  id              String          @id @default(cuid())
   printerId       String
-  printer         Printer             @relation(fields: [printerId], references: [id], onDelete: Cascade)
+  printer         Printer         @relation(fields: [printerId], references: [id], onDelete: Cascade)
   type            MaintenanceType
   description     String
   scheduledDate   DateTime?
@@ -331,8 +335,8 @@ model MaintenanceLog {
   cost            Float?
   performedById   String?
   notes           String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   @@index([printerId])
 }
@@ -362,60 +366,60 @@ enum PrinterStatus {
 // ============ PRODUCTION ============
 
 model ProductionJob {
-  id              String     @id @default(cuid())
-  name            String
-  status          JobStatus  @default(QUEUED)
-  printerId       String?
-  printer         Printer?   @relation(fields: [printerId], references: [id])
-  assignedToId    String?
-  assignedTo      User?      @relation(fields: [assignedToId], references: [id])
-  orderId         String?
-  order           Order?     @relation(fields: [orderId], references: [id])
-  orderItemId     String?
-  orderItem       OrderItem? @relation(fields: [orderItemId], references: [id])
-  productId       String?
-  product         Product?   @relation(fields: [productId], references: [id])
-  variantId       String?
-  variant         ProductVariant? @relation(fields: [variantId], references: [id])
-  componentId     String?
-  component       ProductComponent? @relation(fields: [componentId], references: [id])
-  quantityToProduce Int      @default(1)
+  id                String            @id @default(cuid())
+  name              String
+  status            JobStatus         @default(QUEUED)
+  printerId         String?
+  printer           Printer?          @relation(fields: [printerId], references: [id])
+  assignedToId      String?
+  assignedTo        User?             @relation(fields: [assignedToId], references: [id])
+  orderId           String?
+  order             Order?            @relation(fields: [orderId], references: [id])
+  orderItemId       String?
+  orderItem         OrderItem?        @relation(fields: [orderItemId], references: [id])
+  productId         String?
+  product           Product?          @relation(fields: [productId], references: [id])
+  variantId         String?
+  variant           ProductVariant?   @relation(fields: [variantId], references: [id])
+  componentId       String?
+  component         ProductComponent? @relation(fields: [componentId], references: [id])
+  quantityToProduce Int               @default(1)
   // Why this job exists. TEST/SAMPLE/WASTE prints still consume filament and
   // parts, but are excluded from revenue and cost-of-sales reporting so they
   // don't distort margins.
-  purpose         JobPurpose @default(CUSTOMER)
+  purpose           JobPurpose        @default(CUSTOMER)
 
-  printDuration   Float?
-  filamentUsedMm  Float?
+  printDuration  Float?
+  filamentUsedMm Float?
 
-  colorChanges    Int        @default(0)
-  purgeWasteGrams Float      @default(0)
+  colorChanges    Int   @default(0)
+  purgeWasteGrams Float @default(0)
 
-  materialCost    Float?
-  machineCost     Float?
-  wasteCost       Float?
-  overheadCost    Float?
-  totalCost       Float?
+  materialCost Float?
+  machineCost  Float?
+  wasteCost    Float?
+  overheadCost Float?
+  totalCost    Float?
 
-  moonrakerJobId  String?
-  gcodeFilename   String?
+  moonrakerJobId String?
+  gcodeFilename  String?
 
   // Failed print tracking
-  failureReason   String?
-  failedAt        DateTime?
-  wasteGrams      Float      @default(0)
-  reprintOfId     String?
-  reprintOf       ProductionJob?  @relation("Reprints", fields: [reprintOfId], references: [id])
-  reprints        ProductionJob[] @relation("Reprints")
+  failureReason String?
+  failedAt      DateTime?
+  wasteGrams    Float           @default(0)
+  reprintOfId   String?
+  reprintOf     ProductionJob?  @relation("Reprints", fields: [reprintOfId], references: [id])
+  reprints      ProductionJob[] @relation("Reprints")
 
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  materials       JobMaterial[]
-  parts           JobPart[]
-  attachments     Attachment[]
+  materials   JobMaterial[]
+  parts       JobPart[]
+  attachments Attachment[]
 
   @@index([status])
   @@index([orderId])
@@ -437,23 +441,23 @@ enum JobStatus {
 
 enum JobPurpose {
   CUSTOMER // real work — counts toward cost of sales
-  TEST     // calibration / test print
-  SAMPLE   // giveaway or showcase piece
-  WASTE    // reprint of a failure, purge, etc.
+  TEST // calibration / test print
+  SAMPLE // giveaway or showcase piece
+  WASTE // reprint of a failure, purge, etc.
 }
 
 model JobMaterial {
-  id              String        @id @default(cuid())
-  jobId           String
-  job             ProductionJob @relation(fields: [jobId], references: [id])
-  materialId      String
-  material        Material      @relation(fields: [materialId], references: [id])
-  spoolId         String?
-  spool           Spool?        @relation(fields: [spoolId], references: [id])
-  gramsUsed       Float
-  costPerGram     Float
-  colorIndex      Int           @default(0)
-  createdAt       DateTime      @default(now())
+  id          String        @id @default(cuid())
+  jobId       String
+  job         ProductionJob @relation(fields: [jobId], references: [id])
+  materialId  String
+  material    Material      @relation(fields: [materialId], references: [id])
+  spoolId     String?
+  spool       Spool?        @relation(fields: [spoolId], references: [id])
+  gramsUsed   Float
+  costPerGram Float
+  colorIndex  Int           @default(0)
+  createdAt   DateTime      @default(now())
 
   @@index([jobId])
   @@index([materialId])
@@ -462,28 +466,28 @@ model JobMaterial {
 // ============ ORDERS ============
 
 model Quote {
-  id              String       @id @default(cuid())
-  quoteNumber     String       @unique
-  customerId      String
-  customer        Customer     @relation(fields: [customerId], references: [id])
-  status          QuoteStatus  @default(DRAFT)
-  source          QuoteSource  @default(MANUAL)
-  subtotal        Float        @default(0)
-  tax             Float        @default(0)
-  total           Float        @default(0)
-  notes           String?
-  validUntil      DateTime?
-  gcodeMetadata   Json?
-  stlMetadata     Json?
-  costBreakdown   Json?
-  createdById     String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id            String      @id @default(cuid())
+  quoteNumber   String      @unique
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  status        QuoteStatus @default(DRAFT)
+  source        QuoteSource @default(MANUAL)
+  subtotal      Float       @default(0)
+  tax           Float       @default(0)
+  total         Float       @default(0)
+  notes         String?
+  validUntil    DateTime?
+  gcodeMetadata Json?
+  stlMetadata   Json?
+  costBreakdown Json?
+  createdById   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
-  items           QuoteItem[]
-  order           Order?
-  attachments     Attachment[]
-  designProject   DesignProject?
+  items         QuoteItem[]
+  order         Order?
+  attachments   Attachment[]
+  designProject DesignProject?
 
   @@index([status])
   @@index([customerId])
@@ -506,46 +510,46 @@ enum QuoteStatus {
 }
 
 model QuoteItem {
-  id                 String   @id @default(cuid())
-  quoteId            String
-  quote              Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  productId          String?
-  description        String
-  quantity           Int      @default(1)
-  unitPrice          Float
-  totalPrice         Float
-  estimatedGrams     Float?
-  estimatedMinutes   Float?
-  estimatedColors    Int?
-  estimatedCost      Float?
-  marginPercent      Float?
-  createdAt          DateTime @default(now())
+  id               String   @id @default(cuid())
+  quoteId          String
+  quote            Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId        String?
+  description      String
+  quantity         Int      @default(1)
+  unitPrice        Float
+  totalPrice       Float
+  estimatedGrams   Float?
+  estimatedMinutes Float?
+  estimatedColors  Int?
+  estimatedCost    Float?
+  marginPercent    Float?
+  createdAt        DateTime @default(now())
 
   @@index([quoteId])
 }
 
 model Order {
-  id              String      @id @default(cuid())
-  orderNumber     String      @unique
-  customerId      String
-  customer        Customer    @relation(fields: [customerId], references: [id])
-  quoteId         String?     @unique
-  quote           Quote?      @relation(fields: [quoteId], references: [id])
-  status          OrderStatus @default(PENDING)
-  subtotal        Float       @default(0)
-  tax             Float       @default(0)
-  total           Float       @default(0)
-  paidAmount      Float       @default(0)
-  notes           String?
-  dueDate         DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  quoteId     String?     @unique
+  quote       Quote?      @relation(fields: [quoteId], references: [id])
+  status      OrderStatus @default(PENDING)
+  subtotal    Float       @default(0)
+  tax         Float       @default(0)
+  total       Float       @default(0)
+  paidAmount  Float       @default(0)
+  notes       String?
+  dueDate     DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  items           OrderItem[]
-  productionJobs  ProductionJob[]
-  invoices        Invoice[]
-  attachments     Attachment[]
-  configOrders    ConfigOrder[]
+  items          OrderItem[]
+  productionJobs ProductionJob[]
+  invoices       Invoice[]
+  attachments    Attachment[]
+  configOrders   ConfigOrder[]
 
   @@index([status])
   @@index([customerId])
@@ -561,11 +565,11 @@ model ConfigOrder {
   orderId      String
   order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   generatorKey String
-  params       Json     // validated parameter set (source of truth)
+  params       Json // validated parameter set (source of truth)
   status       String   @default("GENERATED") // GENERATED | FAILED
   createdAt    DateTime @default(now())
 
-  artifacts    ConfigArtifact[]
+  artifacts ConfigArtifact[]
 
   @@index([orderId])
 }
@@ -577,7 +581,7 @@ model ConfigArtifact {
   id            String      @id @default(cuid())
   configOrderId String
   configOrder   ConfigOrder @relation(fields: [configOrderId], references: [id], onDelete: Cascade)
-  filename      String      // validated, for download header only — never a path
+  filename      String // validated, for download header only — never a path
   mime          String
   sizeBytes     Int
   storageKey    String      @unique // opaque random token = on-disk filename
@@ -597,43 +601,43 @@ enum OrderStatus {
 }
 
 model OrderItem {
-  id              String          @id @default(cuid())
-  orderId         String
-  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId       String?
-  variantId       String?
-  variant         ProductVariant? @relation(fields: [variantId], references: [id])
-  description     String
-  quantity        Int             @default(1)
-  unitPrice       Float
-  totalPrice      Float
-  materialCost    Float?
-  createdAt       DateTime        @default(now())
+  id           String          @id @default(cuid())
+  orderId      String
+  order        Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String?
+  variantId    String?
+  variant      ProductVariant? @relation(fields: [variantId], references: [id])
+  description  String
+  quantity     Int             @default(1)
+  unitPrice    Float
+  totalPrice   Float
+  materialCost Float?
+  createdAt    DateTime        @default(now())
 
-  productionJobs  ProductionJob[]
+  productionJobs ProductionJob[]
 
   @@index([orderId])
   @@index([productId])
 }
 
 model Invoice {
-  id              String        @id @default(cuid())
-  invoiceNumber   String        @unique
-  orderId         String
-  order           Order         @relation(fields: [orderId], references: [id])
-  status          InvoiceStatus @default(DRAFT)
-  subtotal        Float
-  tax             Float
-  total           Float
-  paidAmount      Float         @default(0)
-  issuedAt        DateTime?
-  dueDate         DateTime?
-  paidAt          DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  orderId       String
+  order         Order         @relation(fields: [orderId], references: [id])
+  status        InvoiceStatus @default(DRAFT)
+  subtotal      Float
+  tax           Float
+  total         Float
+  paidAmount    Float         @default(0)
+  issuedAt      DateTime?
+  dueDate       DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  attachments     Attachment[]
-  transactions    AccountTransaction[]
+  attachments  Attachment[]
+  transactions AccountTransaction[]
 
   @@index([status, paidAt])
 }
@@ -649,29 +653,29 @@ enum InvoiceStatus {
 // ============ ACCOUNTING ============
 
 model ExpenseCategory {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
   description String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
-  expenses    Expense[]
+  expenses Expense[]
 }
 
 model Expense {
-  id           String          @id @default(cuid())
-  categoryId   String
-  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
-  description  String
-  amount       Float
-  date         DateTime
-  recurring    Boolean         @default(false)
-  notes        String?
+  id          String          @id @default(cuid())
+  categoryId  String
+  category    ExpenseCategory @relation(fields: [categoryId], references: [id])
+  description String
+  amount      Float
+  date        DateTime
+  recurring   Boolean         @default(false)
+  notes       String?
   // Which account the money left. Optional so historical expenses recorded
   // before accounts existed stay valid.
-  accountId    String?
-  account      Account?        @relation(fields: [accountId], references: [id])
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  accountId   String?
+  account     Account?        @relation(fields: [accountId], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
   transactions AccountTransaction[]
 
@@ -686,18 +690,18 @@ model Expense {
 // `balance` is a running total kept in step with AccountTransaction, so the
 // current figure is one read rather than a sum over all history.
 model Account {
-  id          String      @id @default(cuid())
-  name        String
-  type        AccountType @default(BANK)
+  id        String      @id @default(cuid())
+  name      String
+  type      AccountType @default(BANK)
   // Free-text: IBAN, last 4 digits, whatever identifies it.
-  reference   String?
-  balance     Float       @default(0)
+  reference String?
+  balance   Float       @default(0)
   // Where invoice payments land unless told otherwise. Only one may be true.
-  isDefault   Boolean     @default(false)
-  isActive    Boolean     @default(true)
-  notes       String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  isDefault Boolean     @default(false)
+  isActive  Boolean     @default(true)
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 
   transactions AccountTransaction[]
   expenses     Expense[]
@@ -752,17 +756,17 @@ enum TransactionType {
 // ============ FILE MANAGEMENT ============
 
 model Attachment {
-  id              String   @id @default(cuid())
-  filename        String
-  originalName    String
-  mimeType        String
-  sizeBytes       Int
-  storagePath     String
-  entityType      String
-  entityId        String
-  parsedMetadata  Json?
-  uploadedById    String?
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  filename       String
+  originalName   String
+  mimeType       String
+  sizeBytes      Int
+  storagePath    String
+  entityType     String
+  entityId       String
+  parsedMetadata Json?
+  uploadedById   String?
+  createdAt      DateTime @default(now())
 
   // Polymorphic relation — entityType + entityId reference different tables
   // (Quote, Order, ProductionJob, DesignProject, Invoice) without FK constraints
@@ -783,13 +787,13 @@ model Attachment {
 // ============ DESIGN MODULE (groundwork) ============
 
 model DesignProject {
-  id                String       @id @default(cuid())
-  projectNumber     String       @unique
+  id                String        @id @default(cuid())
+  projectNumber     String        @unique
   customerId        String
-  customer          Customer     @relation(fields: [customerId], references: [id])
+  customer          Customer      @relation(fields: [customerId], references: [id])
   assignedToId      String?
-  assignedTo        User?        @relation("DesignAssignments", fields: [assignedToId], references: [id])
-  status            DesignStatus @default(REQUESTED)
+  assignedTo        User?         @relation("DesignAssignments", fields: [assignedToId], references: [id])
+  status            DesignStatus  @default(REQUESTED)
   title             String
   brief             String?
   budget            Float?
@@ -799,16 +803,16 @@ model DesignProject {
   designFeeHours    Float?
   totalDesignFee    Float?
   estimatedDelivery DateTime?
-  quoteId           String?      @unique
-  quote             Quote?       @relation(fields: [quoteId], references: [id])
+  quoteId           String?       @unique
+  quote             Quote?        @relation(fields: [quoteId], references: [id])
   deadline          DateTime?
   notes             String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  revisions         DesignRevision[]
-  comments          DesignComment[]
-  attachments       Attachment[]
+  revisions   DesignRevision[]
+  comments    DesignComment[]
+  attachments Attachment[]
 
   @@index([status])
   @@index([customerId])
@@ -834,38 +838,55 @@ enum DesignStatus {
 }
 
 model DesignRevision {
-  id              String        @id @default(cuid())
-  projectId       String
-  project         DesignProject @relation(fields: [projectId], references: [id])
-  versionNumber   Int
-  description     String?
-  internalNotes   String?
-  customerNotes   String?
-  createdAt       DateTime      @default(now())
+  id            String        @id @default(cuid())
+  projectId     String
+  project       DesignProject @relation(fields: [projectId], references: [id])
+  versionNumber Int
+  description   String?
+  internalNotes String?
+  customerNotes String?
+  createdAt     DateTime      @default(now())
 
-  comments        DesignComment[]
+  comments DesignComment[]
 }
 
 model DesignComment {
-  id              String          @id @default(cuid())
-  projectId       String
-  project         DesignProject   @relation(fields: [projectId], references: [id])
-  revisionId      String?
-  revision        DesignRevision? @relation(fields: [revisionId], references: [id])
-  authorId        String?
-  authorName      String
-  isCustomer      Boolean         @default(false)
-  content         String
-  attachmentIds   String[]
-  createdAt       DateTime        @default(now())
+  id            String          @id @default(cuid())
+  projectId     String
+  project       DesignProject   @relation(fields: [projectId], references: [id])
+  revisionId    String?
+  revision      DesignRevision? @relation(fields: [revisionId], references: [id])
+  authorId      String?
+  authorName    String
+  isCustomer    Boolean         @default(false)
+  content       String
+  attachmentIds String[]
+  createdAt     DateTime        @default(now())
+}
+
+// A filament swatch from the bundled filamentcolors.xyz snapshot (CC BY 4.0).
+// Reference data only — picking one fills in a Material, it never becomes
+// stock itself. Refreshed by scripts/fetch-filament-catalog.mjs.
+model FilamentCatalog {
+  id     Int     @id
+  brand  String
+  colour String
+  type   String
+  family String?
+  hex    String
+  hotEnd Int?
+  bed    Int?
+
+  @@index([brand])
+  @@index([colour])
 }
 
 // ============ SYSTEM ============
 
 model SystemSetting {
-  id      String @id @default(cuid())
-  key     String @unique
-  value   String
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
 }
 
 // ============ ADDONS ============
@@ -874,35 +895,35 @@ model SystemSetting {
 // Static files live on disk at ${UPLOAD_DIR}/addons/{slug}/; this row is the
 // registry entry that drives the sidebar and the addon host page.
 model Addon {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  description String?
-  icon        String?  // lucide-react icon name, e.g. "Type"
-  version     String   @default("0.0.0")
-  entry       String   @default("index.html")
-  isActive    Boolean  @default(true)
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  description     String?
+  icon            String? // lucide-react icon name, e.g. "Type"
+  version         String   @default("0.0.0")
+  entry           String   @default("index.html")
+  isActive        Boolean  @default(true)
   // Whether customers can see and open this addon in the portal. Defaults to
   // false so a newly uploaded addon is staff-only until explicitly published —
   // internal tools (e.g. 3mf-orca-prep) simply stay off.
-  customerVisible Boolean @default(false)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  customerVisible Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([isActive, sortOrder])
 }
 
 model Notification {
-  id          String           @id @default(cuid())
-  type        NotificationType
-  title       String
-  message     String
-  entityType  String?
-  entityId    String?
-  isRead      Boolean          @default(false)
-  userId      String?
-  createdAt   DateTime         @default(now())
+  id         String           @id @default(cuid())
+  type       NotificationType
+  title      String
+  message    String
+  entityType String?
+  entityId   String?
+  isRead     Boolean          @default(false)
+  userId     String?
+  createdAt  DateTime         @default(now())
 
   @@index([userId, isRead])
   @@index([createdAt])

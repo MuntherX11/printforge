@@ -283,6 +283,8 @@ export interface CreateMaterialDto {
   name: string;
   type: MaterialType;
   color?: string;
+  /** Six hex digits, no leading hash — drives perceptual colour matching. */
+  colorHex?: string | null;
   brand?: string;
   /** Cost per gram — can be supplied directly or derived from spoolPrice / spoolWeightGrams. */
   costPerGram?: number;

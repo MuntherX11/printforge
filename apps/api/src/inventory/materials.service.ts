@@ -45,6 +45,17 @@ export class MaterialsService {
     if (!partial || dto.type !== undefined) out.type = requiredEnum(dto.type, 'type', MATERIAL_TYPES);
     if (dto.color !== undefined) out.color = dto.color?.trim().slice(0, 60) || null;
     if (dto.brand !== undefined) out.brand = dto.brand?.trim().slice(0, 100) || null;
+    if (dto.colorHex !== undefined) {
+      // Stored bare and uppercase so comparisons never hinge on "#" or case.
+      const raw = (dto.colorHex ?? '').toString().trim().replace(/^#/, '');
+      if (raw === '') {
+        out.colorHex = null;
+      } else if (/^[0-9a-fA-F]{6}$/.test(raw)) {
+        out.colorHex = raw.toUpperCase();
+      } else {
+        throw new BadRequestException('colorHex must be six hex digits, e.g. 91202B');
+      }
+    }
 
     const spoolPrice = optionalNumber(dto.spoolPrice, 'spoolPrice', LIMITS.spoolPrice);
     const spoolWeightGrams = optionalNumber(dto.spoolWeightGrams, 'spoolWeightGrams', LIMITS.spoolWeightGrams);
