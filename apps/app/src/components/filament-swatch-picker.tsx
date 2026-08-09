@@ -70,9 +70,12 @@ export function FilamentBrandColour({ materialType, brand, colour, hex, onChange
 
   // One entry per colour name — a brand often lists the same colour across
   // several sub-types (PLA, PLA+, PLA Matte) that all map to one type of ours.
-  const colours = Array.from(
+  // A hand-typed brand isn't in the catalogue, so the catalogue has nothing to
+  // say about its colours. Offering them anyway would attach some other
+  // brand's hex to this filament.
+  const colours = brandOther ? [] : Array.from(
     forType
-      .filter((s) => !brand || brandOther || s.brand === brand)
+      .filter((s) => !brand || s.brand === brand)
       .reduce((m, s) => (m.has(s.colour) ? m : m.set(s.colour, s)), new Map<string, Swatch>())
       .values(),
   ).sort((a, b) => a.colour.localeCompare(b.colour));
@@ -124,11 +127,18 @@ export function FilamentBrandColour({ materialType, brand, colour, hex, onChange
           value={brandValue}
           onChange={(e) => {
             const v = e.target.value;
-            if (v === OTHER) { setBrandOther(true); onChange({ brand: '' }); return; }
+            // Colours are brand-specific either way, so the old one no longer
+            // applies — including when switching to a hand-typed brand, where
+            // keeping it would leave another brand's hex attached.
+            if (v === OTHER) {
+              setBrandOther(true);
+              setColourOther(true);
+              onChange({ brand: '', colour: '', hex: '' });
+              return;
+            }
             setBrandOther(false);
-            // Colours are brand-specific, so the old one no longer applies.
-            onChange({ brand: v, colour: '', hex: '' });
             setColourOther(false);
+            onChange({ brand: v, colour: '', hex: '' });
           }}
           options={[
             { value: '', label: 'Select brand…' },
