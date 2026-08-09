@@ -406,7 +406,14 @@ export default function JobDetailPage() {
                 {job.filamentPlan.map((f: any, i: number) => (
                   <div key={f.materialId ?? i} className="flex items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium dark:text-gray-100">{f.label}</p>
+                      <p className="text-sm font-medium dark:text-gray-100">
+                        {f.label}
+                        {f.substituted && (
+                          <span className="ml-2 text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                            closest colour — file asked for another
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {f.spoolRef ? (
                           <>
@@ -423,7 +430,7 @@ export default function JobDetailPage() {
                       <p className="text-sm font-semibold tabular-nums dark:text-gray-100">{f.gramsNeeded}g</p>
                       {f.hasEnough ? (
                         <span className="text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1 justify-end">
-                          <CheckCircle className="h-3 w-3" /> {f.assigned ? 'loaded' : 'in stock'}
+                          <CheckCircle className="h-3 w-3" /> {f.assigned ? 'reserved' : 'in stock'}
                         </span>
                       ) : (
                         <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 justify-end">
@@ -434,13 +441,11 @@ export default function JobDetailPage() {
                   </div>
                 ))}
               </div>
-              {!job.filamentPlan.some((f: any) => f.assigned) && (
-                <p className="px-4 py-2.5 text-xs text-gray-400 border-t dark:border-gray-700">
-                  Suggested from the product&apos;s bill of materials — the smallest spool that still
-                  covers the job, so part-used spools get finished first. Nothing is deducted until
-                  the job is completed.
-                </p>
-              )}
+              <p className="px-4 py-2.5 text-xs text-gray-400 border-t dark:border-gray-700">
+                {job.filamentPlan.some((f: any) => f.assigned)
+                  ? 'Reserved for this job — the smallest spool that still covers it, so part-used spools get finished first. Deducted when the job is marked complete.'
+                  : 'Suggested from the product’s bill of materials. Nothing is deducted until the job is completed.'}
+              </p>
             </>
           )}
         </CardContent>

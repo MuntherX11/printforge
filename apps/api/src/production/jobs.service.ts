@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { requiredNumber, requiredEnum } from '../common/utils/validate-number';
+import { colourDistance } from '../common/utils/colour';
 import { CostingService } from '../costing/costing.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { JobPlanningService } from './job-planning.service';
@@ -108,6 +109,13 @@ export class JobsService {
 
     if (isInternal && !autoName) {
       autoName = purpose === 'TEST' ? 'Test print' : purpose === 'SAMPLE' ? 'Sample print' : 'Waste / reprint';
+    }
+
+    // No filament named explicitly, but the product's BOM says what it burns —
+    // assign spools now. Completion deducts from job materials, so a job
+    // created without them prints and completes while stock never moves.
+    if (materialLines.length === 0 && dto.productId) {
+      materialLines.push(...await this.buildAssignedMaterials(dto.productId, quantityToProduce) as any);
     }
 
     // One transaction so a job never exists without the filament lines it was
@@ -221,28 +229,57 @@ export class JobsService {
 
     // Filament already assigned to this job.
     if (job.materials?.length) {
-      return job.materials.map((jm: any) =>
-        fmt(jm.material, jm.spool, jm.gramsUsed, true,
+      // If a colour was substituted at assignment time, say so — the operator
+      // is about to print in a colour the file did not ask for.
+      let wanted = new Set<string>();
+      if (job.productId) {
+        const { needs } = await this.computeBomNeeds(job.productId, job.quantityToProduce || 1);
+        wanted = new Set(needs.map((n) => n.material.id));
+      }
+      return job.materials.map((jm: any) => ({
+        ...fmt(jm.material, jm.spool, jm.gramsUsed, true,
           jm.spool ? jm.spool.currentWeight >= jm.gramsUsed : false),
-      );
+        substituted: wanted.size > 0 && !wanted.has(jm.materialId),
+      }));
     }
 
     if (!job.productId) return [];
 
-    // Otherwise work out what the product needs and suggest spools.
+    // Job predates spool assignment, or the product had no filament set when it
+    // was created. Show the same suggestion the assigner would have made.
+    const { needs, unassignedGrams } = await this.computeBomNeeds(
+      job.productId, job.quantityToProduce || 1,
+    );
+    const unresolved = unassignedGrams > 0
+      ? [fmt({ name: 'Filament not set on product' }, null, unassignedGrams, false, false)]
+      : [];
+    if (needs.length === 0) return unresolved;
+
+    const picks = await this.pickSpoolsForNeeds(needs);
+    const planned = picks.map((p) => ({
+      ...fmt(p.spool?.material ?? p.material, p.spool, p.grams, false, p.hasEnough),
+      substituted: p.substituted,
+    }));
+    return [...planned, ...unresolved];
+  }
+
+  /**
+   * What a product's bill of materials consumes at a given build quantity.
+   * `unassignedGrams` covers components that weigh something but have no
+   * filament set, so they can be reported rather than silently dropped.
+   */
+  private async computeBomNeeds(productId: string, qty: number) {
     const components = await this.prisma.productComponent.findMany({
-      where: { productId: job.productId },
+      where: { productId },
       include: { material: true, materials: { include: { material: true } } },
     });
 
     const needed = new Map<string, { material: any; grams: number }>();
-    // Components that have a weight but no filament picked yet. Silently
-    // dropping them would show an empty list on a job that clearly needs
-    // filament, so they get surfaced as an unresolved line instead.
     let unassignedGrams = 0;
-    const qty = job.quantityToProduce || 1;
+
     for (const c of components) {
-      if (!c.materialId && !((c as any).materials ?? []).length && c.gramsUsed) {
+      const sub = (c as any).materials ?? [];
+      if (!c.materialId && !sub.length && c.gramsUsed) {
         unassignedGrams += c.gramsUsed * c.quantity * qty;
       }
       if (c.materialId && c.material) {
@@ -251,34 +288,98 @@ export class JobsService {
         needed.set(c.materialId, { material: c.material, grams: (prev?.grams ?? 0) + grams });
       }
       // Multicolour components carry their materials on the join table.
-      for (const cm of (c as any).materials ?? []) {
+      for (const cm of sub) {
         if (!cm.materialId || !cm.material) continue;
         const prev = needed.get(cm.materialId);
         const grams = cm.gramsUsed * c.quantity * qty;
         needed.set(cm.materialId, { material: cm.material, grams: (prev?.grams ?? 0) + grams });
       }
     }
-    const unresolved = unassignedGrams > 0
-      ? [fmt({ name: 'Filament not set on product' }, null, unassignedGrams, false, false)]
-      : [];
-    if (needed.size === 0) return unresolved;
 
+    return { needs: Array.from(needed.values()), unassignedGrams };
+  }
+
+  /**
+   * Choose the spool to pull for each filament the job needs.
+   *
+   * Exact material first — the type and colour the slicer asked for. Among
+   * those, the smallest spool that still covers the job, so part-used spools
+   * get finished before a fresh one is opened.
+   *
+   * If nothing of that exact material is in stock, fall back to the nearest
+   * colour of the *same type*: printing PLA in a near-enough colour is a
+   * judgement the operator can accept or override, printing PETG when the file
+   * wants PLA is not. Substitutions are flagged so they are never silent.
+   */
+  private async pickSpoolsForNeeds(needs: Array<{ material: any; grams: number }>) {
+    if (needs.length === 0) return [];
+
+    const types = Array.from(new Set(needs.map((n) => n.material?.type).filter(Boolean)));
     const spools = await this.prisma.spool.findMany({
-      where: { materialId: { in: Array.from(needed.keys()) }, isActive: true, currentWeight: { gt: 0 } },
-      include: { location: { select: { id: true, name: true } } },
+      where: { isActive: true, currentWeight: { gt: 0 }, material: { type: { in: types as any } } },
+      include: {
+        material: true,
+        location: { select: { id: true, name: true } },
+      },
       orderBy: { currentWeight: 'asc' },
     });
 
-    const planned = Array.from(needed.values()).map(({ material, grams }) => {
-      const candidates = spools.filter((s) => s.materialId === material.id);
-      // Smallest spool that still covers the job; otherwise the fullest one.
-      const pick = candidates.find((s) => s.currentWeight >= grams)
-        ?? candidates[candidates.length - 1]
+    // A spool can only be promised to one line of this job.
+    const taken = new Set<string>();
+    const smallestThatCovers = (list: typeof spools, grams: number) =>
+      list.find((s) => !taken.has(s.id) && s.currentWeight >= grams)
+        ?? [...list].reverse().find((s) => !taken.has(s.id))
         ?? null;
-      return fmt(material, pick, grams, false, !!pick && pick.currentWeight >= grams);
-    });
 
-    return [...planned, ...unresolved];
+    return needs.map(({ material, grams }) => {
+      const exact = spools.filter((s) => s.materialId === material.id);
+      let spool = smallestThatCovers(exact, grams);
+      let substituted = false;
+
+      if (!spool) {
+        // Same type, ranked by how close the colour is, then by finishing
+        // part-used spools first.
+        const sameType = spools
+          .filter((s) => !taken.has(s.id) && s.material?.type === material.type)
+          .map((s) => ({ s, d: colourDistance(material.color, s.material?.color) }))
+          .filter((x) => x.d !== null)
+          .sort((a, b) => (a.d! - b.d!) || (a.s.currentWeight - b.s.currentWeight))
+          .map((x) => x.s);
+        spool = smallestThatCovers(sameType, grams);
+        substituted = !!spool;
+      }
+
+      if (spool) taken.add(spool.id);
+      return {
+        material,
+        grams,
+        spool,
+        substituted,
+        hasEnough: !!spool && spool.currentWeight >= grams,
+      };
+    });
+  }
+
+  /**
+   * Turn a product's BOM into the filament lines a job actually consumes.
+   *
+   * Without these rows the job carries no filament at all, and completing it
+   * deducts nothing — the picking list would tell the operator to fetch a spool
+   * that then never went down. A line with no spool is still recorded so the
+   * requirement is visible; it simply has nothing to deduct from.
+   */
+  private async buildAssignedMaterials(productId: string, qty: number) {
+    const { needs } = await this.computeBomNeeds(productId, qty);
+    const picks = await this.pickSpoolsForNeeds(needs);
+
+    return picks.map(({ material, grams, spool }) => ({
+      // The material actually pulled, so cost and deduction agree with reality.
+      materialId: spool?.materialId ?? material.id,
+      spoolId: spool?.id ?? null,
+      gramsUsed: Math.round(grams * 10) / 10,
+      // Snapshot, so a later price change doesn't rewrite this job's cost.
+      costPerGram: spool?.material?.costPerGram ?? material.costPerGram ?? 0,
+    }));
   }
 
   async update(id: string, dto: UpdateProductionJobDto) {
