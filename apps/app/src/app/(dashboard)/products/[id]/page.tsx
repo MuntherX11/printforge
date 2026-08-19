@@ -15,7 +15,7 @@ import { api } from '@/lib/api';
 import type { ApiProduct, ApiMaterial, ApiPrinter } from '@/lib/types/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
-import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw, Download } from 'lucide-react';
+import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw, Download, Factory } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { ProductPartsCard } from './ProductPartsCard';
 import { useToast } from '@/components/ui/toast';
@@ -42,6 +42,8 @@ export default function ProductDetailPage() {
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [savingComponent, setSavingComponent] = useState(false);
   const [showDeleteProduct, setShowDeleteProduct] = useState(false);
+  const [showNewJob, setShowNewJob] = useState(false);
+  const [creatingJob, setCreatingJob] = useState(false);
   const [deletingProduct, setDeletingProduct] = useState(false);
   const [showDeleteComponent, setShowDeleteComponent] = useState<string | null>(null);
   const [deletingComponent, setDeletingComponent] = useState<string | null>(null);
@@ -401,6 +403,27 @@ export default function ProductDetailPage() {
 
   const materialOptions = materials.map(m => ({ value: m.id, label: `${m.name} (${m.type}${m.color ? ' - ' + m.color : ''})` }));
 
+  // Shortcut to Production → New Job with this product pre-selected: purpose
+  // and quantity here, everything else (name, BOM filament reservation, g-code
+  // details) auto-fills exactly as it does on the full form.
+  async function handleCreateJob(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    setCreatingJob(true);
+    try {
+      const job = await api.post<any>('/jobs', {
+        productId: id,
+        purpose: form.get('purpose'),
+        quantityToProduce: parseInt(form.get('quantity') as string) || 1,
+      });
+      toast('success', 'Job created — filament reserved');
+      router.push(`/production/${job.id}`);
+    } catch (err: any) {
+      toast('error', err.message);
+      setCreatingJob(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -421,8 +444,34 @@ export default function ProductDetailPage() {
           <Button onClick={handleCalculateCost} disabled={calculating}>
             <Calculator className="h-4 w-4 mr-2" /> {calculating ? 'Calculating...' : 'Calculate Cost'}
           </Button>
+          <Button onClick={() => setShowNewJob(true)}>
+            <Factory className="h-4 w-4 mr-2" /> New Job
+          </Button>
         </div>
       </div>
+
+      <Dialog open={showNewJob} onClose={() => setShowNewJob(false)} title={`New job — ${product.name}`}>
+        <form onSubmit={handleCreateJob} className="space-y-4">
+          <Select
+            name="purpose" label="Purpose"
+            options={[
+              { value: 'CUSTOMER', label: 'Customer order' },
+              { value: 'TEST', label: 'Test print' },
+              { value: 'SAMPLE', label: 'Sample / showcase' },
+              { value: 'WASTE', label: 'Waste / reprint' },
+            ]}
+          />
+          <Input name="quantity" label="Quantity" type="number" min="1" step="1" defaultValue="1" required />
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Filament is reserved from the product&apos;s bill of materials and deducted when the job
+            is completed. Printer and file details can be set on the job page.
+          </p>
+          <div className="flex gap-3">
+            <Button type="submit" disabled={creatingJob}>{creatingJob ? 'Creating…' : 'Create Job'}</Button>
+            <Button type="button" variant="outline" onClick={() => setShowNewJob(false)}>Cancel</Button>
+          </div>
+        </form>
+      </Dialog>
 
       <div className="flex flex-col sm:flex-row gap-4">
         <dl className="flex-1 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">

@@ -126,6 +126,39 @@ export default function JobDetailPage() {
     }
   }
 
+  // Which picking-list line has its colour picker open, and the same-type
+  // colour options for it.
+  const [swapLine, setSwapLine] = useState<string | null>(null);
+  const [swapOptions, setSwapOptions] = useState<any[]>([]);
+  const [swapping, setSwapping] = useState(false);
+
+  async function openSwap(f: any) {
+    const matsRes = await api.get<any>('/materials?limit=500');
+    const mats = Array.isArray(matsRes) ? matsRes : (matsRes?.data ?? []);
+    // Same material type only — a colour is the operator's call, a different
+    // plastic is not. And only colours with an active spool to pull.
+    setSwapOptions(mats.filter((m: any) =>
+      m.type === f.type && m.id !== f.materialId &&
+      (m.spools ?? []).some((sp: any) => sp.isActive !== false && sp.currentWeight > 0),
+    ));
+    setSwapLine(f.lineId);
+  }
+
+  async function handleSwap(lineId: string, materialId: string) {
+    if (!materialId) return;
+    setSwapping(true);
+    try {
+      await api.patch(`/jobs/materials/${lineId}/colour`, { materialId });
+      toast('success', 'Filament changed — new spool reserved');
+      setSwapLine(null);
+      load();
+    } catch (err: any) {
+      toast('error', err.message);
+    } finally {
+      setSwapping(false);
+    }
+  }
+
   async function openAddMaterial() {
     const matsRes = await api.get<any>('/materials?limit=500');
     const mats = Array.isArray(matsRes) ? matsRes : (matsRes?.data ?? []);
@@ -408,7 +441,11 @@ export default function JobDetailPage() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium dark:text-gray-100">
                         {f.label}
-                        {f.substituted && (
+                        {f.overridden ? (
+                          <span className="ml-2 text-[11px] font-normal text-blue-600 dark:text-blue-400">
+                            customer change — file sliced for {f.slicedColour}
+                          </span>
+                        ) : f.substituted && (
                           <span className="ml-2 text-[11px] font-normal text-amber-600 dark:text-amber-400">
                             closest colour — file asked for another
                           </span>
@@ -425,6 +462,36 @@ export default function JobDetailPage() {
                           <span className="text-amber-600 dark:text-amber-400">No spool available in stock</span>
                         )}
                       </p>
+                      {f.assigned && f.lineId && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
+                        swapLine === f.lineId ? (
+                          <span className="mt-1 flex items-center gap-2">
+                            <select
+                              autoFocus
+                              disabled={swapping}
+                              defaultValue=""
+                              onChange={(e) => handleSwap(f.lineId, e.target.value)}
+                              className="h-7 rounded border border-gray-300 bg-white px-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            >
+                              <option value="">Pick new colour…</option>
+                              {swapOptions.map((m: any) => (
+                                <option key={m.id} value={m.id}>
+                                  {[m.color, m.brand].filter(Boolean).join(' · ') || m.name}
+                                </option>
+                              ))}
+                            </select>
+                            <button type="button" className="text-xs text-gray-500 hover:underline"
+                              onClick={() => setSwapLine(null)}>cancel</button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openSwap(f)}
+                            className="mt-1 block text-xs text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            Change colour
+                          </button>
+                        )
+                      )}
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-semibold tabular-nums dark:text-gray-100">{f.gramsNeeded}g</p>

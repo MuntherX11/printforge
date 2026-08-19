@@ -185,6 +185,7 @@ export class JobsService {
         materials: {
           include: {
             material: true,
+            slicedMaterial: true,
             // Location matters as much as the spool id — the operator has to
             // physically go and fetch it.
             spool: { include: { location: { select: { id: true, name: true } } } },
@@ -239,7 +240,14 @@ export class JobsService {
       return job.materials.map((jm: any) => ({
         ...fmt(jm.material, jm.spool, jm.gramsUsed, true,
           jm.spool ? jm.spool.currentWeight >= jm.gramsUsed : false),
+        lineId: jm.id,
         substituted: wanted.size > 0 && !wanted.has(jm.materialId),
+        // Deliberate customer colour change, distinct from an out-of-stock
+        // substitution: the file says one colour, the customer asked another.
+        overridden: !!jm.slicedMaterialId && jm.slicedMaterialId !== jm.materialId,
+        slicedColour: jm.slicedMaterial
+          ? [jm.slicedMaterial.color, jm.slicedMaterial.type].filter(Boolean).join(' ')
+          : null,
       }));
     }
 

@@ -68,6 +68,18 @@ export class JobsController {
     return this.jobMaterialsService.addMaterial(id, dto);
   }
 
+  // Customer changed colour after the file was sliced — swap this line to a
+  // different colour of the same material type so the right spool is deducted.
+  @Patch('materials/:lineId/colour')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  swapColour(
+    @Param('lineId') lineId: string,
+    @Body() body: { materialId: string; spoolId?: string },
+  ) {
+    return this.jobMaterialsService.swapColour(lineId, body ?? ({} as any));
+  }
+
   @Post(':id/calculate-cost')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')

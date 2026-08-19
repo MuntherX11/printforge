@@ -91,6 +91,7 @@ model Material {
 
   spools             Spool[]
   jobMaterials       JobMaterial[]
+  jobMaterialsSliced JobMaterial[]       @relation("SlicedMaterial")
   productComponents  ProductComponent[]
   componentMaterials ComponentMaterial[]
 }
@@ -447,17 +448,21 @@ enum JobPurpose {
 }
 
 model JobMaterial {
-  id          String        @id @default(cuid())
-  jobId       String
-  job         ProductionJob @relation(fields: [jobId], references: [id])
-  materialId  String
-  material    Material      @relation(fields: [materialId], references: [id])
-  spoolId     String?
-  spool       Spool?        @relation(fields: [spoolId], references: [id])
-  gramsUsed   Float
-  costPerGram Float
-  colorIndex  Int           @default(0)
-  createdAt   DateTime      @default(now())
+  id               String        @id @default(cuid())
+  jobId            String
+  job              ProductionJob @relation(fields: [jobId], references: [id])
+  materialId       String
+  material         Material      @relation(fields: [materialId], references: [id])
+  spoolId          String?
+  spool            Spool?        @relation(fields: [spoolId], references: [id])
+  gramsUsed        Float
+  costPerGram      Float
+  colorIndex       Int           @default(0)
+  // Set when the customer changed colour after slicing: what the file was
+  // actually sliced with, so the swap stays visible on the picking list.
+  slicedMaterialId String?
+  slicedMaterial   Material?     @relation("SlicedMaterial", fields: [slicedMaterialId], references: [id])
+  createdAt        DateTime      @default(now())
 
   @@index([jobId])
   @@index([materialId])
