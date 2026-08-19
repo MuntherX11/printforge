@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { SidebarProvider } from '@/components/sidebar-provider';
-import { LocaleProvider } from '@/lib/locale-context';
 import { AuthProvider } from '@/lib/auth-context';
 import { WsStatusBanner } from '@/components/ui/ws-status-banner';
 
@@ -33,14 +32,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (isPublic) {
     return (
       <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
-        <LocaleProvider>{children}</LocaleProvider>
+        {children}
       </main>
     );
   }
 
   return (
-    <LocaleProvider>
-      <AuthProvider>
+    <AuthProvider>
       <SidebarProvider>
         <div className="flex h-screen overflow-hidden">
           <Sidebar />
@@ -53,7 +51,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </SidebarProvider>
-      </AuthProvider>
-    </LocaleProvider>
+    </AuthProvider>
   );
 }

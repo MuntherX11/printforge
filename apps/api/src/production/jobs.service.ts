@@ -465,8 +465,12 @@ export class JobsService {
       include: { materials: true },
     });
     if (!job) throw new NotFoundException('Production job not found');
-    if (job.status === 'COMPLETED') {
-      throw new BadRequestException('Job is already completed');
+    // All terminal states, not just COMPLETED. A FAILED job has already taken
+    // its proportional waste out of the spools, so completing it afterwards
+    // would deduct the full planned grams a second time; a CANCELLED job never
+    // ran, so completing it would consume stock for nothing.
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+      throw new BadRequestException(`Cannot complete a job that is already ${job.status.toLowerCase()}`);
     }
 
     // Wrap all inventory mutations + job status update in a single transaction
