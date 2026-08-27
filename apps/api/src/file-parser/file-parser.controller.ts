@@ -5,6 +5,7 @@ import { GcodeParserService } from './gcode-parser.service';
 import { StlEstimatorService } from './stl-estimator.service';
 import { UrlScraperService } from './url-scraper.service';
 import { CostingService } from '../costing/costing.service';
+import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { ThreeMfParserService } from './threemf-parser.service';
@@ -19,6 +20,7 @@ class ScrapeUrlDto {
 @UseGuards(JwtAuthGuard, StaffGuard)
 export class FileParserController {
   constructor(
+    private chunkUploads: ChunkUploadsService,
     private gcodeParser: GcodeParserService,
     private stlEstimator: StlEstimatorService,
     private urlScraper: UrlScraperService,
@@ -38,7 +40,11 @@ export class FileParserController {
     @Query('printerId') printerId?: string,
     @Query('colorChanges') colorChanges?: string,
     @Query('infill') infill?: string,
+    @Body('assembledUploadId') assembledId?: string,
   ) {
+    // keep: analysis is a preflight — the staged file is consumed later by the
+    // onboarding step, so the browser only uploads it once.
+    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024, { keep: true });
     if (!file) throw new BadRequestException('No file uploaded');
 
     const name = (file.originalname || '').toLowerCase();

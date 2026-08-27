@@ -17,6 +17,7 @@ import {
   SetProductPartDto,
 } from '@printforge/types';
 import { PartsService } from '../parts/parts.service';
+import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard)
@@ -24,6 +25,7 @@ export class ProductsController {
   constructor(
     private productsService: ProductsService,
     private partsService: PartsService,
+    private chunkUploads: ChunkUploadsService,
   ) {}
 
   @Post()
@@ -164,7 +166,20 @@ export class ProductsController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
   @UseInterceptors(FilesInterceptor('files', 20, { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async onboardGcode(@Param('id') id: string, @UploadedFiles() files: any[]) {
+  async onboardGcode(
+    @Param('id') id: string,
+    @UploadedFiles() files: any[],
+    @Body('assembledUploadIds') assembledIdsRaw?: string,
+  ) {
+    // Files above Cloudflare's per-request cap arrive pre-staged via
+    // /chunk-uploads; both forms can mix in one call.
+    if (assembledIdsRaw) {
+      let ids: string[];
+      try { ids = JSON.parse(assembledIdsRaw); } catch { throw new BadRequestException('assembledUploadIds must be JSON'); }
+      if (!Array.isArray(ids)) throw new BadRequestException('assembledUploadIds must be an array');
+      files = [...(files ?? [])];
+      for (const cid of ids) files.push(await this.chunkUploads.consume(String(cid), 200 * 1024 * 1024));
+    }
     if (!files?.length) throw new BadRequestException('No files uploaded');
     return this.productsService.onboardFromGcode(id, files);
   }
@@ -178,7 +193,9 @@ export class ProductsController {
     @UploadedFile() file: any,
     @Body('selectedPlates') selectedPlatesRaw: string,
     @Body('plateNames') plateNamesRaw?: string,
+    @Body('assembledUploadId') assembledId?: string,
   ) {
+    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
     if (!file) throw new BadRequestException('No file uploaded');
     if (!file.originalname?.toLowerCase().endsWith('.3mf')) {
       throw new BadRequestException('File must be a .3mf');
@@ -236,7 +253,9 @@ export class ProductsController {
     @Param('id') id: string,
     @Param('variantId') variantId: string,
     @UploadedFile() file: any,
+    @Body('assembledUploadId') assembledId?: string,
   ) {
+    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
     if (!file) throw new BadRequestException('No file uploaded');
     return this.productsService.onboardVariantFromGcode(id, variantId, file);
   }

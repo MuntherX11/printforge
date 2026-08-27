@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import { splitAndStage, stageLargeFile, CHUNK_THRESHOLD } from '@/lib/chunked-upload';
 import type { ApiProduct, ApiMaterial, ApiPrinter } from '@/lib/types/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
@@ -51,6 +52,7 @@ export default function ProductDetailPage() {
   const [deletingImage, setDeletingImage] = useState<string | null>(null);
   const [showThreeMfWizard, setShowThreeMfWizard] = useState(false);
   const [threeMfFile, setThreeMfFile] = useState<File | null>(null);
+  const [threeMfStagedId, setThreeMfStagedId] = useState<string | null>(null);
   const [threeMfAnalysis, setThreeMfAnalysis] = useState<any>(null);
   const [analyzingThreeMf, setAnalyzingThreeMf] = useState(false);
 
@@ -155,9 +157,11 @@ export default function ProductDetailPage() {
     setUploadingGcode(true);
     try {
       const formData = new FormData();
-      for (let i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
-      }
+      // Cloudflare caps a single request at 100 MB — bigger files are staged
+      // in parts and referenced by id instead of attached directly.
+      const { direct, assembledIds } = await splitAndStage(Array.from(files));
+      for (const f of direct) formData.append('files', f);
+      if (assembledIds.length) formData.append('assembledUploadIds', JSON.stringify(assembledIds));
       const res = await fetch(`/api/products/${id}/onboard-gcode`, {
         method: 'POST',
         body: formData,
@@ -185,9 +189,19 @@ export default function ProductDetailPage() {
     if (!file) return;
     setAnalyzingThreeMf(true);
     setThreeMfFile(file);
+    setThreeMfStagedId(null);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      // Cloudflare caps one request at 100 MB. A bigger file is staged in
+      // parts ONCE: analysis peeks at it and the import consumes it, so the
+      // browser never uploads the same bytes twice.
+      if (file.size >= CHUNK_THRESHOLD) {
+        const stagedId = await stageLargeFile(file);
+        setThreeMfStagedId(stagedId);
+        formData.append('assembledUploadId', stagedId);
+      } else {
+        formData.append('file', file);
+      }
       const res = await fetch('/api/file-parser/analyze', {
         method: 'POST',
         body: formData,
@@ -314,7 +328,11 @@ export default function ProductDetailPage() {
       // If a gcode file was attached in the dialog, upload it to the new variant now
       if (addVariantGcodeFile && newVariant?.id) {
         const gcodeForm = new FormData();
-        gcodeForm.append('file', addVariantGcodeFile);
+        if (addVariantGcodeFile.size >= CHUNK_THRESHOLD) {
+          gcodeForm.append('assembledUploadId', await stageLargeFile(addVariantGcodeFile));
+        } else {
+          gcodeForm.append('file', addVariantGcodeFile);
+        }
         const res = await fetch(`/api/products/${id}/variants/${newVariant.id}/onboard-gcode`, {
           method: 'POST',
           body: gcodeForm,
@@ -364,7 +382,11 @@ export default function ProductDetailPage() {
     setUploadingVariantGcode(variantId);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      if (file.size >= CHUNK_THRESHOLD) {
+        formData.append('assembledUploadId', await stageLargeFile(file));
+      } else {
+        formData.append('file', file);
+      }
       const res = await fetch(`/api/products/${id}/variants/${variantId}/onboard-gcode`, {
         method: 'POST',
         body: formData,
@@ -1086,11 +1108,12 @@ export default function ProductDetailPage() {
       </Dialog>
       <ThreeMfImportWizard
         open={showThreeMfWizard}
-        onClose={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); }}
+        onClose={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); setThreeMfStagedId(null); }}
         analysis={threeMfAnalysis}
         file={threeMfFile}
+        stagedUploadId={threeMfStagedId}
         productId={id as string}
-        onSuccess={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); load(); }}
+        onSuccess={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); setThreeMfStagedId(null); load(); }}
       />
     </div>
   );

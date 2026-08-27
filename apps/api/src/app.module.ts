@@ -28,6 +28,7 @@ import { BridgeModule } from './moonraker-bridge/bridge.module';
 import { WebSocketModule } from './websocket/websocket.module';
 import { RedisModule } from './common/redis/redis.module';
 import { AddonsModule } from './addons/addons.module';
+import { ChunkUploadsModule } from './chunk-uploads/chunk-uploads.module';
 import { ConfiguratorModule } from './configurator/configurator.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LowStockProcessor } from './worker/low-stock.processor';
@@ -69,6 +70,7 @@ import { HealthController } from './health/health.controller';
     WebSocketModule,
     RedisModule,
     AddonsModule,
+    ChunkUploadsModule,
     ConfiguratorModule,
     ScheduleModule.forRoot(),
   ],

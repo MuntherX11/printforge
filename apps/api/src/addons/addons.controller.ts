@@ -18,6 +18,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import * as path from 'path';
 import { AddonsService } from './addons.service';
+import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
@@ -73,7 +74,7 @@ const MIME: Record<string, string> = {
 @Controller('addons')
 @UseGuards(JwtAuthGuard)
 export class AddonsController {
-  constructor(private readonly addons: AddonsService) {}
+  constructor(private readonly addons: AddonsService, private readonly chunkUploads: ChunkUploadsService) {}
 
   // Active addons for the staff sidebar — any authenticated staff member.
   @Get()
@@ -108,7 +109,11 @@ export class AddonsController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
-  upload(@UploadedFile() file: Express.Multer.File) {
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('assembledUploadId') assembledId?: string,
+  ) {
+    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
     return this.addons.install(file);
   }
 

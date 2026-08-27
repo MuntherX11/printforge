@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { stageLargeFile, CHUNK_THRESHOLD } from '@/lib/chunked-upload';
 import { useToast } from '@/components/ui/toast';
 import { Puzzle, Upload, Trash2, ExternalLink, Users, Lock } from 'lucide-react';
 
@@ -41,7 +42,15 @@ export function AddonsManager() {
     if (!file) return;
     setUploading(true);
     try {
-      const addon = (await api.upload('/addons/upload', file, {})) as Addon;
+      let addon: Addon;
+      if (file.size >= CHUNK_THRESHOLD) {
+        // Too big for one request through Cloudflare — stage in parts first.
+        const fd = new FormData();
+        fd.append('assembledUploadId', await stageLargeFile(file));
+        addon = (await api.postForm('/addons/upload', fd)) as Addon;
+      } else {
+        addon = (await api.upload('/addons/upload', file, {})) as Addon;
+      }
       toast('success', `Installed "${addon.name}" v${addon.version}`);
       load();
     } catch (err: any) {

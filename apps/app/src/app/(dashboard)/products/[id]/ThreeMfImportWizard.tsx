@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { stageLargeFile, CHUNK_THRESHOLD } from '@/lib/chunked-upload';
 import { ThreeMfAnalysis } from '@printforge/types';
 import PlatePreviewCard from './PlatePreviewCard';
 
@@ -12,6 +13,9 @@ interface ThreeMfImportWizardProps {
   onClose: () => void;
   analysis: ThreeMfAnalysis | null;
   file: File | null;
+  /** Set when the file was staged in parts (too big for one request through
+   *  Cloudflare) — the import references it instead of re-uploading. */
+  stagedUploadId?: string | null;
   productId: string;
   onSuccess: () => void;
 }
@@ -21,6 +25,7 @@ export function ThreeMfImportWizard({
   onClose,
   analysis,
   file,
+  stagedUploadId,
   productId,
   onSuccess,
 }: ThreeMfImportWizardProps) {
@@ -59,7 +64,15 @@ export function ThreeMfImportWizard({
     setImporting(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      // A big file was already staged once for the analysis step — reference
+      // it rather than uploading it a second time.
+      if (stagedUploadId) {
+        formData.append('assembledUploadId', stagedUploadId);
+      } else if (file.size >= CHUNK_THRESHOLD) {
+        formData.append('assembledUploadId', await stageLargeFile(file));
+      } else {
+        formData.append('file', file);
+      }
       formData.append('selectedPlates', JSON.stringify(selectedPlates));
       formData.append('plateNames', JSON.stringify(plateNames));
 

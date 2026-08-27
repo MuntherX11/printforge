@@ -7,9 +7,10 @@ import { WatchFolderService } from './watch-folder.service';
 import { WatchFolderController } from './watch-folder.controller';
 import { ThreeMfParserService } from './threemf-parser.service';
 import { CostingModule } from '../costing/costing.module';
+import { ChunkUploadsModule } from '../chunk-uploads/chunk-uploads.module';
 
 @Module({
-  imports: [CostingModule],
+  imports: [CostingModule, ChunkUploadsModule],
   controllers: [FileParserController, WatchFolderController],
   providers: [GcodeParserService, StlEstimatorService, UrlScraperService, WatchFolderService, ThreeMfParserService],
   exports: [GcodeParserService, StlEstimatorService, UrlScraperService, WatchFolderService, ThreeMfParserService],
