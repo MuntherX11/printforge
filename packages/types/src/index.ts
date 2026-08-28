@@ -424,6 +424,16 @@ export interface UpdateProductComponentDto {
   quantity?: number;
   sortOrder?: number;
   stockOnHand?: number;
+  /** Plate calibration: units on a full plate of this component, and that
+   *  plate's total minutes/grams from the slicer. Drives bulk cost floors. */
+  platedUnits?: number | null;
+  platedMinutes?: number | null;
+  platedGrams?: number | null;
+}
+
+export interface PriceTierDto {
+  minQty: number;
+  unitPrice: number;
 }
 
 export interface CreateProductVariantDto {

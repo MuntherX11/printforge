@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { requiredNumber } from '../common/utils/validate-number';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ProductCostingService } from './product-costing.service';
 import { ProductOnboardingService } from './product-onboarding.service';
@@ -79,6 +80,9 @@ export class ProductsService {
         estimatedMinutes: true,
         colorChanges: true,
         basePrice: true,
+        // Staff-side bulk pricing — deliberately absent from findPublicCatalog:
+        // tiers are applied by staff, never shown to customers.
+        priceTiers: { orderBy: { minQty: 'asc' }, select: { minQty: true, unitPrice: true } },
         variants: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
@@ -136,6 +140,7 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
+        priceTiers: { orderBy: { minQty: 'asc' } },
         defaultPrinter: true,
         variants: { orderBy: { sortOrder: 'asc' } },
         components: {
@@ -271,6 +276,31 @@ export class ProductsService {
     return component;
   }
 
+  /**
+   * Replace this product's bulk price tiers wholesale. Tiers are few and edited
+   * as a table, so replace-all keeps the API one honest call instead of a
+   * diff protocol. minQty 1 is meaningless here — that is just basePrice.
+   */
+  async setPriceTiers(productId: string, tiers: Array<{ minQty: number; unitPrice: number }>) {
+    await this.findOne(productId);
+    const clean = (tiers ?? []).map((t, i) => ({
+      minQty: requiredNumber(t?.minQty, `tiers[${i}].minQty`, { min: 2, max: 1_000_000, integer: true }),
+      unitPrice: requiredNumber(t?.unitPrice, `tiers[${i}].unitPrice`, { min: 0.001, max: 1_000_000 }),
+    }));
+    const seen = new Set<number>();
+    for (const t of clean) {
+      if (seen.has(t.minQty)) throw new BadRequestException(`Duplicate tier at quantity ${t.minQty}`);
+      seen.add(t.minQty);
+    }
+    await this.prisma.$transaction([
+      this.prisma.priceTier.deleteMany({ where: { productId } }),
+      ...(clean.length
+        ? [this.prisma.priceTier.createMany({ data: clean.map((t) => ({ ...t, productId })) })]
+        : []),
+    ]);
+    return this.prisma.priceTier.findMany({ where: { productId }, orderBy: { minQty: 'asc' } });
+  }
+
   async updateComponent(componentId: string, dto: UpdateProductComponentDto) {
     const component = await this.prisma.productComponent.findUnique({
       where: { id: componentId },
@@ -282,6 +312,19 @@ export class ProductsService {
       const newMaterial = await this.prisma.material.findUnique({ where: { id: dto.materialId } });
       if (!newMaterial) throw new NotFoundException('Material not found');
     }
+
+    // Plate calibration fields: bounded like every other dimensional input, and
+    // all-or-nothing — a plate time without a unit count is uninterpretable.
+    for (const [k, lim] of [
+      ['platedUnits', { min: 1, max: 10_000, integer: true }],
+      ['platedMinutes', { min: 1, max: 1_000_000 }],
+      ['platedGrams', { min: 0.1, max: 1_000_000 }],
+    ] as const) {
+      if ((dto as any)[k] !== undefined && (dto as any)[k] !== null) {
+        (dto as any)[k] = requiredNumber((dto as any)[k], k, lim as any);
+      }
+    }
+
 
     const updated = await this.prisma.productComponent.update({
       where: { id: componentId },

@@ -232,6 +232,22 @@ model Product {
   components     ProductComponent[]
   parts          ProductPart[]
   productionJobs ProductionJob[]
+  priceTiers     PriceTier[]
+}
+
+// Staff-set bulk pricing: at minQty and above, the unit price for this product
+// drops to unitPrice. Applied on the staff order form only — the customer
+// portal keeps charging basePrice regardless.
+model PriceTier {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  minQty    Int
+  unitPrice Float
+  createdAt DateTime @default(now())
+
+  @@unique([productId, minQty])
+  @@index([productId])
 }
 
 model ProductVariant {
@@ -273,6 +289,12 @@ model ProductComponent {
   gcodeFilename String?
   colorChanges  Int       @default(0)
   attachmentId  String?
+  // Plate calibration for bulk costing: slicing a FULL plate of this component
+  // measures how setup and colour-change time amortise across units — the real
+  // per-unit cost at volume, not printMinutes x quantity.
+  platedUnits   Int?
+  platedMinutes Float?
+  platedGrams   Float?
   createdAt     DateTime  @default(now())
 
   materials      ComponentMaterial[]

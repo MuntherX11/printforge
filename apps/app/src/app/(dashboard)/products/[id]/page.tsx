@@ -18,6 +18,8 @@ import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
 import { Plus, Calculator, Trash2, Edit2, Upload, Image as ImageIcon, X, AlertTriangle, CheckCircle, FileCode, Tag, RefreshCw, Download, Factory } from 'lucide-react';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
+import { BulkPricingCard } from './BulkPricingCard';
+import { PlateCalibrationDialog } from './PlateCalibrationDialog';
 import { ProductPartsCard } from './ProductPartsCard';
 import { useToast } from '@/components/ui/toast';
 
@@ -44,6 +46,7 @@ export default function ProductDetailPage() {
   const [savingComponent, setSavingComponent] = useState(false);
   const [showDeleteProduct, setShowDeleteProduct] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
+  const [calibratingComponent, setCalibratingComponent] = useState<any>(null);
   const [creatingJob, setCreatingJob] = useState(false);
   const [deletingProduct, setDeletingProduct] = useState(false);
   const [showDeleteComponent, setShowDeleteComponent] = useState<string | null>(null);
@@ -695,7 +698,19 @@ export default function ProductDetailPage() {
                       )}
                     </TableCell>
                     <TableCell className="font-mono">{c.gramsUsed}g</TableCell>
-                    <TableCell className="font-mono">{c.printMinutes}min</TableCell>
+                    <TableCell className="font-mono">
+                      {c.printMinutes}min
+                      <button
+                        type="button"
+                        onClick={() => setCalibratingComponent(c)}
+                        className="mt-0.5 block text-[11px] font-sans text-blue-600 hover:underline dark:text-blue-400"
+                        title="Time and grams for a full plate of this component — drives bulk cost floors"
+                      >
+                        {c.platedUnits && c.platedMinutes
+                          ? `${c.platedUnits}/plate · ${Math.round(c.platedMinutes)}min`
+                          : 'Calibrate plate'}
+                      </button>
+                    </TableCell>
                     <TableCell>{c.quantity}</TableCell>
                     <TableCell>
                       {c.isMultiColor && c.materials?.length > 0 ? (
@@ -775,6 +790,13 @@ export default function ProductDetailPage() {
       </Card>
 
       {/* Non-printed parts (NFC tags, inserts, keyrings…) */}
+      <BulkPricingCard
+        productId={id as string}
+        basePrice={product.basePrice}
+        initialTiers={(product.priceTiers || []).map((t: any) => ({ minQty: t.minQty, unitPrice: t.unitPrice }))}
+        onSaved={load}
+      />
+
       <ProductPartsCard productId={String(id)} />
 
       {/* Slicer File Onboarding */}
@@ -1106,6 +1128,13 @@ export default function ProductDetailPage() {
           </div>
         </div>
       </Dialog>
+      <PlateCalibrationDialog
+        open={!!calibratingComponent}
+        onClose={() => setCalibratingComponent(null)}
+        component={calibratingComponent}
+        onSaved={load}
+      />
+
       <ThreeMfImportWizard
         open={showThreeMfWizard}
         onClose={() => { setShowThreeMfWizard(false); setThreeMfFile(null); setThreeMfAnalysis(null); setThreeMfStagedId(null); }}

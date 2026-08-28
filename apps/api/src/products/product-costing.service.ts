@@ -262,4 +262,71 @@ export class ProductCostingService {
       await this.calculateCost(productId);
     }
   }
+
+  /**
+   * True cost per unit at each quantity, for validating bulk price tiers.
+   *
+   * Components with plate calibration (a full plate sliced: platedUnits +
+   * platedMinutes) amortise properly: whole plates are charged even when the
+   * last one is partial, because the printer runs the plate either way.
+   * Components without it fall back to linear time — which over-states cost,
+   * so the floor errs safe, never optimistic.
+   */
+  async bulkCosts(id: string, qtys: number[]) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: {
+        defaultPrinter: true,
+        components: { include: { material: true, materials: { include: { material: true } } } },
+        parts: { include: { part: true } },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const printer = product.defaultPrinter ?? null;
+    const partsPerUnit = (product as any).parts.reduce(
+      (sum: number, pp: any) => sum + pp.part.unitCost * pp.quantity, 0);
+
+    const results = [] as Array<{ qty: number; totalCost: number; unitCost: number; calibrated: boolean }>;
+    for (const qty of qtys) {
+      let minutes = 0;
+      const materials: Array<{ gramsUsed: number; costPerGram: number }> = [];
+      let allCalibrated = true;
+
+      for (const c of product.components) {
+        const subs: any[] = (c as any).materials ?? [];
+        const cpg = c.material?.costPerGram
+          ?? (subs.length ? subs.reduce((s2: number, cm: any) => s2 + (cm.material?.costPerGram ?? 0), 0) / subs.length : 0);
+
+        const unitsNeeded = c.quantity * qty;
+        if (c.platedUnits && c.platedMinutes && c.platedUnits > 0) {
+          const plates = Math.ceil(unitsNeeded / c.platedUnits);
+          minutes += plates * c.platedMinutes;
+          // grams stay linear; the plate figure just refines the per-unit rate
+          const gPerUnit = c.platedGrams ? c.platedGrams / c.platedUnits : c.gramsUsed;
+          materials.push({ gramsUsed: gPerUnit * unitsNeeded, costPerGram: cpg });
+        } else {
+          allCalibrated = false;
+          minutes += c.printMinutes * unitsNeeded;
+          materials.push({ gramsUsed: c.gramsUsed * unitsNeeded, costPerGram: cpg });
+        }
+      }
+
+      const breakdown = await this.costingService.calculateJobCost({
+        printDuration: minutes * 60,
+        colorChanges: 0,
+        purgeWasteGrams: 0,
+        printer,
+        materials,
+      });
+      const totalCost = Math.round((breakdown.totalCost + partsPerUnit * qty) * 1000) / 1000;
+      results.push({
+        qty,
+        totalCost,
+        unitCost: Math.round((totalCost / qty) * 10000) / 10000,
+        calibrated: allCalibrated,
+      });
+    }
+    return { basePrice: product.basePrice, results };
+  }
 }

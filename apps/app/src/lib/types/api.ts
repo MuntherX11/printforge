@@ -170,6 +170,9 @@ export interface ApiProductComponent {
   materialId: string | null;
   material?: ApiMaterial | null;
   description: string;
+  platedUnits?: number | null;
+  platedMinutes?: number | null;
+  platedGrams?: number | null;
   gramsUsed: number;
   printMinutes: number;
   quantity: number;
@@ -214,6 +217,8 @@ export interface ApiProduct {
   updatedAt: string;
   components?: ApiProductComponent[];
   variants?: ApiProductVariant[];
+  /** Staff-side bulk pricing tiers, ordered by minQty. */
+  priceTiers?: Array<{ id?: string; minQty: number; unitPrice: number }>;
   /** Present on list endpoint via _count select. */
   _count?: {
     components: number;

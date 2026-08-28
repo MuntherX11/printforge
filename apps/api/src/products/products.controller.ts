@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 
 import { ProductsService } from './products.service';
+import { ProductCostingService } from './product-costing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -26,6 +27,7 @@ export class ProductsController {
     private productsService: ProductsService,
     private partsService: PartsService,
     private chunkUploads: ChunkUploadsService,
+    private productCostingService: ProductCostingService,
   ) {}
 
   @Post()
@@ -139,6 +141,27 @@ export class ProductsController {
   @UseGuards(StaffGuard)
   listParts(@Param('id') id: string) {
     return this.partsService.listForProduct(id);
+  }
+
+  // Bulk pricing: staff-set quantity tiers, validated in the UI against the
+  // true cost floor from bulk-costs.
+  @Put(':id/price-tiers')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  setPriceTiers(@Param('id') id: string, @Body() body: { tiers?: Array<{ minQty: number; unitPrice: number }> }) {
+    return this.productsService.setPriceTiers(id, body?.tiers ?? []);
+  }
+
+  @Get(':id/bulk-costs')
+  @UseGuards(StaffGuard)
+  bulkCosts(@Param('id') id: string, @Query('qtys') qtysRaw?: string) {
+    const qtys = (qtysRaw ?? '1')
+      .split(',')
+      .map((q) => parseInt(q.trim(), 10))
+      .filter((q) => Number.isInteger(q) && q >= 1 && q <= 1_000_000)
+      .slice(0, 20);
+    if (!qtys.length) throw new BadRequestException('qtys must be a comma-separated list of quantities');
+    return this.productCostingService.bulkCosts(id, qtys);
   }
 
   @Post(':id/parts')
