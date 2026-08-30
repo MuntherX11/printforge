@@ -547,6 +547,25 @@ export class ProductsService {
     const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
     if (!attachment || attachment.entityId !== productId) throw new NotFoundException('Image not found');
 
+    // This route deletes IMAGES. Product attachments also include onboarded
+    // slicer files, and deleting one destroys the row and the bytes with no
+    // backup — which is exactly how a set of G-codes was lost when they
+    // rendered in the image grid as deletable tiles. Refuse anything that
+    // isn't an image, and anything a component still references.
+    if (!(attachment.mimeType || '').startsWith('image/')) {
+      throw new BadRequestException(
+        `"${attachment.originalName}" is not an image — it is the stored slicer file. Remove it from its component instead.`,
+      );
+    }
+    const referencedBy = await this.prisma.productComponent.findFirst({
+      where: { attachmentId }, select: { description: true },
+    });
+    if (referencedBy) {
+      throw new BadRequestException(
+        `This file is the print source for component "${referencedBy.description}" and cannot be deleted here.`,
+      );
+    }
+
     const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
     const fullPath = path.join(uploadDir, attachment.storagePath);
     if (fs.existsSync(fullPath)) {

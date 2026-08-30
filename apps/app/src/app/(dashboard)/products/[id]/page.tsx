@@ -75,12 +75,15 @@ export default function ProductDetailPage() {
       api.get<ApiProduct>(`/products/${id}`),
       api.get<{ data: ApiMaterial[] } | ApiMaterial[]>('/materials?limit=500').then((r: any) => Array.isArray(r) ? r : (r?.data ?? [])),
       api.get<ApiPrinter[]>('/printers'),
-      api.get<{ id: string; fileName: string }[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => [] as { id: string; fileName: string }[]),
+      api.get<any[]>(`/attachments?entityType=product&entityId=${id}`).catch(() => [] as any[]),
     ]).then(([p, m, pr, imgs]) => {
       setProduct(p);
       setMaterials(m);
       setPrinters(pr);
-      setImages(imgs);
+      // Product attachments include onboarded slicer files, not just photos.
+      // A G-code rendered here as a broken tile with a delete button once cost
+      // a full set of print sources — only actual images belong in this grid.
+      setImages((imgs as any[]).filter((a: any) => (a.mimeType || '').startsWith('image/')));
     }).catch((err: unknown) => {
       toast('error', (err as Error)?.message || 'Failed to load product details');
     }).finally(() => setLoading(false));
