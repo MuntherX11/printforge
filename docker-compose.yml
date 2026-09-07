@@ -1,4 +1,18 @@
 services:
+  # Camera relay for Creality's WebRTC-only printers (Hi, K1/K2 family).
+  # Their camera speaks proprietary WebRTC on port 8000 (/call/webrtc_local);
+  # go2rtc >=1.9.10 handles the quirk natively (#format=creality) and re-serves
+  # the feed as MJPEG, which /api/printers/:id/camera/stream already proxies —
+  # so remote viewing works through the normal authenticated domain.
+  # Host networking: WebRTC media is UDP on ephemeral ports; NATing it through
+  # the bridge is exactly the kind of thing that "connects" with no frames.
+  go2rtc:
+    image: alexxit/go2rtc:1.9.14
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./docker/go2rtc/go2rtc.yaml:/config/go2rtc.yaml:ro
+
   nginx:
     build:
       context: ./docker/nginx

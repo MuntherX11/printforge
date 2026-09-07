@@ -1,0 +1,22 @@
+# Camera relay for WebRTC-only Creality printers (Hi, K1/K2 family).
+#
+# One entry per printer. The printer's camera service listens on port 8000 and
+# speaks Creality's proprietary WebRTC signaling; "#format=creality" is
+# go2rtc's built-in handler for it (>= v1.9.10).
+#
+# After adding a stream here (and `docker compose restart go2rtc`), point the
+# printer's Camera URL in PrintForge at:
+#
+#   http://<docker-vm-lan-ip>:1984/api/stream.mjpeg?src=<stream-name>
+#
+# e.g.  http://192.168.100.241:1984/api/stream.mjpeg?src=creality-hi
+#
+# PrintForge's own camera proxy does the rest — the feed then works from
+# anywhere the dashboard does, through the normal login.
+
+api:
+  listen: ":1984"
+
+streams:
+  # creality-hi: webrtc:http://192.168.100.XXX:8000/call/webrtc_local#format=creality
+  # ender3-v3:   http://192.168.100.YYY:8080/?action=stream   # mjpg-streamer models pass straight through
