@@ -30,6 +30,11 @@ export function PlateCalibrationDialog({ open, onClose, component, onSaved }: {
   const [grams, setGrams] = useState('');
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [detected, setDetected] = useState<{
+    count: number | null;
+    models: Array<{ model: string; count: number }>;
+    ignored: string[];
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,6 +42,7 @@ export function PlateCalibrationDialog({ open, onClose, component, onSaved }: {
     setUnits(component.platedUnits ? String(component.platedUnits) : '');
     setMinutes(component.platedMinutes ? String(component.platedMinutes) : '');
     setGrams(component.platedGrams ? String(component.platedGrams) : '');
+    setDetected(null);
   }, [component?.id, open]);
 
   async function parseGcode(e: React.ChangeEvent<HTMLInputElement>) {
@@ -48,8 +54,18 @@ export function PlateCalibrationDialog({ open, onClose, component, onSaved }: {
       fd.append('file', file);
       const res = await api.postForm<any>('/file-parser/parse-gcode', fd);
       if (res?.estimatedTimeSeconds) setMinutes(String(Math.round(res.estimatedTimeSeconds / 60)));
-      if (res?.filamentGrams) setGrams(String(Math.round(res.filamentGrams * 100) / 100));
-      toast('success', 'Read time and grams from the file — type how many units are on the plate');
+      if (res?.filamentUsedGrams) setGrams(String(Math.round(res.filamentUsedGrams * 100) / 100));
+      // Object labels give the unit count directly; the purge tower is already
+      // excluded server-side. null means the file has no labels — ask, don't guess.
+      if (res?.objectCount) setUnits(String(res.objectCount));
+      setDetected({
+        count: res?.objectCount ?? null,
+        models: res?.objectModels ?? [],
+        ignored: res?.ignoredLabels ?? [],
+      });
+      toast('success', res?.objectCount
+        ? `Read ${res.objectCount} object${res.objectCount === 1 ? '' : 's'}, time and grams from the file`
+        : 'Read time and grams — this file has no object labels, so type the units on the plate');
     } catch (err: any) {
       toast('error', err.message);
     } finally {
@@ -92,6 +108,31 @@ export function PlateCalibrationDialog({ open, onClose, component, onSaved }: {
             <Upload className="h-4 w-4 mr-2" /> {parsing ? 'Reading…' : 'Read from plate G-code'}
           </Button>
         </div>
+        {detected && (
+          <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+            {detected.count ? (
+              <>
+                <p className="text-gray-700 dark:text-gray-200">
+                  {detected.models.map(m => `${m.count} × ${m.model}`).join(', ')}
+                </p>
+                {detected.models.length > 1 && (
+                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                    This plate mixes {detected.models.length} different models — check the unit count covers only this component.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-gray-600 dark:text-gray-300">
+                No object labels in this file — type how many units are on the plate.
+              </p>
+            )}
+            {detected.ignored.length > 0 && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Purge tower not counted.
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <Input label="Units on plate" type="number" min={1} step={1} value={units} onChange={e => setUnits(e.target.value)} placeholder="e.g. 12" />
           <Input label="Plate minutes" type="number" min={1} step={1} value={minutes} onChange={e => setMinutes(e.target.value)} placeholder="e.g. 243" />

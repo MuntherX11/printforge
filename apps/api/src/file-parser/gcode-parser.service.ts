@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { detectPlateObjects, PlateObjects } from './object-labels';
 
 export interface ToolInfo {
   index: number;
@@ -8,7 +9,7 @@ export interface ToolInfo {
   materialType?: string;
 }
 
-export interface GcodeAnalysis {
+export interface GcodeAnalysis extends PlateObjects {
   slicer: string | null;
   estimatedTimeSeconds: number | null;
   filamentUsedMm: number | null;
@@ -31,11 +32,20 @@ export class GcodeParserService {
    * Parse G-code buffer/string and extract metadata from slicer headers.
    */
   parse(input: Buffer | string): GcodeAnalysis {
+    const result = this.parseMetadata(input);
+    return Object.assign(result, detectPlateObjects(typeof input === 'string' ? Buffer.from(input) : input));
+  }
+
+  private parseMetadata(input: Buffer | string): GcodeAnalysis {
     const text = typeof input === 'string' ? input : input.toString('utf-8');
     const lines = text.split('\n');
     const searchLines = lines;
 
     const result: GcodeAnalysis = {
+      objectCount: null,
+      objectModels: [],
+      objectLabelSource: null,
+      ignoredLabels: [],
       slicer: null,
       estimatedTimeSeconds: null,
       filamentUsedMm: null,
@@ -274,7 +284,10 @@ export class GcodeParserService {
     }
     const headerText = buffer.subarray(0, chunkSize).toString('utf-8');
     const footerText = buffer.subarray(buffer.length - chunkSize).toString('utf-8');
-    return this.parse(headerText + '\n' + footerText);
+    // Metadata lives in the head/tail comments; object labels must come from
+    // the full buffer (see detectPlateObjects).
+    const result = this.parseMetadata(headerText + '\n' + footerText);
+    return Object.assign(result, detectPlateObjects(buffer));
   }
 
   private detectSlicer(lines: string[]): string | null {
