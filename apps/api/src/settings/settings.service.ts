@@ -55,12 +55,18 @@ export class SettingsService {
   }
 
   async setBulk(settings: Array<{ key: string; value: string }>) {
+    // KEEP IN SYNC with the Settings form (apps/app .../settings/page.tsx).
+    // The save is all-or-nothing, so one field missing from this list 400s the
+    // whole form — which once presented as "nothing saves except the logo".
     const ALLOWED_KEYS = new Set([
       'currency', 'tax_rate', 'overhead_percent', 'purge_waste_grams',
       'default_infill_percent', 'company_name', 'company_address', 'company_phone',
       'company_email', 'default_margin_percent', 'bank_details', 'invoice_notes',
       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass',
-      'whatsapp_template', 'electricity_rate_kwh', 'markup_multiplier',
+      'whatsapp_template', 'whatsapp_enabled', 'whatsapp_phone_id', 'whatsapp_token',
+      'notify_quote_sent', 'notify_order_confirmed', 'notify_order_production',
+      'notify_order_ready', 'notify_order_completed',
+      'electricity_rate_kwh', 'markup_multiplier',
       'machine_hourly_rate', 'admin_email', 'design_fee_default',
       'quote_validity_days', 'locale', 'date_format', 'currency_decimals',
     ]);

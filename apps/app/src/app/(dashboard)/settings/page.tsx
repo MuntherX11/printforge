@@ -64,6 +64,16 @@ export default function SettingsPage() {
     const entries = Array.from(form.entries())
       .filter(([key]) => key !== 'logo')
       .map(([key, value]) => ({ key, value: value as string }));
+    // An unchecked checkbox is simply absent from FormData, so without this an
+    // untick could never be saved — the old value would win forever.
+    const CHECKBOX_KEYS = [
+      'whatsapp_enabled',
+      'notify_quote_sent', 'notify_order_confirmed', 'notify_order_production',
+      'notify_order_ready', 'notify_order_completed',
+    ];
+    for (const key of CHECKBOX_KEYS) {
+      if (!entries.some(en => en.key === key)) entries.push({ key, value: 'false' });
+    }
     try {
       await api.put('/settings', { settings: entries });
       setIsDirty(false);
