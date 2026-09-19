@@ -138,8 +138,8 @@ export default function ProductsPage() {
                 {products.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="w-16">
-                      {p.imageUrl ? (
-                        <Image src={`/api/uploads/${p.imageUrl}`} alt={p.name} width={40} height={40} loading="lazy" className="h-10 w-10 rounded object-cover" unoptimized />
+                      {p.coverImageUrl ? (
+                        <Image src={p.coverImageUrl} alt={p.name} width={40} height={40} loading="lazy" className="h-10 w-10 rounded object-cover" unoptimized />
                       ) : (
                         <div className="h-10 w-10 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
                           <Box className="h-5 w-5 text-gray-400" />

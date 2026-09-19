@@ -6,36 +6,28 @@ import Image from 'next/image';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { ArrowLeft, Clock, Package, RefreshCw } from 'lucide-react';
 import { formatTime } from '@/lib/format';
+import type { CatalogProductDetail } from '@/lib/types/api';
 
-interface Variant {
-  id: string;
-  name: string;
-  sku?: string;
-  basePrice: number;
-  estimatedMinutes?: number;
-  estimatedGrams?: number;
-}
+type Size = CatalogProductDetail['sizes'][number];
+type Colour = CatalogProductDetail['colours'][number];
 
-interface Product {
-  id: string;
-  name: string;
-  description?: string;
-  imageUrl?: string;
-  basePrice: number;
-  estimatedMinutes?: number;
-  estimatedGrams?: number;
-  variants: Variant[];
-}
+/** Colours offered on a size (spec §3.1 rule 8, P4 `sizeOptionIds`). */
+const coloursOn = (p: CatalogProductDetail, sizeId: string | null): Colour[] =>
+  p.colours.filter(c => c.sizeOptionIds.includes(sizeId));
 
 export default function CustomerProductDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [product, setProduct] = useState<Product | null>(null);
+  const { toast } = useToast();
+  const [product, setProduct] = useState<CatalogProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
+  const [selectedSize, setSelectedSize] = useState<Size | null>(null);
+  const [selectedColour, setSelectedColour] = useState<Colour | null>(null);
+  const [colourNote, setColourNote] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [ordered, setOrdered] = useState<string | false>(false);
@@ -45,11 +37,14 @@ export default function CustomerProductDetailPage() {
     if (!params?.id) return;
     setLoading(true);
     setFetchError(false);
-    api.get<any>(`/products/customer/${params.id}`)
-      .then(r => {
-        const p = r?.data ?? r;
+    api.get<CatalogProductDetail>(`/products/customer/${params.id}`)
+      .then(p => {
         setProduct(p);
-        if (p?.variants?.length > 0) setSelectedVariant(p.variants[0]);
+        // Rule 10 (customers): the first size, then the first colour offered on it.
+        const size = p.sizes[0] ?? null;
+        setSelectedSize(size);
+        setSelectedColour(size ? coloursOn(p, size.sizeOptionId)[0] ?? null : null);
+        setColourNote(null);
       })
       .catch(() => setFetchError(true))
       .finally(() => setLoading(false));
@@ -57,24 +52,48 @@ export default function CustomerProductDetailPage() {
 
   useEffect(() => { load(); }, [params?.id]);
 
-  const price = selectedVariant ? selectedVariant.basePrice : product?.basePrice ?? 0;
+  /** On a size change the colour is kept when offered there, else the first offered one with a note. */
+  function chooseSize(size: Size) {
+    setSelectedSize(size);
+    if (!product || !product.colours.length) return;
+    const offered = coloursOn(product, size.sizeOptionId);
+    if (selectedColour && offered.some(c => c.colourOptionId === selectedColour.colourOptionId)) {
+      setColourNote(null);
+      return;
+    }
+    setColourNote(selectedColour ? `${selectedColour.label} isn't available in ${size.label}` : null);
+    setSelectedColour(offered[0] ?? null);
+  }
+
+  const price = selectedSize?.price ?? 0;
   const totalPrice = Math.round(price * quantity * 1000) / 1000;
   const priceReady = price > 0;
+  const colours = product && selectedSize ? coloursOn(product, selectedSize.sizeOptionId) : [];
+  const minutes = selectedSize?.estimatedMinutes ?? 0;
+  const grams = selectedSize?.estimatedGrams ?? 0;
 
   async function handleOrder() {
-    if (!product) return;
+    if (!product || !selectedSize) return;
     setSubmitting(true);
     setOrderError(null);
     try {
-      const item = selectedVariant
-        ? { variantId: selectedVariant.id, quantity }
-        : { productId: product.id, quantity };
-      const result: any = await api.post('/orders/customer', { items: [item] });
-      const orderNumber = result?.orderNumber ?? result?.data?.orderNumber ?? '';
-      setOrdered(orderNumber || 'placed');
-    } catch (err: any) {
-      const msg = err?.message || 'Something went wrong — please try again or contact us on WhatsApp.';
-      setOrderError(msg);
+      const item = {
+        productId: product.id,
+        sizeOptionId: selectedSize.sizeOptionId,
+        colourOptionId: selectedColour?.colourOptionId ?? null,
+        quantity,
+      };
+      const result = await api.post<{ orderNumber?: string }>('/orders/customer', { items: [item] });
+      setOrdered(result?.orderNumber || 'placed');
+    } catch (err: unknown) {
+      const msg = (err instanceof Error && err.message) || 'Something went wrong — please try again or contact us on WhatsApp.';
+      if (/no longer available|isn't made in|can't be ordered yet/.test(msg)) {
+        // The option changed since the page loaded: say so and show what is offered now.
+        toast('error', msg);
+        load();
+      } else {
+        setOrderError(msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -116,6 +135,13 @@ export default function CustomerProductDetailPage() {
     );
   }
 
+  const image = product.images[0]?.url ?? null;
+  const chip = (selected: boolean) => `px-3 py-1.5 rounded-md border text-sm font-medium transition-colors ${
+    selected
+      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-950/30 dark:text-brand-300'
+      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
+  }`;
+
   return (
     <div className="space-y-6 max-w-2xl">
       <button
@@ -127,9 +153,9 @@ export default function CustomerProductDetailPage() {
 
       {/* Product image */}
       <div className="aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
-        {product.imageUrl ? (
+        {image ? (
           <Image
-            src={product.imageUrl}
+            src={image}
             alt={product.name}
             width={700}
             height={394}
@@ -143,7 +169,7 @@ export default function CustomerProductDetailPage() {
         )}
       </div>
 
-      {/* Name + live price + variant chips (before description) */}
+      {/* Name + live price + option chips (before description) */}
       <div>
         <h1 className="text-2xl font-bold dark:text-gray-100">{product.name}</h1>
         {priceReady && (
@@ -152,50 +178,72 @@ export default function CustomerProductDetailPage() {
           </p>
         )}
 
-        {/* Variant chips — immediately below name so price is always in context */}
-        {product.variants.length > 0 && (
+        {/* Size chips — immediately below name so price is always in context */}
+        {product.hasSizes && (
           <div className="mt-3">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select option</p>
             <div className="flex flex-wrap gap-2">
-              {product.variants.map(variant => (
+              {product.sizes.map(size => (
                 <button
-                  key={variant.id}
-                  onClick={() => setSelectedVariant(variant)}
-                  className={`px-3 py-1.5 rounded-md border text-sm font-medium transition-colors ${
-                    selectedVariant?.id === variant.id
-                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-950/30 dark:text-brand-300'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
+                  key={size.sizeOptionId ?? 'standard'}
+                  onClick={() => chooseSize(size)}
+                  className={chip(selectedSize?.sizeOptionId === size.sizeOptionId)}
                 >
-                  {variant.name}
-                  {variant.basePrice > 0 && (
-                    <span className="ml-1.5 text-xs opacity-70">{variant.basePrice.toFixed(3)} OMR</span>
+                  {size.label}
+                  {size.price > 0 && (
+                    <span className="ml-1.5 text-xs opacity-70">{size.price.toFixed(3)} OMR</span>
                   )}
                 </button>
               ))}
             </div>
-            {selectedVariant?.estimatedMinutes && (
+            {minutes > 0 && (
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 flex items-center gap-1">
-                <Clock className="h-3 w-3" />{formatTime(selectedVariant.estimatedMinutes)} for this option
+                <Clock className="h-3 w-3" />{formatTime(minutes)} for this option
               </p>
             )}
           </div>
         )}
 
-        {/* Description + specs below variant selection */}
+        {/* Colour chips — the colours offered on the selected size */}
+        {product.colours.length > 0 && (
+          <div className="mt-3">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Colour</p>
+            <div className="flex flex-wrap gap-2">
+              {colours.map(colour => (
+                <button
+                  key={colour.colourOptionId ?? 'standard'}
+                  onClick={() => { setSelectedColour(colour); setColourNote(null); }}
+                  className={`${chip(selectedColour?.colourOptionId === colour.colourOptionId)} inline-flex items-center gap-2`}
+                >
+                  {colour.swatches.length > 0 && (
+                    <span className="flex -space-x-1" aria-hidden="true">
+                      {colour.swatches.map((hex, i) => (
+                        <span key={`${hex}-${i}`} className="h-3.5 w-3.5 rounded-full border border-white dark:border-gray-900" style={{ backgroundColor: hex }} />
+                      ))}
+                    </span>
+                  )}
+                  {colour.label}
+                </button>
+              ))}
+            </div>
+            {colourNote && <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">{colourNote}</p>}
+          </div>
+        )}
+
+        {/* Description + specs below option selection */}
         {product.description && (
           <p className="text-gray-600 dark:text-gray-400 mt-4 leading-relaxed">{product.description}</p>
         )}
-        {(product.estimatedMinutes || product.estimatedGrams) && (
+        {(minutes > 0 || grams > 0) && (
           <div className="flex gap-4 mt-3 text-sm text-gray-500 dark:text-gray-400">
-            {product.estimatedMinutes && (
+            {minutes > 0 && (
               <span className="flex items-center gap-1.5">
-                <Clock className="h-4 w-4" />{formatTime(product.estimatedMinutes)} print time
+                <Clock className="h-4 w-4" />{formatTime(minutes)} print time
               </span>
             )}
-            {product.estimatedGrams && (
+            {grams > 0 && (
               <span className="flex items-center gap-1.5">
-                <Package className="h-4 w-4" />{Math.round(product.estimatedGrams)}g material
+                <Package className="h-4 w-4" />{Math.round(grams)}g material
               </span>
             )}
           </div>
@@ -278,7 +326,7 @@ export default function CustomerProductDetailPage() {
                     {orderError}
                   </p>
                 )}
-                <Button className="w-full" onClick={handleOrder} disabled={submitting}>
+                <Button className="w-full" onClick={handleOrder} disabled={submitting || (product.colours.length > 0 && !selectedColour)}>
                   {submitting ? 'Placing Order…' : 'Place Order'}
                 </Button>
               </>

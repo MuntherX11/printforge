@@ -8,39 +8,23 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Package, RefreshCw } from 'lucide-react';
 import { formatTime } from '@/lib/format';
-
-interface ProductSummary {
-  id: string;
-  name: string;
-  description?: string;
-  imageUrl?: string;
-  basePrice: number;
-  estimatedMinutes?: number;
-  variants: Array<{ id: string; name: string; basePrice: number }>;
-}
+import type { CatalogProduct } from '@/lib/types/api';
 
 export default function CustomerShopPage() {
-  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   function load() {
     setLoading(true);
     setError(false);
-    api.get<any>('/products/customer/catalog')
+    api.get<CatalogProduct[] | { data: CatalogProduct[] }>('/products/customer/catalog')
       .then(r => setProducts(Array.isArray(r) ? r : r?.data ?? []))
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => { load(); }, []);
-
-  const minPrice = (product: ProductSummary) => {
-    const prices = [
-      ...(product.variants.length > 0 ? product.variants.map(v => v.basePrice) : [product.basePrice]),
-    ].filter(p => p > 0);
-    return prices.length > 0 ? Math.min(...prices) : 0;
-  };
 
   return (
     <div className="space-y-6">
@@ -88,9 +72,9 @@ export default function CustomerShopPage() {
               <Card className="sm:hidden transition-shadow hover:shadow-md">
                 <CardContent className="p-3 flex gap-3">
                   <div className="w-20 h-20 flex-shrink-0 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden">
-                    {product.imageUrl ? (
+                    {product.coverImageUrl ? (
                       <Image
-                        src={product.imageUrl}
+                        src={product.coverImageUrl}
                         alt={product.name}
                         width={80}
                         height={80}
@@ -114,11 +98,11 @@ export default function CustomerShopPage() {
                     )}
                     <div className="flex items-center justify-between mt-2 gap-1">
                       <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-                        {product.variants.length > 1 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
+                        {product.optionCount > 1 ? 'From ' : ''}{product.fromPrice.toFixed(3)} OMR
                       </span>
-                      {product.estimatedMinutes && (
+                      {product.estimatedMinutes > 0 ? (
                         <span className="text-xs text-gray-400 dark:text-gray-500">{formatTime(product.estimatedMinutes)}</span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </CardContent>
@@ -127,9 +111,9 @@ export default function CustomerShopPage() {
               {/* Desktop grid card */}
               <Card className="hidden sm:block h-full transition-shadow hover:shadow-md dark:hover:shadow-brand-900/20">
                 <div className="aspect-video bg-gray-100 dark:bg-gray-800 rounded-t-lg overflow-hidden">
-                  {product.imageUrl ? (
+                  {product.coverImageUrl ? (
                     <Image
-                      src={product.imageUrl}
+                      src={product.coverImageUrl}
                       alt={product.name}
                       width={400}
                       height={225}
@@ -153,13 +137,13 @@ export default function CustomerShopPage() {
                   )}
                   <div className="flex items-center justify-between mt-3 gap-2">
                     <span className="text-base font-bold text-brand-600 dark:text-brand-400 shrink-0">
-                      {product.variants.length > 1 ? 'From ' : ''}{minPrice(product).toFixed(3)} OMR
+                      {product.optionCount > 1 ? 'From ' : ''}{product.fromPrice.toFixed(3)} OMR
                     </span>
                     <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                      {product.variants.length > 1 && (
-                        <Badge variant="default">{product.variants.length} options</Badge>
+                      {product.optionCount > 1 && (
+                        <Badge variant="default">{product.optionCount} options</Badge>
                       )}
-                      {product.estimatedMinutes ? <span>{formatTime(product.estimatedMinutes)}</span> : null}
+                      {product.estimatedMinutes > 0 ? <span>{formatTime(product.estimatedMinutes)}</span> : null}
                     </div>
                   </div>
                 </CardContent>

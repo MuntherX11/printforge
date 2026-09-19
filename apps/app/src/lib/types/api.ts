@@ -310,6 +310,8 @@ export interface ApiProduct {
   colorChanges: number;
   basePrice: number;
   imageUrl: string | null;
+  /** P1: the first photo's URL (spec §4.1). */
+  coverImageUrl?: string | null;
   isActive: boolean;
   defaultPrinterId: string | null;
   createdAt: string;
