@@ -26,6 +26,15 @@ export interface PricingPrinter {
 
 export type PurgeBasis = 'SLICER_INCLUDED' | 'COLOUR_CHANGES' | 'NONE';
 
+/**
+ * Slicer grams already include flush and tower, so the manual colour-change
+ * purge never applies. A per-unit component estimated from a ×N plate (WP5) has
+ * no file of its own, but its grams still came from the slicer.
+ */
+export function slicerIncluded(bom: Pick<ResolvedBom, 'hasSlicerComponent' | 'components'>): boolean {
+  return bom.hasSlicerComponent || bom.components.some((c) => c.perUnitEstimated);
+}
+
 export interface CostResult {
   complete: boolean;
   problems: Problem[];
@@ -112,7 +121,7 @@ function priceIt(
 
   let basis: PurgeBasis = 'NONE';
   let purgeGrams = 0;
-  if (bom.hasSlicerComponent) basis = 'SLICER_INCLUDED';
+  if (slicerIncluded(bom)) basis = 'SLICER_INCLUDED';
   else if (bom.productColorChanges > 0) {
     basis = 'COLOUR_CHANGES';
     purgeGrams = bom.productColorChanges * settings.purgeWasteGrams * N;
@@ -240,7 +249,7 @@ export function unitFromBasis(basis: QuantityBasis, bom: ResolvedBom, settings: 
     }
   }
   const N = basis.N;
-  const purgeGrams = !bom.hasSlicerComponent && bom.productColorChanges > 0 ? bom.productColorChanges * settings.purgeWasteGrams * N : 0;
+  const purgeGrams = !slicerIncluded(bom) && bom.productColorChanges > 0 ? bom.productColorChanges * settings.purgeWasteGrams * N : 0;
   const waste = grams > 0 ? purgeGrams * (material / grams) : 0;
   const hours = basis.minutes / 60;
   const hourlyRate = printer && printer.hourlyRate > 0 ? printer.hourlyRate : settings.machineHourlyRate;

@@ -56,6 +56,21 @@ describe('cost engine (§3.8)', () => {
     expect(none.purge.basis).toBe('NONE');
   });
 
+  it('purge: a per-unit component estimated from a ×N plate (no file, single colour) never gets the manual purge', () => {
+    const perUnit = fixtureComponent('pu', null, 'Box', 1, 0, 20, [[0, M.black, 9.4, null]], [{ id: 'pu12', units: 12, minutes: 240, grams: 112.8 }], {
+      gcodeFilename: null, attachmentId: null, perUnitEstimatedFromLayoutId: 'pu12',
+    });
+    const config = toProductConfig({ ...boxRow(), colorChanges: 2, components: [perUnit] });
+    const bom = resolveInConfig(config, null, null);
+    expect(bom.hasSlicerComponent).toBe(false);
+    const r = unitCostAtOne(bom, SETTINGS, printer);
+    expect(r.purge.basis).toBe('SLICER_INCLUDED');
+    expect(r.purge.grams).toBe(0);
+    expect(r.lines.waste).toBe(0);
+    const bulk = costForQuantity(bom, 24, SETTINGS, printer, new PlanCache());
+    expect(bulk.lines.waste).toBe(0);
+  });
+
   it('parts are added after overhead', () => {
     const config = toProductConfig({ ...boxRow(), parts: [{ partId: 'pt1', quantity: 2, part: { name: 'Magnet', unitCost: 0.05, isActive: true, stockQty: 10 } }] });
     const r = unitCostAtOne(resolveInConfig(config, null, null), SETTINGS, printer);
