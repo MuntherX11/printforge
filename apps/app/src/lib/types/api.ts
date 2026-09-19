@@ -4,7 +4,14 @@
  * models, since the API selects/includes specific fields per endpoint.
  */
 
-import type { ProductCostPayload as CostPayloadForCalculate } from '@printforge/types';
+import type {
+  MaterialLite as SharedMaterialLite,
+  OptionCost as SharedOptionCost,
+  Problem as SharedProblem,
+  ProductCostPayload as CostPayloadForCalculate,
+  ProductDetail as SharedProductDetail,
+  VariantKind as SharedVariantKind,
+} from '@printforge/types';
 
 // ============ ENUMS ============
 
@@ -164,6 +171,8 @@ export interface ApiMaterial {
   name: string;
   type: MaterialType;
   color: string | null;
+  /** Swatch colour (e.g. "#d32f2f"); returned by /materials, absent on some older shapes. */
+  colorHex?: string | null;
   brand: string | null;
   costPerGram: number;
   density: number;
@@ -609,4 +618,95 @@ export interface ApiProductHistory {
 /** POST /products/:id/calculate (P17): the P16 payload plus what was applied per size. */
 export interface ApiCalculateResult extends CostPayloadForCalculate {
   applied: Array<{ sizeOptionId: string | null; applied: boolean; price: number | null }>;
+}
+
+// ============ SIZES & COLOURS (WP9b, frontend-only shapes) ============
+
+/** One open order/quote line whose printed filament a configuration change would alter (spec §3.3). */
+export interface ApiOpenLineImpact {
+  kind: 'ORDER' | 'QUOTE';
+  lineId: string;
+  number: string;
+  description: string;
+  quantity: number;
+  changes: string[];
+  partlyPlanned: boolean;
+}
+
+/** `?dryRun=1` of O5 / C4 (and C3, which adds links and assignments). */
+export interface ApiImpactPreview {
+  impact: ApiOpenLineImpact[];
+}
+
+/** GET /products/:id/variants/:variantId/history (O3). */
+export interface ApiOptionHistory {
+  orderLines: number;
+  quoteLines: number;
+  jobs: number;
+  stockRecords: number;
+  canDelete: boolean;
+}
+
+/** Body of the `Keep selling …` step (O1 `keepStandard`, O7 `keepStandard.colour|size`). */
+export interface ApiKeepStandard {
+  label: string;
+  sellInShop: boolean;
+}
+
+/** Response of O1 / O2: the option row (plus O1 warnings). */
+export interface ApiOptionRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  kind: SharedVariantKind;
+  isActive: boolean;
+  sortOrder: number;
+  warnings?: SharedProblem[];
+}
+
+/** PUT /products/:id/option-kinds (O7). */
+export type ApiOptionKindsResult = SharedProductDetail & {
+  rewritten: { orderLines: number; quoteLines: number; jobs: number };
+};
+
+/** PUT /products/:id/variants/:variantId/colour-slots (O5), written. */
+export interface ApiAssignmentsResult {
+  assignments: Array<{ colourSlotId: string; materialId: string; material: SharedMaterialLite }>;
+  excludedSizeKeys: string[];
+  warnings: SharedProblem[];
+  impact: ApiOpenLineImpact[];
+}
+
+/** DELETE /products/:id/colour-slots/:slotId?dryRun=1 (C3 preview). */
+export interface ApiSlotRemovalPreview extends ApiImpactPreview {
+  links: Array<{ componentId: string; description: string; sizeOptionId: string | null; colorIndex: number }>;
+  assignments: Array<{ colourOptionId: string; name: string; materialId: string; materialName: string | null }>;
+}
+
+/** GET /products/:id/colour-links/proposal (C5). */
+export interface ApiColourLinkProposal {
+  newSlots: Array<{ ref: string; name: string }>;
+  links: Array<{ componentId: string; colorIndex: number; colourSlotId: string | null; slotRef: string | null; fixed: boolean }>;
+}
+
+/** One entry of the C4 body. Exactly one of colourSlotId / slotRef / fixed; colourSlotId null alone = unlinked. */
+export interface ApiColourLinkInput {
+  componentId: string;
+  colorIndex: number;
+  colourSlotId?: string | null;
+  slotRef?: string;
+  fixed?: boolean;
+}
+
+/** PUT /products/:id/colour-links (C4), written. */
+export interface ApiColourLinksResult {
+  slots: Array<{ id: string; name: string; sortOrder: number }>;
+  warnings: SharedProblem[];
+  impact: ApiOpenLineImpact[];
+}
+
+/** GET /products/:id/cost?sizeOptionId=&colourOptionId= (P16 for one pair). */
+export interface ApiPairCost {
+  costVersion: string;
+  pair: SharedOptionCost;
 }
