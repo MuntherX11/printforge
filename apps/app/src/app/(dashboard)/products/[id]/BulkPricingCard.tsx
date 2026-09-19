@@ -68,8 +68,8 @@ export function BulkPricingCard({ productId, basePrice, initialTiers, onSaved }:
       await api.put(`/products/${productId}/price-tiers`, { tiers: clean });
       toast('success', clean.length ? `${clean.length} price tier${clean.length === 1 ? '' : 's'} saved` : 'Bulk pricing cleared');
       onSaved();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', (err as Error).message);
     } finally {
       setSaving(false);
     }

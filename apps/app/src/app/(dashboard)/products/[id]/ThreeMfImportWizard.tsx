@@ -89,8 +89,8 @@ export function ThreeMfImportWizard({
 
       toast('success', `Imported ${selectedPlates.length} plate${selectedPlates.length !== 1 ? 's' : ''} successfully`);
       onSuccess();
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to import 3MF');
+    } catch (err: unknown) {
+      toast('error', (err as Error).message || 'Failed to import 3MF');
     } finally {
       setImporting(false);
     }
