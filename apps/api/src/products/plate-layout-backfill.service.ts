@@ -72,34 +72,16 @@ export class PlateLayoutBackfillService implements OnApplicationBootstrap {
         this.logger.log(`${BF1_KEY}: ${c.id} skipped: claimed by another runner`);
         return 'skipped';
       }
-      const multi = isMultiColourComponent(c);
-      const perUnit = multi ? c.materials.reduce((s: number, m: any) => s + (m.gramsUsed || 0), 0) : c.gramsUsed || 0;
-      const units = c.platedUnits;
-      const minutes = c.platedMinutes;
-      const grams = c.platedGrams ?? round3(perUnit * (units ?? 0));
-      const intOk = Number.isInteger(units) && units >= 1 && units <= 500;
-      const minOk = typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 1 && minutes <= 100_000;
-      const gOk = typeof grams === 'number' && Number.isFinite(grams) && grams >= 0.1 && grams <= 100_000;
-      if (!intOk || !minOk || !gOk) {
-        this.logger.log(`${BF1_KEY}: "${c.description}" skipped: out of range or incomplete (units=${units}, minutes=${minutes}, grams=${grams})`);
+      const a = assessCalibration(c);
+      if (a.outcome === 'OUT_OF_RANGE') {
+        this.logger.log(`${BF1_KEY}: "${c.description}" skipped: out of range or incomplete (units=${a.units}, minutes=${a.minutes}, grams=${a.grams})`);
         return 'skipped';
       }
+      const { units, minutes, grams, isActive, note } = a;
       const dup = await tx.plateLayout.findFirst({ where: { componentId: c.id, unitsPerPlate: units, isActive: true }, select: { id: true } });
       if (dup) {
         this.logger.log(`${BF1_KEY}: "${c.description}" skipped: layout exists`);
         return 'skipped';
-      }
-      let isActive = true;
-      let note: string | null = null;
-      if (!(perUnit > 0)) {
-        isActive = false;
-        note = 'component has no per-unit grams to cross-check';
-      } else {
-        const diff = Math.abs(grams / units - perUnit) / perUnit;
-        if (diff > STALE_GRAMS_RATIO) {
-          isActive = false;
-          note = `plate grams differ by ${Math.round(diff * 100)} % from the component`;
-        }
       }
       const layout = await tx.plateLayout.create({
         data: {
@@ -108,19 +90,73 @@ export class PlateLayoutBackfillService implements OnApplicationBootstrap {
         },
         select: { id: true },
       });
-      const slots = multi ? this.multiSlots(c.materials, grams) : [{ colorIndex: 0, gramsUsed: grams }];
-      for (const s of slots) await tx.plateLayoutSlot.create({ data: { layoutId: layout.id, ...s } });
+      for (const s of a.slots) await tx.plateLayoutSlot.create({ data: { layoutId: layout.id, ...s } });
       if (!isActive) this.logger.warn(`${BF1_KEY}: layout ×${units} for "${c.description}" created inactive for review: ${note}`);
       return 'created';
     }, TX_OPTS);
   }
+}
 
-  /** One slot per ComponentMaterial, proportional to its grams (equal split when they sum to 0). */
-  private multiSlots(materials: Array<{ colorIndex: number; gramsUsed: number }>, grams: number) {
-    const sum = materials.reduce((s, m) => s + (m.gramsUsed || 0), 0);
-    return materials.map((m) => ({
-      colorIndex: m.colorIndex,
-      gramsUsed: round3(sum > 0 ? (grams * (m.gramsUsed || 0)) / sum : grams / materials.length),
-    }));
+export interface CalibrationSource {
+  gramsUsed: number | null;
+  isMultiColor: boolean;
+  materialId: string | null;
+  materials: Array<{ colorIndex: number; gramsUsed: number; materialId: string }>;
+  platedUnits: number | null;
+  platedMinutes: number | null;
+  platedGrams: number | null;
+}
+
+export type CalibrationAssessment =
+  | { outcome: 'OUT_OF_RANGE'; units: number | null; minutes: number | null; grams: number | null }
+  | {
+      outcome: 'CREATE';
+      units: number;
+      minutes: number;
+      grams: number;
+      isActive: boolean;
+      /** why the layout is created inactive for review (null when active) */
+      note: string | null;
+      slots: Array<{ colorIndex: number; gramsUsed: number }>;
+    };
+
+/**
+ * The pure half of BF-1 (§2.4): validates one component's legacy calibration
+ * and decides the layout it would get. Shared by the backfill and the WP11
+ * price-impact report's dry run, so the two can never disagree. The only check
+ * left to the caller is "an active layout of that size already exists".
+ */
+export function assessCalibration(c: CalibrationSource): CalibrationAssessment {
+  const multi = isMultiColourComponent(c as any);
+  const perUnit = multi ? c.materials.reduce((s, m) => s + (m.gramsUsed || 0), 0) : c.gramsUsed || 0;
+  const units = c.platedUnits;
+  const minutes = c.platedMinutes;
+  const grams = c.platedGrams ?? round3(perUnit * (units ?? 0));
+  const intOk = Number.isInteger(units) && (units as number) >= 1 && (units as number) <= 500;
+  const minOk = typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 1 && minutes <= 100_000;
+  const gOk = typeof grams === 'number' && Number.isFinite(grams) && grams >= 0.1 && grams <= 100_000;
+  if (!intOk || !minOk || !gOk) return { outcome: 'OUT_OF_RANGE', units, minutes, grams };
+  let isActive = true;
+  let note: string | null = null;
+  if (!(perUnit > 0)) {
+    isActive = false;
+    note = 'component has no per-unit grams to cross-check';
+  } else {
+    const diff = Math.abs(grams / (units as number) - perUnit) / perUnit;
+    if (diff > STALE_GRAMS_RATIO) {
+      isActive = false;
+      note = `plate grams differ by ${Math.round(diff * 100)} % from the component`;
+    }
   }
+  const slots = multi ? multiSlots(c.materials, grams) : [{ colorIndex: 0, gramsUsed: grams }];
+  return { outcome: 'CREATE', units: units as number, minutes: minutes as number, grams, isActive, note, slots };
+}
+
+/** One slot per ComponentMaterial, proportional to its grams (equal split when they sum to 0). */
+function multiSlots(materials: Array<{ colorIndex: number; gramsUsed: number }>, grams: number) {
+  const sum = materials.reduce((s, m) => s + (m.gramsUsed || 0), 0);
+  return materials.map((m) => ({
+    colorIndex: m.colorIndex,
+    gramsUsed: round3(sum > 0 ? (grams * (m.gramsUsed || 0)) / sum : grams / materials.length),
+  }));
 }
