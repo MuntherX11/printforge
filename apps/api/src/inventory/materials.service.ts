@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { colourKeyHasMaterial } from '../stock-ledger/colour-key';
 import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
 import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
 import { optionalNumber, requiredNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
@@ -247,15 +249,38 @@ export class MaterialsService {
     return results;
   }
 
+  /**
+   * Delete a filament only when nothing uses it (spec §3.3 "Deleting a
+   * filament"). One transaction: lock the row, count every reference, and 409
+   * with the counts when any exist. It never deletes components, job lines,
+   * spools or colour assignments — the old cascade destroyed them before a
+   * foreign key failed.
+   */
   async remove(id: string) {
-    const material = await this.prisma.material.findUnique({ where: { id } });
-    if (!material) throw new NotFoundException('Material not found');
-    // Cascade: clear references then delete
-    await this.prisma.jobMaterial.deleteMany({ where: { materialId: id } });
-    await this.prisma.productComponent.deleteMany({ where: { materialId: id } });
-    await this.prisma.spool.deleteMany({ where: { materialId: id } });
-    await this.prisma.material.delete({ where: { id } });
-    return { deleted: true };
+    return this.prisma.$transaction(async (tx: any) => {
+      const rows = (await tx.$queryRaw(
+        Prisma.sql`/* lock:Material:UPDATE */ SELECT "id", "name" FROM "Material" WHERE "id" = ANY(${[id]}::text[]) FOR UPDATE`,
+      )) as Array<{ id: string; name: string }>;
+      const locked = rows[0];
+      if (!locked) throw new NotFoundException('Material not found');
+      const [components, componentSlots, colours, jobLines, spools, stockRows] = await Promise.all([
+        tx.productComponent.count({ where: { materialId: id } }),
+        tx.componentMaterial.count({ where: { materialId: id } }),
+        tx.colourOptionSlot.count({ where: { materialId: id } }),
+        tx.jobMaterial.count({ where: { OR: [{ materialId: id }, { slicedMaterialId: id }, { plannedMaterialId: id }, { plannedSlicedMaterialId: id }] } }),
+        tx.spool.count({ where: { materialId: id } }),
+        tx.componentColourStock.findMany({ where: { stockOnHand: { gt: 0 }, colourKey: { contains: `:${id}` } }, select: { colourKey: true } }),
+      ]);
+      const stocked = (stockRows as Array<{ colourKey: string }>).filter((r) => colourKeyHasMaterial(r.colourKey, id)).length;
+      const parts = components + componentSlots + stocked;
+      if (parts + colours + jobLines + spools > 0) {
+        throw new ConflictException(
+          `"${locked.name}" is used by ${parts} parts, ${colours} colours, ${jobLines} job lines and ${spools} spools — remove it from those first`,
+        );
+      }
+      await tx.material.delete({ where: { id } });
+      return { deleted: true };
+    }, { timeout: 30_000, maxWait: 10_000 });
   }
 
   async getLowStock() {
