@@ -1,19 +1,30 @@
-import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
-import { PrismaService } from '../common/prisma/prisma.service';
-import { requiredNumber, requiredEnum } from '../common/utils/validate-number';
-import { filamentColourDistance } from '../common/utils/colour';
-import { CostingService } from '../costing/costing.service';
-import { EventsGateway } from '../websocket/events.gateway';
-import { JobPlanningService } from './job-planning.service';
-import { JobSchedulingService } from './job-scheduling.service';
-import { CreateProductionJobDto, UpdateProductionJobDto, FailJobDto, JobStatus } from '@printforge/types';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { JobStatus } from '@printforge/types';
+import { BomResolverService } from '../catalog-core/bom-resolver.service';
+import { CatalogRequestContext } from '../catalog-core/catalog-context';
+import { lineDescription, mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
+import { planFromBom, ProductionPlannerService } from '../catalog-core/production-planner.service';
+import { pickSpools } from '../catalog-core/spool-picker';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
+import { CostingService } from '../costing/costing.service';
+import { lockOptions, TX_OPTS } from '../products/product-locks';
 import { SettingsService } from '../settings/settings.service';
+import { JobCompletionService } from '../stock-ledger/job-completion.service';
+import { EventsGateway } from '../websocket/events.gateway';
+import { materialLines, plateRows, reservationSummary, singlePlateFilename } from './job-builder';
+import { reprintRows } from './job-reprint';
+import { parseCreateJob, parseFail, parseReprint, parseUpdateJob } from './job-input';
+import { JobPlanningService } from './job-planning.service';
+import { buildFilamentPlan, jobDetailExtras } from './job-presenter';
+import { JobSchedulingService } from './job-scheduling.service';
 
-// Mirrors the JobPurpose enum in schema.prisma.
-const JOB_PURPOSES = ['CUSTOMER', 'TEST', 'SAMPLE', 'WASTE'] as const;
+const ACTIVE = ['QUEUED', 'IN_PROGRESS', 'PAUSED'];
+const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
+const NO_LONGER_ACTIVE = 'This job was already completed, failed or cancelled';
 
 /** Minimal shape of a customer row returned via Prisma include. */
 interface CustomerRecord {
@@ -30,130 +41,180 @@ export class JobsService {
     @Optional() private gateway: EventsGateway,
     private jobPlanning: JobPlanningService,
     private jobScheduling: JobSchedulingService,
+    private completion: JobCompletionService,
+    private resolver: BomResolverService,
+    private planner: ProductionPlannerService,
     @Optional() private emailNotifications?: EmailNotificationService,
     @Optional() private whatsapp?: WhatsAppService,
     @Optional() private settingsService?: SettingsService,
   ) {}
 
-  async create(dto: CreateProductionJobDto) {
-    // CreateProductionJobDto is a plain interface, so ValidationPipe never runs
-    // on it — an unrecognised purpose would otherwise reach Prisma and come
-    // back as a 500 instead of telling the caller what was wrong.
-    const purpose = dto.purpose === undefined
-      ? 'CUSTOMER'
-      : requiredEnum(dto.purpose, 'purpose', JOB_PURPOSES);
-    const isInternal = purpose !== 'CUSTOMER';
+  // ------------------------------------------------------------------ J1
 
-    // Test/sample/waste prints are deliberately not tied to an order or a
-    // product — they still burn filament, so they carry their own material
-    // lines instead.
-    if (!isInternal && !dto.orderId && !dto.productId) {
+  /**
+   * J1 (§3.7 "Job creation"): linkage and pair validated, option rows locked FOR
+   * SHARE as the transaction's first statement, the pair planned with
+   * catalog-core (plates, per-slot grams by policy) and stored as JobPlate rows
+   * and JobMaterial lines with their planned identity.
+   */
+  async create(body: unknown) {
+    const dto = parseCreateJob(body);
+    const isInternal = dto.purpose !== 'CUSTOMER';
+
+    // Test/sample/waste prints may skip the order/product link; they still burn
+    // filament, so they carry their own material lines instead.
+    if (!isInternal && !dto.orderId && !dto.productId && !dto.variantId) {
       throw new BadRequestException('A production job must be linked to an order or a product');
     }
-    if (isInternal && !dto.productId && !(dto.materials?.length)) {
+    if (isInternal && !dto.productId && !dto.materials.length) {
       throw new BadRequestException('A test print needs at least one filament line (spool + grams)');
     }
 
-    let autoName = dto.name?.trim() || '';
-
+    // ---- linkage (§3.7)
+    if (dto.orderItemId && !dto.orderId) throw new BadRequestException('An order line needs its order');
+    let order: { orderNumber: string; customer: { name: string } | null } | null = null;
     if (dto.orderId) {
-      const order = await this.prisma.order.findUnique({
+      order = await this.prisma.order.findUnique({
         where: { id: dto.orderId },
-        include: { customer: { select: { name: true } } },
+        select: { orderNumber: true, customer: { select: { name: true } } },
       });
       if (!order) throw new NotFoundException('Linked order not found');
-      if (!autoName) {
-        autoName = order.customer?.name
-          ? `${order.orderNumber} — ${order.customer.name}`
-          : order.orderNumber;
+    }
+    const ctx = new CatalogRequestContext();
+    let productId = dto.productId ?? null;
+    let sizeOptionId = dto.sizeOptionId ?? null;
+    let colourOptionId = dto.colourOptionId ?? null;
+    if (dto.variantId && !sizeOptionId && !colourOptionId) {
+      await this.resolver.preloadVariants([dto.variantId], ctx);
+      const mapped = mapLegacyVariantId({ productId, variantId: dto.variantId }, (id) => ctx.variants.get(id) ?? null);
+      ({ productId, sizeOptionId, colourOptionId } = mapped);
+    }
+    let lineBound = false;
+    if (dto.orderItemId) {
+      const item = await this.prisma.orderItem.findUnique({
+        where: { id: dto.orderItemId },
+        select: { id: true, orderId: true, productId: true, variantId: true, sizeOptionId: true, colourOptionId: true },
+      });
+      if (!item) throw new NotFoundException('Order line not found');
+      if (item.orderId !== dto.orderId) throw new BadRequestException('That order line belongs to another order');
+      await this.resolver.preloadVariants([item.variantId].filter((x): x is string => !!x), ctx);
+      const eff = this.resolver.effectiveOptions(item, ctx);
+      if (eff.skip || (item.productId ?? null) !== productId || eff.sizeOptionId !== sizeOptionId || eff.colourOptionId !== colourOptionId) {
+        throw new BadRequestException("The job's product, size or colour doesn't match the order line");
       }
-    }
-    if (dto.productId) {
-      const product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
-      if (!product) throw new NotFoundException('Linked product not found');
-      if (!autoName) autoName = product.name;
+      lineBound = true;
     }
 
-    // quantityToProduce was previously never persisted, so every job recorded 1
-    // no matter what was requested — silently under-consuming BOM parts and
-    // under-crediting component stock on completion.
-    const quantityToProduce = dto.quantityToProduce === undefined
-      ? 1
-      : requiredNumber(dto.quantityToProduce, 'quantityToProduce', { min: 1, max: 100_000, integer: true });
-
-    // Validate any inline filament lines BEFORE creating anything, so a bad
-    // spool id can't leave a job with no materials attached.
-    const materialLines: Array<{
-      spoolId: string; materialId: string; gramsUsed: number; costPerGram: number;
-    }> = [];
-    for (const [i, line] of (dto.materials ?? []).entries()) {
-      const grams = requiredNumber(line?.gramsUsed, `materials[${i}].gramsUsed`, { min: 0.1, max: 100_000 });
+    // ---- explicit filament lines (test prints), validated before anything is created
+    const explicitLines: Array<{ spoolId: string; materialId: string; gramsUsed: number; costPerGram: number }> = [];
+    for (const [i, line] of dto.materials.entries()) {
       const spool = await this.prisma.spool.findUnique({
-        where: { id: String(line?.spoolId ?? '') },
+        where: { id: line.spoolId },
         select: { id: true, materialId: true, currentWeight: true, material: { select: { costPerGram: true } } },
       });
       if (!spool) throw new BadRequestException(`Filament line ${i + 1}: spool not found`);
-      if (spool.currentWeight < grams) {
+      if (spool.currentWeight < line.gramsUsed) {
         throw new BadRequestException(
-          `Filament line ${i + 1}: only ${spool.currentWeight.toFixed(0)} g left on that spool, ${grams} g requested`,
+          `Filament line ${i + 1}: only ${spool.currentWeight.toFixed(0)} g left on that spool, ${line.gramsUsed} g requested`,
         );
       }
-      materialLines.push({
-        spoolId: spool.id,
-        materialId: spool.materialId,
-        gramsUsed: grams,
-        // Snapshot, so a later price change doesn't rewrite this job's cost.
-        costPerGram: spool.material?.costPerGram ?? 0,
-      });
+      explicitLines.push({ spoolId: spool.id, materialId: spool.materialId, gramsUsed: line.gramsUsed, costPerGram: spool.material?.costPerGram ?? 0 });
     }
 
-    if (isInternal && !autoName) {
-      autoName = purpose === 'TEST' ? 'Test print' : purpose === 'SAMPLE' ? 'Sample print' : 'Waste / reprint';
-    }
+    const result = await this.prisma.$transaction(async (tx: any) => {
+      // First statement: the option rows the pair is validated on (§3.1 rule 3).
+      const optionIds = [sizeOptionId, colourOptionId].filter((x): x is string => !!x);
+      if (optionIds.length) await lockOptions(tx, optionIds, 'SHARE');
 
-    // No filament named explicitly, but the product's BOM says what it burns —
-    // assign spools now. Completion deducts from job materials, so a job
-    // created without them prints and completes while stock never moves.
-    if (materialLines.length === 0 && dto.productId) {
-      materialLines.push(...await this.buildAssignedMaterials(dto.productId, quantityToProduce) as any);
-    }
-
-    // One transaction so a job never exists without the filament lines it was
-    // created to consume.
-    return this.prisma.$transaction(async (tx) => {
-      const job = await tx.productionJob.create({
-        data: {
-          name: autoName || 'Untitled Job',
-          productId: dto.productId,
-          variantId: dto.variantId,
-          componentId: dto.componentId,
-          printerId: dto.printerId,
-          assignedToId: dto.assignedToId,
-          orderId: dto.orderId,
-          orderItemId: dto.orderItemId,
-          gcodeFilename: dto.gcodeFilename,
-          colorChanges: dto.colorChanges || 0,
-          quantityToProduce,
-          purpose: purpose as any,
-        },
-      });
-
-      if (materialLines.length) {
-        await tx.jobMaterial.createMany({
-          data: materialLines.map((l) => ({ ...l, jobId: job.id })),
+      let config: Awaited<ReturnType<BomResolverService['requireConfig']>> | null = null;
+      let names: { size: { name: string } | null; colour: { name: string } | null } = { size: null, colour: null };
+      if (productId) {
+        config = await this.resolver.requireConfig(productId, ctx, tx);
+        const pairRows = validatePair(this.resolver.pairContext(config), sizeOptionId, colourOptionId, {
+          audience: 'STAFF',
+          allowInactive: lineBound,
         });
+        names = { size: pairRows.size, colour: pairRows.colour };
+      } else if (optionIds.length) {
+        throw new BadRequestException('A size or colour needs a product');
       }
 
-      return tx.productionJob.findUnique({
+      const policy = dto.surplusPolicy ?? config?.product.surplusPolicy ?? 'KEEP_FOR_STOCK';
+      let plates: any[] = [];
+      let lines: any[] = explicitLines.map((l) => ({ ...l, colorIndex: 0 }));
+      let reservation: ReturnType<typeof reservationSummary> | null = null;
+      if (config && !explicitLines.length) {
+        const bom = this.resolver.resolveWithConfig(config, { sizeOptionId, colourOptionId });
+        const blocking = bom.problems.find((p) => ['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL'].includes(p.code));
+        if (blocking && bom.components.length) throw new BadRequestException(blocking.message);
+        for (const e of dto.plates ?? []) {
+          if (!bom.components.some((c) => c.componentId === e.componentId)) {
+            throw new BadRequestException(`That component isn't part of "${bom.label}"`);
+          }
+        }
+        const plan = planFromBom(bom, { quantity: dto.quantityToProduce, surplusPolicy: policy, plates: dto.plates }, config.materials, ctx.planCache);
+        if (plan.problems.length) {
+          const c = bom.components.find((x) => x.componentId === plan.problems[0].componentId);
+          throw new BadRequestException(`"${c?.description ?? 'A component'}" has no sliced data — add its grams and minutes or a plate layout`);
+        }
+        const needs = plan.filamentNeeds;
+        const picks = pickSpools(needs, await this.planner.spoolsFor(needs), { reservedBySpool: await this.planner.reservedBySpool() });
+        plates = plateRows(plan.components);
+        lines = materialLines(plan.components, needs, picks);
+        reservation = reservationSummary(needs, picks);
+      }
+
+      const name = dto.name
+        || (order ? (order.customer?.name ? `${order.orderNumber} — ${order.customer.name}` : order.orderNumber) : '')
+        || (config ? lineDescription(config.product, names.size, names.colour) : '')
+        || (dto.purpose === 'TEST' ? 'Test print' : dto.purpose === 'SAMPLE' ? 'Sample print' : dto.purpose === 'WASTE' ? 'Waste / reprint' : 'Untitled Job');
+
+      const job = await tx.productionJob.create({
+        data: {
+          name,
+          status: 'QUEUED',
+          productId,
+          sizeOptionId,
+          colourOptionId,
+          variantId: sizeOptionId ?? colourOptionId,
+          printerId: dto.printerId ?? config?.product.defaultPrinterId ?? null,
+          assignedToId: dto.assignedToId ?? null,
+          orderId: dto.orderId ?? null,
+          orderItemId: dto.orderItemId ?? null,
+          // Any requested file name is ignored for jobs with plates (§3.7).
+          gcodeFilename: plates.length ? singlePlateFilename(plates) : dto.gcodeFilename ?? null,
+          colorChanges: plates.length ? 0 : dto.colorChanges,
+          quantityToProduce: dto.quantityToProduce,
+          purpose: dto.purpose as any,
+          surplusPolicy: plates.length ? (policy as any) : null,
+          stockMode: (dto.stockMode ?? null) as any,
+        },
+      });
+      if (plates.length) await tx.jobPlate.createMany({ data: plates.map((p) => ({ ...p, jobId: job.id })) });
+      if (lines.length) await tx.jobMaterial.createMany({ data: lines.map((l) => ({ ...l, jobId: job.id })) });
+
+      const full = await tx.productionJob.findUnique({
         where: { id: job.id },
         include: {
           printer: true,
           assignedTo: { select: { id: true, name: true } },
           materials: { include: { material: true, spool: true } },
+          plates: { orderBy: { sortOrder: 'asc' } },
         },
       });
-    });
+      return { ...full, reservation: reservation ?? { lines: lines.length, withSpool: lines.filter((l) => l.spoolId).length, short: [] } };
+    }, TX_OPTS);
+    return result;
   }
+
+  // ------------------------------------------------------------------ J2
+
+  /** J2: readiness of a pair and quantity, with the credit each component would earn (no order). */
+  async preview(body: unknown) {
+    return this.jobPlanning.previewJob(body);
+  }
+
+  // ------------------------------------------------------------ list / J3
 
   async findAll(query: PaginationDto, status?: string) {
     const validStatuses = ['QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
@@ -174,6 +235,7 @@ export class JobsService {
     return paginatedResponse(data, total, query);
   }
 
+  /** J3: the job, its pair (effectiveOptions), plates, surplus per component and picking list. */
   async findOne(id: string) {
     const job = await this.prisma.productionJob.findUnique({
       where: { id },
@@ -186,261 +248,102 @@ export class JobsService {
           include: {
             material: true,
             slicedMaterial: true,
-            // Location matters as much as the spool id — the operator has to
-            // physically go and fetch it.
+            // Location matters as much as the spool id — the operator has to go and fetch it.
             spool: { include: { location: { select: { id: true, name: true } } } },
           },
         },
+        plates: { orderBy: { sortOrder: 'asc' } },
         reprintOf: { select: { id: true, name: true, status: true } },
         reprints: { select: { id: true, name: true, status: true }, orderBy: { createdAt: 'desc' } },
         attachments: true,
       },
     });
     if (!job) throw new NotFoundException('Production job not found');
-
-    return { ...job, filamentPlan: await this.buildFilamentPlan(job) };
+    const ctx = new CatalogRequestContext();
+    const extras = await jobDetailExtras(job, this.resolver, ctx);
+    return {
+      ...job,
+      ...extras.detail,
+      filamentPlan: await buildFilamentPlan(job, extras.bom, this.planner, ctx),
+    };
   }
 
-  /**
-   * What to load into the printer, as a picking list.
-   *
-   * Two cases. If filament has already been assigned to the job, report exactly
-   * that — with the spool's PrintForge id and where it lives. If it hasn't
-   * (a job created straight from a product), derive the requirement from the
-   * product's BOM and suggest a spool for each material: the one with least
-   * remaining that still covers the job, so part-used spools get finished
-   * first rather than opening a new one.
-   */
-  private async buildFilamentPlan(job: any) {
-    const fmt = (m: any, spool: any, grams: number, assigned: boolean, enough: boolean) => ({
-      materialId: m?.id ?? null,
-      colour: m?.color ?? null,
-      type: m?.type ?? null,
-      brand: m?.brand ?? null,
-      // "White · PLA · eSUN" — how it reads on the shelf
-      label: [m?.color, m?.type, m?.brand].filter(Boolean).join(' · ') || m?.name || 'Unknown filament',
-      gramsNeeded: Math.round(grams * 10) / 10,
-      spoolId: spool?.id ?? null,
-      spoolRef: spool?.printforgeId ?? null,
-      location: spool?.location?.name ?? null,
-      spoolRemaining: spool ? Math.round(spool.currentWeight) : null,
-      assigned,
-      hasEnough: enough,
-    });
+  // ------------------------------------------------------------------ J8
 
-    // Filament already assigned to this job.
-    if (job.materials?.length) {
-      // If a colour was substituted at assignment time, say so — the operator
-      // is about to print in a colour the file did not ask for.
-      let wanted = new Set<string>();
-      if (job.productId) {
-        const { needs } = await this.computeBomNeeds(job.productId, job.quantityToProduce || 1);
-        wanted = new Set(needs.map((n) => n.material.id));
-      }
-      return job.materials.map((jm: any) => ({
-        ...fmt(jm.material, jm.spool, jm.gramsUsed, true,
-          jm.spool ? jm.spool.currentWeight >= jm.gramsUsed : false),
-        lineId: jm.id,
-        substituted: wanted.size > 0 && !wanted.has(jm.materialId),
-        // Deliberate customer colour change, distinct from an out-of-stock
-        // substitution: the file says one colour, the customer asked another.
-        overridden: !!jm.slicedMaterialId && jm.slicedMaterialId !== jm.materialId,
-        slicedColour: jm.slicedMaterial
-          ? [jm.slicedMaterial.color, jm.slicedMaterial.type].filter(Boolean).join(' ')
-          : null,
-      }));
-    }
-
-    if (!job.productId) return [];
-
-    // Job predates spool assignment, or the product had no filament set when it
-    // was created. Show the same suggestion the assigner would have made.
-    const { needs, unassignedGrams } = await this.computeBomNeeds(
-      job.productId, job.quantityToProduce || 1,
-    );
-    const unresolved = unassignedGrams > 0
-      ? [fmt({ name: 'Filament not set on product' }, null, unassignedGrams, false, false)]
-      : [];
-    if (needs.length === 0) return unresolved;
-
-    const picks = await this.pickSpoolsForNeeds(needs);
-    const planned = picks.map((p) => ({
-      ...fmt(p.spool?.material ?? p.material, p.spool, p.grams, false, p.hasEnough),
-      substituted: p.substituted,
-    }));
-    return [...planned, ...unresolved];
-  }
-
-  /**
-   * What a product's bill of materials consumes at a given build quantity.
-   * `unassignedGrams` covers components that weigh something but have no
-   * filament set, so they can be reported rather than silently dropped.
-   */
-  private async computeBomNeeds(productId: string, qty: number) {
-    const components = await this.prisma.productComponent.findMany({
-      where: { productId },
-      include: { material: true, materials: { include: { material: true } } },
-    });
-
-    const needed = new Map<string, { material: any; grams: number }>();
-    let unassignedGrams = 0;
-
-    for (const c of components) {
-      const sub = (c as any).materials ?? [];
-      if (!c.materialId && !sub.length && c.gramsUsed) {
-        unassignedGrams += c.gramsUsed * c.quantity * qty;
-      }
-      if (c.materialId && c.material) {
-        const prev = needed.get(c.materialId);
-        const grams = c.gramsUsed * c.quantity * qty;
-        needed.set(c.materialId, { material: c.material, grams: (prev?.grams ?? 0) + grams });
-      }
-      // Multicolour components carry their materials on the join table.
-      for (const cm of sub) {
-        if (!cm.materialId || !cm.material) continue;
-        const prev = needed.get(cm.materialId);
-        const grams = cm.gramsUsed * c.quantity * qty;
-        needed.set(cm.materialId, { material: cm.material, grams: (prev?.grams ?? 0) + grams });
-      }
-    }
-
-    return { needs: Array.from(needed.values()), unassignedGrams };
-  }
-
-  /**
-   * Choose the spool to pull for each filament the job needs.
-   *
-   * Exact material first — the type and colour the slicer asked for. Among
-   * those, the smallest spool that still covers the job, so part-used spools
-   * get finished before a fresh one is opened.
-   *
-   * If nothing of that exact material is in stock, fall back to the nearest
-   * colour of the *same type*: printing PLA in a near-enough colour is a
-   * judgement the operator can accept or override, printing PETG when the file
-   * wants PLA is not. Substitutions are flagged so they are never silent.
-   */
-  private async pickSpoolsForNeeds(needs: Array<{ material: any; grams: number }>) {
-    if (needs.length === 0) return [];
-
-    const types = Array.from(new Set(needs.map((n) => n.material?.type).filter(Boolean)));
-    const spools = await this.prisma.spool.findMany({
-      where: { isActive: true, currentWeight: { gt: 0 }, material: { type: { in: types as any } } },
-      include: {
-        material: true,
-        location: { select: { id: true, name: true } },
-      },
-      orderBy: { currentWeight: 'asc' },
-    });
-
-    // A spool can only be promised to one line of this job.
-    const taken = new Set<string>();
-    const smallestThatCovers = (list: typeof spools, grams: number) =>
-      list.find((s) => !taken.has(s.id) && s.currentWeight >= grams)
-        ?? [...list].reverse().find((s) => !taken.has(s.id))
-        ?? null;
-
-    return needs.map(({ material, grams }) => {
-      const exact = spools.filter((s) => s.materialId === material.id);
-      let spool = smallestThatCovers(exact, grams);
-      let substituted = false;
-
-      if (!spool) {
-        // Same type, ranked by how close the colour looks, then by finishing
-        // part-used spools first.
-        //
-        // Hex-based (Delta E) and name-based distances are different scales, so
-        // they are never ranked against each other: if any candidate can be
-        // compared by hex, only those are considered. Mixing them would let a
-        // coarse name match outrank a measured one.
-        const scored = spools
-          .filter((s) => !taken.has(s.id) && s.material?.type === material.type)
-          .map((s) => ({
-            s,
-            d: filamentColourDistance(
-              { colour: material.color, hex: material.colorHex },
-              { colour: s.material?.color, hex: s.material?.colorHex },
-            ),
-          }))
-          .filter((x) => x.d !== null);
-
-        const byHex = scored.filter((x) => x.d!.basis === 'hex');
-        const pool = byHex.length > 0 ? byHex : scored;
-        const sameType = pool
-          .sort((a, b) => (a.d!.distance - b.d!.distance) || (a.s.currentWeight - b.s.currentWeight))
-          .map((x) => x.s);
-
-        spool = smallestThatCovers(sameType, grams);
-        substituted = !!spool;
-      }
-
-      if (spool) taken.add(spool.id);
-      return {
-        material,
-        grams,
-        spool,
-        substituted,
-        hasEnough: !!spool && spool.currentWeight >= grams,
-      };
-    });
-  }
-
-  /**
-   * Turn a product's BOM into the filament lines a job actually consumes.
-   *
-   * Without these rows the job carries no filament at all, and completing it
-   * deducts nothing — the picking list would tell the operator to fetch a spool
-   * that then never went down. A line with no spool is still recorded so the
-   * requirement is visible; it simply has nothing to deduct from.
-   */
-  private async buildAssignedMaterials(productId: string, qty: number) {
-    const { needs } = await this.computeBomNeeds(productId, qty);
-    const picks = await this.pickSpoolsForNeeds(needs);
-
-    return picks.map(({ material, grams, spool }) => ({
-      // The material actually pulled, so cost and deduction agree with reality.
-      materialId: spool?.materialId ?? material.id,
-      spoolId: spool?.id ?? null,
-      gramsUsed: Math.round(grams * 10) / 10,
-      // Snapshot, so a later price change doesn't rewrite this job's cost.
-      costPerGram: spool?.material?.costPerGram ?? material.costPerGram ?? 0,
-    }));
-  }
-
-  async update(id: string, dto: UpdateProductionJobDto) {
-    if (dto.status === 'COMPLETED' || dto.status === 'FAILED') {
-      throw new BadRequestException('Use /jobs/:id/complete or /jobs/:id/fail to transition to terminal states');
-    }
-
-    const job = await this.findOne(id);
-
-    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+  /** J8: allowlist only; a status change is a guarded transition (§3.7 "Updating a job"). */
+  async update(id: string, body: unknown) {
+    const dto = parseUpdateJob(body);
+    const job = await this.prisma.productionJob.findUnique({ where: { id }, select: { id: true, status: true } });
+    if (!job) throw new NotFoundException('Production job not found');
+    if (TERMINAL.includes(job.status)) {
       throw new BadRequestException(`Cannot modify a job in terminal state: ${job.status}`);
     }
-
-    const data: UpdateProductionJobDto & { startedAt?: Date } = { ...dto };
-
-    if (dto.status === JobStatus.IN_PROGRESS && job.status !== JobStatus.IN_PROGRESS) {
-      data.startedAt = new Date();
+    if (dto.printerId) {
+      const p = await this.prisma.printer.findUnique({ where: { id: dto.printerId }, select: { id: true } });
+      if (!p) throw new BadRequestException('Printer not found');
+    }
+    if (dto.assignedToId) {
+      const u = await this.prisma.user.findUnique({ where: { id: dto.assignedToId }, select: { id: true } });
+      if (!u) throw new BadRequestException('User not found');
     }
 
-    return this.prisma.productionJob.update({
-      where: { id },
-      data,
-      include: {
-        printer: true,
-        materials: { include: { material: true } },
-      },
-    });
+    return this.prisma.$transaction(async (tx: any) => {
+      // Guarded transition first; also re-checks "still active" for field edits.
+      const data: Record<string, unknown> = {};
+      let from = ACTIVE;
+      if (dto.status) {
+        data.status = dto.status;
+        if (dto.status === 'IN_PROGRESS') {
+          from = ['QUEUED', 'PAUSED'];
+          data.startedAt = new Date();
+        }
+      }
+      if (dto.printerId !== undefined) data.printerId = dto.printerId;
+      if (dto.assignedToId !== undefined) data.assignedToId = dto.assignedToId;
+      if (dto.printDuration !== undefined) data.printDuration = dto.printDuration;
+      if (dto.filamentUsedMm !== undefined) data.filamentUsedMm = dto.filamentUsedMm;
+
+      let flipped = await tx.productionJob.updateMany({ where: { id, status: { in: from } }, data });
+      if (flipped.count === 0 && dto.status === 'IN_PROGRESS') {
+        // Already printing: only the other fields apply.
+        const { status: _s, startedAt: _t, ...rest } = data;
+        flipped = await tx.productionJob.updateMany({ where: { id, status: 'IN_PROGRESS' }, data: rest });
+      }
+      if (flipped.count === 0) {
+        const now = await tx.productionJob.findUnique({ where: { id }, select: { status: true } });
+        throw new ConflictException(`This job was already ${String(now?.status ?? 'removed').toLowerCase().replace('_', ' ')} — reload`);
+      }
+      return tx.productionJob.findUnique({
+        where: { id },
+        include: { printer: true, materials: { include: { material: true } } },
+      });
+    }, TX_OPTS);
   }
 
+  // ---------------------------------------------------------------- cost
+
+  /**
+   * Job cost. Jobs with plates: printDuration = the recorded duration, else
+   * Σ plateMinutes × plateCount × 60, and no purge (plate grams include it).
+   * Legacy jobs are unchanged.
+   */
   async calculateCost(id: string) {
     const job = await this.prisma.productionJob.findUnique({
       where: { id },
-      include: { printer: true, materials: { include: { material: true } } },
+      include: { printer: true, materials: { include: { material: true } }, plates: true },
     });
     if (!job) throw new NotFoundException('Production job not found');
 
-    const breakdown = await this.costingService.calculateJobCost(job);
+    const plates = (job as any).plates ?? [];
+    const input = plates.length
+      ? {
+          ...job,
+          printDuration: job.printDuration ?? plates.reduce((s: number, p: any) => s + p.plateMinutes * p.plateCount * 60, 0),
+          colorChanges: 0,
+          purgeWasteGrams: 0,
+        }
+      : job;
+    const breakdown = await this.costingService.calculateJobCost(input as any);
 
     return this.prisma.productionJob.update({
       where: { id },
@@ -454,99 +357,23 @@ export class JobsService {
     });
   }
 
-  async previewPlan(orderId: string) {
+  // -------------------------------------------------------- J4 / J5 facade
+
+  previewPlan(orderId: string) {
     return this.jobPlanning.previewPlan(orderId);
   }
 
-  async createFromPlan(orderId: string, planOverrides?: Array<{
-    componentId: string;
-    toProduce: number;
-    printerId?: string;
-    spoolId?: string;
-  }>) {
-    return this.jobPlanning.createFromPlan(orderId, planOverrides);
+  createFromPlan(orderId: string, body: unknown, userId?: string | null) {
+    return this.jobPlanning.createFromPlan(orderId, body, userId);
   }
 
-  async completeJob(id: string) {
-    const job = await this.prisma.productionJob.findUnique({
-      where: { id },
-      include: { materials: true },
-    });
-    if (!job) throw new NotFoundException('Production job not found');
-    // All terminal states, not just COMPLETED. A FAILED job has already taken
-    // its proportional waste out of the spools, so completing it afterwards
-    // would deduct the full planned grams a second time; a CANCELLED job never
-    // ran, so completing it would consume stock for nothing.
-    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
-      throw new BadRequestException(`Cannot complete a job that is already ${job.status.toLowerCase()}`);
-    }
+  // ------------------------------------------------------------------ J6
 
-    // Wrap all inventory mutations + job status update in a single transaction
-    // so a crash mid-way doesn't leave stock incremented but spool not decremented.
-    const completed = await this.prisma.$transaction(async (tx) => {
-      if (job.componentId && job.quantityToProduce > 0) {
-        await tx.productComponent.update({
-          where: { id: job.componentId },
-          data: { stockOnHand: { increment: job.quantityToProduce } },
-        });
-      }
+  /** J6: the shared completion service; cost, broadcast and notification after commit. */
+  async completeJob(id: string, userId?: string | null) {
+    const result = (await this.completion.complete(id, { source: 'MANUAL', userId }))!;
+    const job = result.job;
 
-      // ARCH-01: batch spool reads into one query instead of N findUnique calls
-      const spoolIds = job.materials.filter(m => m.spoolId && m.gramsUsed > 0).map(m => m.spoolId!);
-      const spoolRows = spoolIds.length > 0
-        ? await tx.spool.findMany({ where: { id: { in: spoolIds } }, select: { id: true, currentWeight: true } })
-        : [];
-      const spoolWeights = new Map(spoolRows.map(s => [s.id, s.currentWeight]));
-
-      for (const mat of job.materials) {
-        if (mat.spoolId && mat.gramsUsed > 0) {
-          const newWeight = Math.max(0, (spoolWeights.get(mat.spoolId) ?? 0) - mat.gramsUsed);
-          await tx.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
-        }
-      }
-
-      // Non-printed parts (NFC tags, heat inserts, keyrings…): consume the
-      // product's BOM once per finished unit. Component-level jobs are skipped
-      // so a multi-component product doesn't consume the same parts repeatedly
-      // — the parts belong to the assembled product, not each printed piece.
-      if (job.productId && !job.componentId && job.quantityToProduce > 0) {
-        const bom = await tx.productPart.findMany({
-          where: { productId: job.productId },
-          include: { part: { select: { stockQty: true, unitCost: true } } },
-        });
-        for (const line of bom) {
-          const needed = line.quantity * job.quantityToProduce;
-          if (needed <= 0) continue;
-          await tx.part.update({
-            where: { id: line.partId },
-            data: { stockQty: Math.max(0, line.part.stockQty - needed) },
-          });
-          await tx.jobPart.create({
-            data: {
-              jobId: id,
-              partId: line.partId,
-              quantity: needed,
-              unitCost: line.part.unitCost, // snapshot so past jobs stay accurate
-            },
-          });
-        }
-      }
-
-      if (job.printerId && job.printDuration) {
-        await tx.printer.update({
-          where: { id: job.printerId },
-          data: { totalPrintHours: { increment: job.printDuration / 3600 } },
-        });
-      }
-
-      return tx.productionJob.update({
-        where: { id },
-        data: { status: 'COMPLETED', completedAt: new Date() },
-        include: { printer: true, materials: { include: { material: true } } },
-      });
-    });
-
-    // Non-fatal: run after commit so it doesn't block the transaction
     await this.calculateCost(id).catch(() => {
       // Cost fields may already be populated or materials missing
     });
@@ -555,14 +382,11 @@ export class JobsService {
       title: 'Job Completed',
       message: `"${job.name}" finished successfully.`,
     });
-
-    // If this job belongs to an order, check if all order jobs are now done
-    // and notify the customer
     if (job.orderId) {
       await this.notifyOrderCompletedIfAllDone(job.orderId).catch(() => {});
     }
-
-    return completed;
+    const { plates: _plates, ...rest } = job;
+    return { ...rest, stockCredits: result.stockCredits, warnings: result.warnings };
   }
 
   private async notifyOrderCompletedIfAllDone(orderId: string) {
@@ -571,9 +395,7 @@ export class JobsService {
       select: { status: true },
     });
 
-    const allDone = allJobs.length > 0 && allJobs.every(j =>
-      ['COMPLETED', 'FAILED', 'CANCELLED'].includes(j.status),
-    );
+    const allDone = allJobs.length > 0 && allJobs.every((j) => TERMINAL.includes(j.status));
     if (!allDone) return;
 
     const order = await this.prisma.order.findUnique({
@@ -596,104 +418,128 @@ export class JobsService {
     }
   }
 
-  async failJob(id: string, dto: FailJobDto) {
-    const job = await this.prisma.productionJob.findUnique({
-      where: { id },
-      include: { materials: true },
-    });
-    if (!job) throw new NotFoundException('Production job not found');
-    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
-      throw new BadRequestException('Cannot fail a job that is already in a terminal state');
-    }
+  // ------------------------------------------------------------------ J9
 
-    const wasteGrams = dto.wasteGrams || 0;
-
-    // Wrap spool deductions + status update in a single transaction so a mid-loop
-    // crash doesn't leave stock partially decremented while the job stays non-FAILED.
-    const failed = await this.prisma.$transaction(async (tx) => {
-      if (wasteGrams > 0 && job.materials.length > 0) {
-        const totalPlanned = job.materials.reduce((s, m) => s + m.gramsUsed, 0);
-        if (totalPlanned > 0) {
-          // ARCH-01: batch spool reads — one findMany instead of N findUnique calls
-          const failSpoolIds = job.materials.filter(m => m.spoolId).map(m => m.spoolId!);
-          const failSpools = failSpoolIds.length > 0
-            ? await tx.spool.findMany({ where: { id: { in: failSpoolIds } }, select: { id: true, currentWeight: true } })
-            : [];
-          const failSpoolWeights = new Map(failSpools.map(s => [s.id, s.currentWeight]));
-
-          for (const mat of job.materials) {
-            if (mat.spoolId) {
-              const proportion = mat.gramsUsed / totalPlanned;
-              const matWaste = wasteGrams * proportion;
-              const newWeight = Math.max(0, (failSpoolWeights.get(mat.spoolId) ?? 0) - matWaste);
-              await tx.spool.update({ where: { id: mat.spoolId }, data: { currentWeight: newWeight } });
-            }
-          }
+  /** J9: guarded transition first; proportional waste deducted atomically. Never credits stock. */
+  async failJob(id: string, body: unknown) {
+    const dto = parseFail(body);
+    const failed = await this.prisma.$transaction(async (tx: any) => {
+      const flipped = await tx.productionJob.updateMany({
+        where: { id, status: { in: ACTIVE } },
+        data: { status: 'FAILED', failureReason: dto.failureReason, failedAt: new Date(), wasteGrams: dto.wasteGrams },
+      });
+      if (flipped.count === 0) return null;
+      const job = await tx.productionJob.findUnique({ where: { id }, include: { materials: true } });
+      const totalPlanned = job.materials.reduce((s: number, m: any) => s + m.gramsUsed, 0);
+      if (dto.wasteGrams > 0 && totalPlanned > 0) {
+        for (const m of job.materials) {
+          if (!m.spoolId) continue;
+          const waste = (dto.wasteGrams * m.gramsUsed) / totalPlanned;
+          await tx.$executeRaw(Prisma.sql`/* completion:spool */ UPDATE "Spool"
+            SET "currentWeight" = GREATEST(0, "currentWeight" - ${waste}), "updatedAt" = NOW()
+            WHERE "id" = ${m.spoolId}`);
         }
       }
-
-      return tx.productionJob.update({
+      return tx.productionJob.findUnique({
         where: { id },
-        data: {
-          status: 'FAILED',
-          failureReason: dto.failureReason,
-          failedAt: new Date(),
-          wasteGrams,
-        },
         include: { printer: true, materials: { include: { material: true } } },
       });
-    });
+    }, TX_OPTS);
+    if (!failed) {
+      const exists = await this.prisma.productionJob.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) throw new NotFoundException('Production job not found');
+      throw new ConflictException(NO_LONGER_ACTIVE);
+    }
     this.gateway?.broadcastNotification({
       type: 'error',
       title: 'Job Failed',
-      message: `"${job.name}" failed${dto.failureReason ? `: ${dto.failureReason}` : ''}.`,
+      message: `"${failed.name}" failed${dto.failureReason ? `: ${dto.failureReason}` : ''}.`,
     });
     return failed;
   }
 
-  async reprintJob(id: string) {
-    const original = await this.prisma.productionJob.findUnique({
+  // ------------------------------------------------------------------ J7
+
+  /**
+   * J7: reprint a FAILED job, optionally a subset of its plates. Per component,
+   * unitsRequired' = max(0, R − (U − U')); lines rebuilt from the chosen plates'
+   * slot snapshot by policy and mapped to the original line of the same planned
+   * identity (keeping a swap, spool, cost and slicedMaterialId).
+   */
+  async reprintJob(id: string, body?: unknown) {
+    const chosenIn = parseReprint(body);
+    const original: any = await this.prisma.productionJob.findUnique({
       where: { id },
-      include: { materials: true },
+      include: { materials: true, plates: { orderBy: { sortOrder: 'asc' } } },
     });
     if (!original) throw new NotFoundException('Production job not found');
-    if (original.status !== 'FAILED') {
-      throw new BadRequestException('Only failed jobs can be reprinted');
+    if (original.status !== 'FAILED') throw new BadRequestException('Only failed jobs can be reprinted');
+
+    // The pair: stored, or for a pre-release job its order line / legacy option (§3.2).
+    let sizeOptionId = original.sizeOptionId ?? null;
+    let colourOptionId = original.colourOptionId ?? null;
+    if (!sizeOptionId && !colourOptionId) {
+      const ctx = new CatalogRequestContext();
+      await this.resolver.preloadVariants([original.variantId].filter(Boolean), ctx);
+      if (original.orderItemId) await this.resolver.preloadOrderItems([original.orderItemId], ctx);
+      const eff = this.resolver.effectiveOptions(original, ctx);
+      if (!eff.skip) ({ sizeOptionId, colourOptionId } = eff);
     }
 
-    const newJob = await this.prisma.productionJob.create({
-      data: {
-        name: `${original.name} (reprint)`,
-        printerId: original.printerId,
-        assignedToId: original.assignedToId,
-        orderId: original.orderId,
-        orderItemId: original.orderItemId,
-        productId: original.productId,
-        componentId: original.componentId,
-        quantityToProduce: original.quantityToProduce,
-        colorChanges: original.colorChanges,
-        gcodeFilename: original.gcodeFilename,
-        reprintOfId: original.id,
-      },
-      include: { printer: true },
-    });
+    const plates: any[] = original.plates ?? [];
+    const counts = new Map<string, number>(plates.map((p) => [p.id, p.plateCount]));
+    if (chosenIn) {
+      counts.clear();
+      for (const c of chosenIn) {
+        const p = plates.find((x) => x.id === c.jobPlateId);
+        if (!p) throw new BadRequestException('That plate is not part of this job');
+        if (c.plateCount > p.plateCount) {
+          throw new BadRequestException(`"${p.label}": at most ${p.plateCount} plates can be reprinted`);
+        }
+        counts.set(p.id, c.plateCount);
+      }
+      if (!counts.size) throw new BadRequestException('Choose at least one plate to reprint');
+    }
 
-    // ARCH-01: createMany instead of N sequential create calls
-    if (original.materials.length > 0) {
-      await this.prisma.jobMaterial.createMany({
-        data: original.materials.map(mat => ({
-          jobId: newJob.id,
-          materialId: mat.materialId,
-          spoolId: mat.spoolId,
-          gramsUsed: mat.gramsUsed,
-          costPerGram: mat.costPerGram,
-          colorIndex: mat.colorIndex,
-        })),
+    const slotMaterialIds = [...new Set(plates.flatMap((p) => ((p.slots as any[]) ?? []).map((x) => x.materialId)))];
+    const mats = slotMaterialIds.length
+      ? await this.prisma.material.findMany({ where: { id: { in: slotMaterialIds } }, select: { id: true, costPerGram: true } })
+      : [];
+    const { newPlates, lines } = reprintRows(original, counts, (id) => mats.find((m) => m.id === id)?.costPerGram ?? 0);
+
+    return this.prisma.$transaction(async (tx: any) => {
+      const job = await tx.productionJob.create({
+        data: {
+          name: `${original.name} (reprint)`,
+          status: 'QUEUED',
+          printerId: original.printerId,
+          assignedToId: original.assignedToId,
+          orderId: original.orderId,
+          orderItemId: original.orderItemId,
+          productId: original.productId,
+          componentId: original.componentId,
+          sizeOptionId,
+          colourOptionId,
+          variantId: original.variantId ?? sizeOptionId ?? colourOptionId,
+          purpose: original.purpose,
+          surplusPolicy: original.surplusPolicy,
+          stockMode: original.stockMode,
+          quantityToProduce: original.componentId && newPlates.length ? Math.max(1, newPlates[0].unitsRequired) : original.quantityToProduce,
+          colorChanges: original.colorChanges,
+          gcodeFilename: plates.length ? singlePlateFilename(newPlates) : original.gcodeFilename,
+          reprintOfId: original.id,
+        },
       });
-    }
-
-    return newJob;
+      if (newPlates.length) await tx.jobPlate.createMany({ data: newPlates.map((p) => ({ ...p, jobId: job.id })) });
+      if (lines.length) await tx.jobMaterial.createMany({ data: lines.map((l) => ({ ...l, jobId: job.id })) });
+      return tx.productionJob.findUnique({
+        where: { id: job.id },
+        include: { printer: true, materials: true, plates: { orderBy: { sortOrder: 'asc' } } },
+      });
+    }, TX_OPTS);
   }
+
+  // ---------------------------------------------------------------- misc
 
   async getFailureStats() {
     const [totalJobs, failedJobs, wasteAgg, reprintCount] = await Promise.all([

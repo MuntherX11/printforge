@@ -48,9 +48,17 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   productPart: { part: one('part', 'partId'), product: one('product', 'productId') },
   orderItem: { order: one('order', 'orderId') },
   quoteItem: { quote: one('quote', 'quoteId') },
-  productionJob: { plates: many('jobPlate', 'jobId'), materials: many('jobMaterial', 'jobId') },
-  jobMaterial: { job: one('productionJob', 'jobId') },
+  productionJob: {
+    plates: many('jobPlate', 'jobId'), materials: many('jobMaterial', 'jobId'),
+    // production specs (WP6)
+    printer: one('printer', 'printerId'), order: one('order', 'orderId'), orderItem: one('orderItem', 'orderItemId'),
+    parts: many('jobPart', 'jobId'), reprints: many('productionJob', 'reprintOfId'), reprintOf: one('productionJob', 'reprintOfId'),
+    assignedTo: one('user', 'assignedToId'), attachments: many('attachment', 'jobId'),
+  },
+  jobMaterial: { job: one('productionJob', 'jobId'), material: one('material', 'materialId'), spool: one('spool', 'spoolId'), slicedMaterial: one('material', 'slicedMaterialId') },
   material: { spools: many('spool', 'materialId') },
+  spool: { material: one('material', 'materialId'), location: one('location', 'locationId') },
+  order: { items: many('orderItem', 'orderId'), customer: one('customer', 'customerId') },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -73,6 +81,7 @@ const MODELS = [
   'colourSizeExclusion', 'priceTier', 'variantPriceTier', 'componentColourStock', 'componentStockMovement',
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
+  'jobPart', 'user', 'location', 'customer',
 ];
 
 const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material' };
