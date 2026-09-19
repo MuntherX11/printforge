@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Param, Body, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { QuotesService } from './quotes.service';
 import { PdfService } from '../invoices/pdf.service';
@@ -8,7 +8,7 @@ import { StaffGuard } from '../auth/guards/staff.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { CreateQuoteDto, UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
+import { UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -23,8 +23,8 @@ export class QuotesController {
   @Post()
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  create(@Body() dto: CreateQuoteDto) {
-    return this.quotesService.create(dto);
+  create(@Body() body: unknown) {
+    return this.quotesService.create(body);
   }
 
   @Post('from-analysis')
@@ -56,8 +56,17 @@ export class QuotesController {
   @Post(':id/convert')
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  convertToOrder(@Param('id') id: string, @Body() body?: { autoCreateJobs?: boolean }) {
-    return this.quotesService.convertToOrder(id, body);
+  convertToOrder(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: any) {
+    const b = body && typeof body === 'object' ? (body as { autoCreateJobs?: unknown }) : {};
+    return this.quotesService.convertToOrder(id, { autoCreateJobs: b.autoCreateJobs !== false }, user?.id ?? null);
+  }
+
+  /** S11: split a product line into same-size colour lines (DRAFT/SENT quotes). */
+  @Put(':id/items/:itemId/colour')
+  @UseGuards(StaffGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  changeLineColour(@Param('id') id: string, @Param('itemId') itemId: string, @Body() body: unknown, @Query('dryRun') dryRun?: string) {
+    return this.quotesService.changeLineColour(id, itemId, body, dryRun === '1' || dryRun === 'true');
   }
 
   @Get(':id/pdf')

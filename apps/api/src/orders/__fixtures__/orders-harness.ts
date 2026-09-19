@@ -1,11 +1,12 @@
 /**
- * Wires the real WP7 services (orders, pricing preview) over WP6's
+ * Wires the real WP7 services (orders, quotes, pricing preview) over WP6's
  * production harness (WP2 catalog-core, the stock ledger and job planning on the
  * in-memory database), the way OrdersModule and QuotesModule do.
  */
 import { SETTINGS } from '../../catalog-core/__fixtures__/box-product';
 import { PricingService } from '../../catalog-core/pricing.service';
 import { productionHarness } from '../../production/__fixtures__/production-harness';
+import { QuotesService } from '../../quotes/quotes.service';
 import { OrdersService } from '../orders.service';
 
 export const CUSTOMER_ID = 'cust-1';
@@ -16,11 +17,13 @@ export function ordersHarness(rows: any[] = []) {
   const pricing = new PricingService(prisma, h.resolver, { loadSettings: jest.fn(async () => ({ ...SETTINGS })) } as any);
   const discord = { notifyNewPortalOrder: jest.fn(async () => undefined) } as any;
   const orders = new OrdersService(prisma, pricing, h.resolver, h.planner, h.stock, undefined, undefined, undefined, discord, undefined);
+  const gateway = { broadcastNotification: jest.fn() } as any;
+  const quotes = new QuotesService(prisma, pricing, h.resolver, h.planning, gateway);
   h.db.insert('customer', {
     id: CUSTOMER_ID, name: 'Ali', email: 'ali@example.com', phone: null, passwordHash: 'HASH', refreshToken: 'RT',
     userType: 'customer', isApproved: true,
   });
-  return { ...h, pricing, orders, discord };
+  return { ...h, pricing, orders, quotes, discord };
 }
 
 export type OrdersHarness = ReturnType<typeof ordersHarness>;
