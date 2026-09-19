@@ -94,6 +94,7 @@ model Material {
   jobMaterialsSliced JobMaterial[]       @relation("SlicedMaterial")
   productComponents  ProductComponent[]
   componentMaterials ComponentMaterial[]
+  colourAssignments  ColourOptionSlot[]
 }
 
 enum MaterialType {
@@ -233,6 +234,14 @@ model Product {
   parts          ProductPart[]
   productionJobs ProductionJob[]
   priceTiers     PriceTier[]
+
+  baseOptionLabel        String? // label of the standard size when sizes exist, e.g. "Regular"; UI default "Standard"
+  baseOptionSellable     Boolean? // customer shop only: offer the standard size when active sizes exist. null/false = not offered (today's shop behaviour)
+  standardColourLabel    String? // label of the standard (as-sliced) colour when colours exist, e.g. "Black"; UI default "Standard"
+  standardColourSellable Boolean? // customer shop only: offer the standard colour when active colours exist. null/false = not offered
+  surplusPolicy          SurplusPolicy       @default(KEEP_FOR_STOCK) // default for extras on the last plate
+  images                 ProductImage[]
+  colourSlots            ProductColourSlot[]
 }
 
 // Staff-set bulk pricing: at minQty and above, the unit price for this product
@@ -267,6 +276,12 @@ model ProductVariant {
   orderItems     OrderItem[]
   productionJobs ProductionJob[]
 
+  kind              VariantKind           @default(SIZE) // every existing row becomes a size (§3.1 rule 5)
+  components        ProductComponent[]    @relation("VariantComponents") // SIZE only
+  colourAssignments ColourOptionSlot[] // COLOUR only
+  sizeExclusions    ColourSizeExclusion[] // COLOUR only: sizes this colour isn't made in
+  priceTiers        VariantPriceTier[] // SIZE only
+
   @@index([productId])
 }
 
@@ -299,6 +314,23 @@ model ProductComponent {
 
   materials      ComponentMaterial[]
   productionJobs ProductionJob[]
+
+  variantId                    String? // null = standard-size component; set = owned by that SIZE option
+  variant                      ProductVariant?          @relation("VariantComponents", fields: [variantId], references: [id], onDelete: Cascade)
+  colourSlotId                 String? // single-material components only: colour slot this filament follows
+  colourSlot                   ProductColourSlot?       @relation(fields: [colourSlotId], references: [id], onDelete: SetNull)
+  colourFixed                  Boolean? // single-material only: true = fixed on purpose; null/false with colourSlotId null = unlinked (§0.3)
+  stockConfirmedAt             DateTime? // null on every pre-release component: its stockOnHand may hold units of other colours; set on create for new components
+  thumbnailAttachmentId        String? // 3MF plate render (staff-only, never a photo)
+  platedMigratedAt             DateTime? // backfill marker for plated* -> PlateLayout
+  perUnitEstimatedFromLayoutId String? // no FK. Set when per-unit grams/minutes were divided out of a xN plate at import; cleared by any grams/minutes edit
+  plateLayouts                 PlateLayout[]
+  colourStock                  ComponentColourStock[]
+  stockMovements               ComponentStockMovement[]
+  jobPlates                    JobPlate[]
+
+  @@index([productId, variantId])
+  @@index([colourSlotId])
 }
 
 model ComponentMaterial {
@@ -311,7 +343,12 @@ model ComponentMaterial {
   colorIndex  Int              @default(0)
   sortOrder   Int              @default(0)
 
+  colourSlotId String? // multicolour: colour slot this tool/colour index follows
+  colourSlot   ProductColourSlot? @relation(fields: [colourSlotId], references: [id], onDelete: SetNull)
+  colourFixed  Boolean? // true = fixed on purpose; null/false with colourSlotId null = unlinked (§0.3)
+
   @@unique([componentId, colorIndex])
+  @@index([colourSlotId])
 }
 
 // ============ PRINTERS ============
@@ -444,6 +481,15 @@ model ProductionJob {
   parts       JobPart[]
   attachments Attachment[]
 
+  // Option pair (variantId kept: legacy source, rollback mirror = sizeOptionId ?? colourOptionId)
+  sizeOptionId   String? // no FK. null = standard size, or a legacy job (read variantId)
+  colourOptionId String? // no FK. null = standard colour, or a legacy job
+  surplusPolicy  SurplusPolicy? // resolved at creation; null = legacy job (no plates)
+  stockMode      JobStockMode? // only for jobs without orderId; null = DIRECT_SALE semantics
+  plates         JobPlate[]
+
+  @@index([sizeOptionId])
+  @@index([colourOptionId])
   @@index([status])
   @@index([orderId])
   @@index([orderItemId])
@@ -485,6 +531,11 @@ model JobMaterial {
   slicedMaterialId String?
   slicedMaterial   Material?     @relation("SlicedMaterial", fields: [slicedMaterialId], references: [id])
   createdAt        DateTime      @default(now())
+
+  // Identity of the planned need this line fulfils, written once at creation and never changed
+  // (swapColour and spool substitution change materialId only). Both null = line added by hand or legacy.
+  plannedMaterialId       String? // no FK. resolved slot material the line was planned for (the colour option's filament)
+  plannedSlicedMaterialId String? // no FK. the component's own material the file was sliced with, when it differs from plannedMaterialId
 
   @@index([jobId])
   @@index([materialId])
@@ -552,7 +603,16 @@ model QuoteItem {
   marginPercent    Float?
   createdAt        DateTime @default(now())
 
+  sizeOptionId        String? // no FK. null = standard size
+  colourOptionId      String? // no FK. null = standard colour
+  listUnitPrice       Float?
+  priceSource         PriceSource?
+  tierMinQty          Int?
+  priceOverrideReason String?
+
   @@index([quoteId])
+  @@index([sizeOptionId])
+  @@index([colourOptionId])
 }
 
 model Order {
@@ -643,8 +703,18 @@ model OrderItem {
 
   productionJobs ProductionJob[]
 
+  // Option pair (variantId kept: legacy source, rollback mirror = sizeOptionId ?? colourOptionId)
+  sizeOptionId        String? // no FK. null = standard size, or a legacy line (read variantId)
+  colourOptionId      String? // no FK. null = standard colour, or a legacy line
+  listUnitPrice       Float?
+  priceSource         PriceSource? // null = line created before this release
+  tierMinQty          Int? // tier that applied (TIER) or would have applied (MANUAL)
+  priceOverrideReason String?
+
   @@index([orderId])
   @@index([productId])
+  @@index([sizeOptionId])
+  @@index([colourOptionId])
 }
 
 model Invoice {
@@ -808,6 +878,8 @@ model Attachment {
   invoiceId       String?
   invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
 
+  photoMigratedAt DateTime? // backfill marker (photo copied, thumbnail linked, or skipped)
+
   @@index([entityType, entityId])
 }
 
@@ -968,4 +1040,220 @@ enum NotificationType {
   DESIGN_CHANGES_REQUESTED
   MAINTENANCE_DUE
   SYSTEM
+}
+
+// ============ PRODUCT REWORK (sizes & colours, plate layouts, printed stock, photos) ============
+
+enum VariantKind {
+  SIZE
+  COLOUR
+}
+
+enum SurplusPolicy {
+  CANCEL_ON_PRINTER
+  KEEP_FOR_STOCK
+}
+
+enum PriceSource {
+  BASE // standard size list price
+  SIZE // a size option's list price
+  TIER
+  MANUAL
+}
+
+enum StockMovementReason {
+  MANUAL_ADJUST
+  PLAN_ALLOCATE
+  PLAN_RELEASE // order cancelled: allocated units returned
+  JOB_COMPLETE_STOCK
+  JOB_COMPLETE_SURPLUS
+  FILAMENT_REKEY // base filament changed: balance moved between colour keys
+}
+
+enum JobStockMode {
+  BUILD_STOCK // no order: every printed unit goes to printed stock
+  DIRECT_SALE // no order in the system, units handed to a customer: only extras go to stock
+}
+
+enum PlateLayoutSource {
+  GCODE
+  MANUAL
+  CALIBRATION
+}
+
+// Bulk tiers of a SIZE option. The standard size keeps using PriceTier. Colours have no tiers.
+model VariantPriceTier {
+  id        String         @id @default(cuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  minQty    Int
+  unitPrice Float
+  createdAt DateTime       @default(now())
+
+  @@unique([variantId, minQty])
+  @@index([variantId])
+}
+
+// A named colour role of a product ("Tin", "Trim"). Component material slots of ANY size link to it,
+// so one colour option recolours every size. 0-12 per product.
+model ProductColourSlot {
+  id                 String              @id @default(cuid())
+  productId          String
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name               String // 1-40 chars; unique per product, case-insensitive (checked in the service)
+  sortOrder          Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  components         ProductComponent[]
+  componentMaterials ComponentMaterial[]
+  assignments        ColourOptionSlot[]
+
+  @@unique([productId, name])
+  @@index([productId])
+}
+
+// COLOUR option: the filament one product colour slot prints in for this colour.
+// Absent row = that slot prints in each linked component's own (as-sliced) filament.
+model ColourOptionSlot {
+  id           String            @id @default(cuid())
+  variantId    String // a COLOUR option of the slot's product
+  variant      ProductVariant    @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  colourSlotId String
+  colourSlot   ProductColourSlot @relation(fields: [colourSlotId], references: [id], onDelete: Cascade)
+  materialId   String
+  material     Material          @relation(fields: [materialId], references: [id]) // Restrict: a filament used by a colour can't be deleted (P2003 -> 400)
+
+  @@unique([variantId, colourSlotId])
+  @@index([colourSlotId])
+  @@index([materialId])
+}
+
+// COLOUR option: a size this colour is NOT made in ("Made in" checklist). No row = made in that size.
+// sizeKey = the SIZE option id, or the literal 'standard' for the standard size (a null would not be unique in Postgres).
+// No FK on sizeKey: size delete and kind changes delete the rows that name a removed or reclassified size in the same transaction.
+model ColourSizeExclusion {
+  id        String         @id @default(cuid())
+  variantId String // the COLOUR option
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  sizeKey   String
+  createdAt DateTime       @default(now())
+
+  @@unique([variantId, sizeKey])
+  @@index([sizeKey])
+}
+
+// Printed-unit stock of a component in a colour key other than its current base key.
+// Keyed by physical colour, not by option: two colours that give a component the same
+// filament share stock, and changing a colour's assignments never strands stock.
+// Invariant (kept by ProductStockService.rekeyBase): no row with stockOnHand > 0 has
+// colourKey equal to the component's current base key.
+model ComponentColourStock {
+  id          String           @id @default(cuid())
+  componentId String
+  component   ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  colourKey   String // "0:<materialId>" or "0:<id>|1:<id>", sorted by colorIndex
+  stockOnHand Int              @default(0)
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([componentId, colourKey])
+}
+
+// Ledger of every change to a stock bucket. Balance lives on ProductComponent.stockOnHand
+// (when the key was the base key at the time of the movement) or ComponentColourStock.stockOnHand.
+// colourKey is ALWAYS the physical colour of the units moved, never null.
+model ComponentStockMovement {
+  id           String              @id @default(cuid())
+  componentId  String
+  component    ProductComponent    @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  colourKey    String // physical colour key of the units (never null; new table, so no legacy rows)
+  baseColumn   Boolean             @default(false) // true = this movement changed ProductComponent.stockOnHand; false = a ComponentColourStock row
+  delta        Int
+  balanceAfter Int
+  reason       StockMovementReason
+  orderItemId  String? // no FK
+  jobId        String? // no FK
+  userId       String?
+  note         String?
+  createdAt    DateTime            @default(now())
+
+  @@index([componentId, colourKey, createdAt])
+  @@index([orderItemId, componentId])
+  @@index([jobId])
+}
+
+model PlateLayout {
+  id            String            @id @default(cuid())
+  componentId   String
+  component     ProductComponent  @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  name          String // default "x{unitsPerPlate}"
+  unitsPerPlate Int // 1..500
+  plateMinutes  Float // 1..100000
+  plateGrams    Float // 0.1..100000, slicer total incl. flush and tower
+  colorChanges  Int               @default(0)
+  source        PlateLayoutSource @default(MANUAL)
+  attachmentId  String? // stored G-code (Attachment, entityType 'product')
+  gcodeFilename String?
+  objectCount   Int? // what the file's object labels said; null = no labels / manual
+  isActive      Boolean           @default(true)
+  sortOrder     Int               @default(0)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  slots         PlateLayoutSlot[]
+  jobPlates     JobPlate[]
+
+  @@index([componentId, isActive])
+}
+
+model PlateLayoutSlot {
+  id         String      @id @default(cuid())
+  layoutId   String
+  layout     PlateLayout @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+  colorIndex Int
+  gramsUsed  Float
+
+  @@unique([layoutId, colorIndex])
+}
+
+// Snapshot of the plates a job prints. One row per (component, layout) with a count.
+model JobPlate {
+  id            String            @id @default(cuid())
+  jobId         String
+  job           ProductionJob     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  componentId   String?
+  component     ProductComponent? @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  layoutId      String? // null = implicit single
+  layout        PlateLayout?      @relation(fields: [layoutId], references: [id], onDelete: SetNull)
+  colourKey     String // planned colour key (display and planning only; completion derives the actual key)
+  slots         Json // planned per slot: [{ colorIndex, materialId, slicedMaterialId: string|null, colourSlotId: string|null, gramsPerPlate }]
+  label         String // e.g. "Box x12" or "Box single"
+  unitsPerPlate Int
+  plateCount    Int
+  unitsRequired Int // units of this component the job must deliver (same on every row of the component)
+  plateMinutes  Float
+  plateGrams    Float
+  attachmentId  String?
+  gcodeFilename String?
+  sortOrder     Int               @default(0)
+  createdAt     DateTime          @default(now())
+
+  @@index([jobId])
+  @@index([layoutId])
+}
+
+// Customer-visible product photos only. Never slicer files, never plate renders.
+model ProductImage {
+  id                 String   @id @default(cuid())
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  storageKey         String   @unique // "<cuid>.<jpg|png|webp>" under ${UPLOAD_DIR}/product-images/
+  mimeType           String // sniffed: image/jpeg | image/png | image/webp
+  sizeBytes          Int
+  width              Int
+  height             Int
+  originalName       String // sanitised display name, never a path
+  sortOrder          Int      @default(0) // lowest = cover
+  uploadedById       String?
+  legacyAttachmentId String?  @unique
+  createdAt          DateTime @default(now())
+
+  @@index([productId, sortOrder])
 }

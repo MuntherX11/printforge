@@ -869,3 +869,477 @@ export interface ScrapedModelData {
   siteName: string | null;
   isPaid?: boolean;
 }
+
+// ============ PRODUCT REWORK: SIZES & COLOURS, PRICING, READINESS ============
+//
+// Enums mirror the Prisma enums. They are const objects plus a string-literal
+// union type, so values coming straight from Prisma ("SIZE") type-check against
+// them, and code can still write VariantKind.SIZE.
+
+export const VariantKind = { SIZE: 'SIZE', COLOUR: 'COLOUR' } as const;
+export type VariantKind = (typeof VariantKind)[keyof typeof VariantKind];
+
+export const SurplusPolicy = {
+  CANCEL_ON_PRINTER: 'CANCEL_ON_PRINTER',
+  KEEP_FOR_STOCK: 'KEEP_FOR_STOCK',
+} as const;
+export type SurplusPolicy = (typeof SurplusPolicy)[keyof typeof SurplusPolicy];
+
+/** Where an order/quote line's unit price came from. null on a line = pre-release. */
+export const PriceSource = { BASE: 'BASE', SIZE: 'SIZE', TIER: 'TIER', MANUAL: 'MANUAL' } as const;
+export type PriceSource = (typeof PriceSource)[keyof typeof PriceSource];
+
+export const JobStockMode = { BUILD_STOCK: 'BUILD_STOCK', DIRECT_SALE: 'DIRECT_SALE' } as const;
+export type JobStockMode = (typeof JobStockMode)[keyof typeof JobStockMode];
+
+export const StockMovementReason = {
+  MANUAL_ADJUST: 'MANUAL_ADJUST',
+  PLAN_ALLOCATE: 'PLAN_ALLOCATE',
+  PLAN_RELEASE: 'PLAN_RELEASE',
+  JOB_COMPLETE_STOCK: 'JOB_COMPLETE_STOCK',
+  JOB_COMPLETE_SURPLUS: 'JOB_COMPLETE_SURPLUS',
+  FILAMENT_REKEY: 'FILAMENT_REKEY',
+} as const;
+export type StockMovementReason = (typeof StockMovementReason)[keyof typeof StockMovementReason];
+
+export const PlateLayoutSource = { GCODE: 'GCODE', MANUAL: 'MANUAL', CALIBRATION: 'CALIBRATION' } as const;
+export type PlateLayoutSource = (typeof PlateLayoutSource)[keyof typeof PlateLayoutSource];
+
+/** A blocking problem or non-blocking warning. Codes and messages are exact (spec §3.2). */
+export interface Problem {
+  code: string;
+  message: string;
+  componentId?: string;
+  materialId?: string;
+  colourSlotId?: string;
+}
+
+/** The sellable item of a line: (standard size | size) x (standard colour | colour). null = standard. */
+export interface OptionPair {
+  sizeOptionId: string | null;
+  colourOptionId: string | null;
+}
+
+export interface MaterialLite {
+  id: string;
+  name: string;
+  type: MaterialType | string;
+  color: string | null;
+  colorHex: string | null;
+  brand: string | null;
+  costPerGram: number;
+}
+
+export interface FileRef {
+  attachmentId: string;
+  filename: string;
+  sizeBytes: number;
+  /** /api/attachments/<id>/download */
+  downloadUrl: string;
+}
+
+export interface ComponentPlateLayout {
+  id: string;
+  name: string;
+  unitsPerPlate: number;
+  plateMinutes: number;
+  plateGrams: number;
+  colorChanges: number;
+  source: PlateLayoutSource;
+  objectCount: number | null;
+  isActive: boolean;
+  sortOrder: number;
+  minutesPerUnit: number;
+  gramsPerUnit: number;
+  file: FileRef | null;
+  slots: Array<{ colorIndex: number; gramsUsed: number }>;
+}
+
+/** One printed component as the product page sees it (spec §4.1.1). */
+export interface ComponentDetail {
+  id: string;
+  /** Owning size; null = standard size. */
+  variantId: string | null;
+  description: string;
+  quantity: number;
+  gramsUsed: number;
+  printMinutes: number;
+  sortOrder: number;
+  isMultiColor: boolean;
+  colorChanges: number;
+  materialId: string | null;
+  material: MaterialLite | null;
+  /** Single-material colour link. */
+  colourSlotId: string | null;
+  /** Single-material: true = Fixed; false with colourSlotId null = unlinked. */
+  colourFixed: boolean;
+  materials: Array<{
+    id: string;
+    colorIndex: number;
+    materialId: string;
+    material: MaterialLite;
+    gramsUsed: number;
+    colourSlotId: string | null;
+    colourFixed: boolean;
+  }>;
+  /** Base column (base colour key). */
+  stockOnHand: number;
+  /** stockConfirmedAt != null || stockOnHand === 0 */
+  stockConfirmed: boolean;
+  baseColourKey: string;
+  /** Non-base keys: rows with a balance other than 0, plus keys active colours resolve to (0 when absent). */
+  colourStock: Array<{ colourKey: string; label: string; stockOnHand: number; usedBy: string[] }>;
+  perUnitEstimatedFrom: { layoutId: string; unitsPerPlate: number } | null;
+  file: FileRef | null;
+  thumbnailUrl: string | null;
+  plateLayouts: ComponentPlateLayout[];
+  problems: Problem[];
+}
+
+export interface PriceTierRow {
+  id: string;
+  minQty: number;
+  unitPrice: number;
+}
+
+export interface UnlinkedSlot {
+  componentId: string;
+  description: string;
+  colorIndex: number;
+}
+
+export interface SizeOptionDetail {
+  id: string;
+  name: string;
+  sku: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  basePrice: number | null;
+  estimatedGrams: number | null;
+  estimatedMinutes: number | null;
+  unlinkedSlots: UnlinkedSlot[];
+  /** No components and no tiers (every legacy option at deploy). */
+  notSetUp: boolean;
+  /** Name looks like a colour; shown only while notSetUp. */
+  likelyColour: boolean;
+  components: ComponentDetail[];
+  priceTiers: PriceTierRow[];
+  setup: { complete: boolean; problems: Problem[] };
+  kindChange: { allowed: boolean; blockers: string[] };
+}
+
+export interface ColourOptionDetail {
+  id: string;
+  name: string;
+  sku: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  /** Stored basePrice, never used for pricing. */
+  legacyPrice: number | null;
+  assignments: Array<{ colourSlotId: string; materialId: string; material: MaterialLite }>;
+  /** "Made in" unticked; 'standard' = standard size. */
+  excludedSizeKeys: string[];
+  /** Sizes where customers are offered this colour. */
+  customerSizeKeys: string[];
+  setup: { warnings: Problem[] };
+  /** rewrites = rows a kind change would move to the colour axis. */
+  kindChange: { allowed: boolean; blockers: string[]; rewrites: number };
+}
+
+export interface ColourSlotDetail {
+  id: string;
+  name: string;
+  sortOrder: number;
+  links: Array<{ componentId: string; componentDescription: string; sizeOptionId: string | null; colorIndex: number }>;
+  /** Distinct own filaments of its linked slots. */
+  standardMaterials: MaterialLite[];
+}
+
+/** GET /products/:id (spec §4.1.1). */
+export interface ProductDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  isActive: boolean;
+  basePrice: number;
+  estimatedGrams: number;
+  estimatedMinutes: number;
+  colorChanges: number;
+  baseOptionLabel: string | null;
+  baseOptionSellable: boolean | null;
+  standardColourLabel: string | null;
+  standardColourSellable: boolean | null;
+  surplusPolicy: SurplusPolicy;
+  defaultPrinterId: string | null;
+  defaultPrinter: { id: string; name: string; hourlyRate: number; wattage: number; markupMultiplier: number } | null;
+  createdAt: string;
+  updatedAt: string;
+  coverImageUrl: string | null;
+  hasSlicerComponent: boolean;
+  /** Staff rule, standard size. */
+  baseSellable: boolean;
+  /** Customer rule, standard size. */
+  baseSellableToCustomers: boolean;
+  /** Customer rule, standard colour. */
+  standardColourSellableToCustomers: boolean;
+  /** Standard size only. */
+  components: ComponentDetail[];
+  /** Standard size. */
+  priceTiers: PriceTierRow[];
+  colourSlots: ColourSlotDetail[];
+  /** SLOT_STANDARD_MIXED present. */
+  standardColourMixed: boolean;
+  sizes: SizeOptionDetail[];
+  colours: ColourOptionDetail[];
+  /** Standard size. */
+  unlinkedSlots: UnlinkedSlot[];
+  warnings: Problem[];
+}
+
+/** Cost of one pair (spec §4.1.2). */
+export interface OptionCost extends OptionPair {
+  label: string;
+  complete: boolean;
+  fallbackToBase: boolean;
+  problems: Problem[];
+  warnings: Problem[];
+  /** null when incomplete. */
+  perUnit: {
+    material: number;
+    machine: number;
+    electricity: number;
+    waste: number;
+    overhead: number;
+    parts: number;
+    total: number;
+  } | null;
+  materials: Array<{
+    materialId: string;
+    name: string;
+    type: MaterialType | string;
+    colorHex: string | null;
+    grams: number;
+    costPerGram: number;
+    cost: number;
+  }>;
+  components: Array<{
+    componentId: string;
+    description: string;
+    quantity: number;
+    gramsPerUnit: number;
+    minutesPerUnit: number;
+    cost: number;
+  }>;
+  parts: Array<{ partId: string; name: string; quantity: number; unitCost: number; lineCost: number }>;
+  purge: {
+    basis: 'SLICER_INCLUDED' | 'COLOUR_CHANGES' | 'NONE';
+    changesPerUnit: number;
+    gramsPerChange: number;
+    grams: number;
+  };
+  machine: {
+    minutesPerUnit: number;
+    hourlyRate: number;
+    rateSource: 'PRINTER' | 'SETTING';
+    wattage: number;
+    electricityRatePerKwh: number;
+  };
+  overheadPercent: number;
+  markup: { multiplier: number; source: 'PRINTER' | 'SETTING'; printerName: string | null };
+  /** The SIZE's stored price (a colour never has one). */
+  storedPrice: number | null;
+  /** Size on the standard colour x markup; null for a non-standard colour pair. */
+  computedPrice: number | null;
+  priceUpToDate: boolean;
+  marginPct: number | null;
+}
+
+/** One size x colour cell of the cost grid (spec §4.1.2). */
+export interface CellCost extends OptionPair {
+  sizeLabel: string;
+  colourLabel: string;
+  active: boolean;
+  excluded: boolean;
+  offeredToCustomers: boolean;
+  complete: boolean;
+  costPerUnit: number | null;
+  price: number | null;
+  marginPct: number | null;
+  deltaVsStandardPct: number | null;
+  problems: Problem[];
+  warnings: Problem[];
+}
+
+/** GET /products/:id/cost without parameters. */
+export interface ProductCostPayload {
+  costVersion: string;
+  sizes: OptionCost[];
+  cells: CellCost[];
+}
+
+/** GET /products/customer/catalog row (spec §4.1 P3). */
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  coverImageUrl: string | null;
+  fromPrice: number;
+  optionCount: number;
+  estimatedMinutes: number;
+}
+
+/** GET /products/customer/:id (spec §4.1 P4). */
+export interface CatalogProductDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  images: Array<{ id: string; url: string }>;
+  hasSizes: boolean;
+  sizes: Array<{
+    sizeOptionId: string | null;
+    label: string;
+    price: number;
+    estimatedMinutes: number | null;
+    estimatedGrams: number | null;
+  }>;
+  colours: Array<{
+    colourOptionId: string | null;
+    label: string;
+    /** colorHex of each assigned filament, at most 4. */
+    swatches: string[];
+    /** Offered sizes on which this colour is offered to customers; null = standard size. */
+    sizeOptionIds: Array<string | null>;
+  }>;
+}
+
+/** GET /products/:id/bulk-floor (spec §4.1 P18, §3.9). */
+export interface BulkFloor {
+  size: { sizeOptionId: string | null; label: string; listPrice: number | null };
+  available: boolean;
+  problems: Problem[];
+  thinMarginPct: number;
+  unitCostAtOne: number | null;
+  colours: Array<{ colourOptionId: string | null; label: string; unitCostAtOne: number | null }>;
+  bands: Array<{
+    minQty: number;
+    maxQty: number | null;
+    worstUnitCost: number;
+    worstAtQty: number;
+    worstColour: { colourOptionId: string | null; label: string };
+    standardWorstUnitCost: number;
+    unitCostAtMin: number;
+    basis: Array<{ componentId: string; description: string; layoutsUsed: string[] }>;
+  }>;
+}
+
+export interface ReadinessPlate {
+  layoutId: string | null;
+  label: string;
+  unitsPerPlate: number;
+  plateCount: number;
+}
+
+/** GET /products/:id/readiness and POST /jobs/preview (spec §4.1 P20, §4.4 J2). */
+export interface Readiness {
+  option: OptionPair & { label: string; fallbackToBase: boolean };
+  qty: number;
+  surplusPolicy: SurplusPolicy;
+  productionReady: boolean;
+  components: Array<{
+    componentId: string;
+    description: string;
+    colourKey: string;
+    colourLabel: string;
+    unitsRequired: number;
+    stockOnHand: number;
+    plates: ReadinessPlate[];
+    unitsPrinted: number;
+    surplus: number;
+    printMinutes: number;
+    /** null on P20; filled by J2. */
+    creditOnComplete: number | null;
+  }>;
+  filament: Array<{
+    materialId: string;
+    label: string;
+    colorHex: string | null;
+    slicedMaterialId: string | null;
+    gramsNeeded: number;
+    totalStock: number;
+    reserved: number;
+    free: number;
+    /** "after open orders" */
+    hasEnough: boolean;
+    suggestedSpool: { id: string; pfid: string | null; location: string | null; effectiveRemaining: number } | null;
+    /** "spool to use" */
+    spoolHasEnough: boolean;
+  }>;
+  parts: Array<{
+    partId: string;
+    name: string;
+    needed: number;
+    stockQty: number;
+    reserved: number;
+    free: number;
+    hasEnough: boolean;
+  }>;
+  ready: boolean;
+  problems: Problem[];
+  warnings: Problem[];
+}
+
+/** One row of GET /jobs/plan/:orderId (spec §4.4.1). rowKey = `${orderItemId}:${componentId}`. */
+export interface PlanRow extends OptionPair {
+  rowKey: string;
+  orderItemId: string;
+  productId: string;
+  productName: string;
+  /** Pair label. */
+  optionLabel: string;
+  fallbackToBase: boolean;
+  componentId: string;
+  componentDescription: string;
+  isMultiColor: boolean;
+  colourKey: string;
+  colourLabel: string;
+  needed: number;
+  alreadyPlanned: number;
+  allocatedFromStock: number;
+  remaining: number;
+  onHand: number;
+  fromStock: number;
+  toProduce: number;
+  surplusPolicy: SurplusPolicy;
+  layouts: Array<{
+    layoutId: string | null;
+    label: string;
+    unitsPerPlate: number;
+    plateMinutes: number;
+    plateGrams: number;
+    minutesPerUnit: number;
+    gramsPerUnit: number;
+    hasFile: boolean;
+  }>;
+  suggestedPlates: ReadinessPlate[];
+  unitsPrinted: number;
+  surplus: number;
+  printMinutes: number;
+  filament: Array<{
+    materialId: string;
+    label: string;
+    colorHex: string | null;
+    slicedMaterialId: string | null;
+    grams: number;
+    suggestedSpool: {
+      id: string;
+      pfid: string | null;
+      currentWeight: number;
+      effectiveRemaining: number;
+      hasEnough: boolean;
+    } | null;
+  }>;
+  printerId: string | null;
+  printerName: string | null;
+  warnings: Problem[];
+}

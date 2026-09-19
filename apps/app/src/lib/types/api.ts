@@ -42,6 +42,40 @@ export type NotificationType =
   | 'MAINTENANCE_DUE'
   | 'SYSTEM';
 
+// ============ PRODUCT REWORK (shared contracts) ============
+// Mirrors of the (T) types in @printforge/types — re-exported rather than
+// copied so the app and the API cannot drift apart.
+
+export type {
+  VariantKind,
+  SurplusPolicy,
+  PriceSource,
+  JobStockMode,
+  StockMovementReason,
+  PlateLayoutSource,
+  Problem,
+  OptionPair,
+  MaterialLite,
+  FileRef,
+  ComponentPlateLayout,
+  ComponentDetail,
+  PriceTierRow,
+  UnlinkedSlot,
+  SizeOptionDetail,
+  ColourOptionDetail,
+  ColourSlotDetail,
+  ProductDetail,
+  OptionCost,
+  CellCost,
+  ProductCostPayload,
+  CatalogProduct,
+  CatalogProductDetail,
+  BulkFloor,
+  ReadinessPlate,
+  Readiness,
+  PlanRow,
+} from '@printforge/types';
+
 // ============ SHARED PRIMITIVES ============
 
 /** Slim reference used in nested includes (e.g. job.printer, job.order). */
@@ -185,6 +219,28 @@ export interface ApiProductComponent {
   hasEnoughStock?: boolean;
   totalStock?: number;
   gramsNeeded?: number;
+  /** Slicer file this component was onboarded from (stored bytes + original name). */
+  attachmentId?: string | null;
+  gcodeFilename?: string | null;
+  colorChanges?: number;
+  /** 3MF plate render (staff-only, never a customer photo). */
+  thumbnailAttachmentId?: string | null;
+  /** Single-material colour link (product colour slot this filament follows). */
+  colourSlotId?: string | null;
+}
+
+/** A customer-visible product photo (GET /products/:id/images). */
+export interface ApiProductImage {
+  id: string;
+  url: string;
+  originalName: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  /** Lowest = cover. */
+  sortOrder: number;
+  isCover: boolean;
 }
 
 export interface ApiProductVariant {
