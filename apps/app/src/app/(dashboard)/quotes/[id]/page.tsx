@@ -12,6 +12,36 @@ import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
+import { useAuth } from '@/lib/auth-context';
+import { LinePriceHint } from '@/components/pricing/LinePriceHint';
+import { ChangeLineColourDialog } from '@/components/orders/ChangeLineColourDialog';
+import type {
+  ApiActiveProduct, LineOptionFields, LinePricingFields, QuoteConversionPlanning, QuoteStatus,
+} from '@/lib/types/api';
+
+interface QuoteLine extends LineOptionFields, Partial<LinePricingFields> {
+  id: string;
+  productId: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+/** GET /quotes/:id (S8), the fields this page reads. */
+interface QuoteDetail {
+  id: string;
+  quoteNumber: string;
+  status: QuoteStatus;
+  total: number;
+  validUntil: string | null;
+  createdAt: string;
+  customer: { id: string; name: string } | null;
+  order: { id: string; orderNumber: string } | null;
+  items: QuoteLine[];
+}
+
+const errorText = (err: unknown, fallback = 'Something went wrong') => (err instanceof Error && err.message) || fallback;
 
 const quoteStatuses = [
   { value: 'DRAFT', label: 'Draft' },
@@ -26,16 +56,28 @@ export default function QuoteDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const [quote, setQuote] = useState<any>(null);
+  const { role } = useAuth();
+  const canEdit = role === 'ADMIN' || role === 'OPERATOR';
+  const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [products, setProducts] = useState<ApiActiveProduct[] | null>(null);
+  const [colourLine, setColourLine] = useState<QuoteLine | null>(null);
 
-  const load = () => api.get(`/quotes/${id}`).then(setQuote).catch((err: any) => {
-    toast('error', err?.message || 'Failed to load quote details');
+  const load = () => api.get<QuoteDetail>(`/quotes/${id}`).then(setQuote).catch((err: unknown) => {
+    toast('error', errorText(err, 'Failed to load quote details'));
   }).finally(() => setLoading(false));
 
   useEffect(() => { load(); }, [id]);
+
+  // Which products have colours (for the Change colour action).
+  useEffect(() => {
+    if (!canEdit) return;
+    api.get<ApiActiveProduct[]>('/products/active').then(setProducts).catch(() => setProducts([]));
+  }, [canEdit]);
+  const hasColours = (productId: string | null) => !!productId && !!products?.find(p => p.id === productId)?.colours.length;
+  const colourEditable = !!quote && ['DRAFT', 'SENT'].includes(quote.status);
 
   async function updateStatus(status: string) {
     setUpdating(true);
@@ -43,8 +85,8 @@ export default function QuoteDetailPage() {
       await api.patch(`/quotes/${id}`, { status });
       load();
       toast('success', `Quote status updated to ${status}`);
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     } finally {
       setUpdating(false);
     }
@@ -53,11 +95,13 @@ export default function QuoteDetailPage() {
   async function convertToOrder(autoCreateJobs = true) {
     setConverting(true);
     try {
-      await api.post(`/quotes/${id}/convert`, { autoCreateJobs });
-      toast('success', 'Quote successfully converted to order');
+      const res = await api.post<{ planning?: QuoteConversionPlanning }>(`/quotes/${id}/convert`, { autoCreateJobs });
+      const planning = res.planning ?? { jobsCreated: 0, warnings: [] };
+      toast('success', `Quote converted — ${planning.jobsCreated} jobs planned`);
+      for (const w of planning.warnings.filter(x => x.code === 'JOBS_NOT_PLANNED')) toast('warning', w.message);
       router.push('/orders');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
       setConverting(false);
     }
   }
@@ -101,15 +145,31 @@ export default function QuoteDetailPage() {
                 <TableHead>Qty</TableHead>
                 <TableHead>Unit Price</TableHead>
                 <TableHead>Total</TableHead>
+                {canEdit && colourEditable && <TableHead><span className="sr-only">Actions</span></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(quote.items || []).map((item: any) => (
+              {(quote.items || []).map(item => (
                 <TableRow key={item.id}>
                   <TableCell>{item.description}</TableCell>
                   <TableCell>{item.quantity}</TableCell>
-                  <TableCell>{formatCurrency(item.unitPrice)}</TableCell>
+                  <TableCell>
+                    {formatCurrency(item.unitPrice)}
+                    <LinePriceHint
+                      readOnly
+                      info={item.priceSource ? { priceSource: item.priceSource, listUnitPrice: item.listUnitPrice ?? null, tierMinQty: item.tierMinQty ?? null, unitPrice: item.unitPrice } : null}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{formatCurrency(item.totalPrice)}</TableCell>
+                  {canEdit && colourEditable && (
+                    <TableCell className="text-right">
+                      {hasColours(item.productId) && (
+                        <button type="button" onClick={() => setColourLine(item)} className="text-sm text-brand-600 hover:underline dark:text-brand-400">
+                          Change colour
+                        </button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -124,6 +184,16 @@ export default function QuoteDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <ChangeLineColourDialog
+        open={!!colourLine}
+        onClose={() => setColourLine(null)}
+        kind="quotes"
+        documentId={String(id)}
+        line={colourLine}
+        products={products}
+        onDone={msg => { setColourLine(null); toast('success', msg); load(); }}
+      />
     </div>
   );
 }

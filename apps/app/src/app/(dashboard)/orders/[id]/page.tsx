@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,17 +8,22 @@ import { Select } from '@/components/ui/select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
 import { AlertTriangle, CheckCircle, Factory, FileDown } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
-import { useOrder } from './useOrder';
+import { LinePriceHint } from '@/components/pricing/LinePriceHint';
+import { ChangeLineColourDialog } from '@/components/orders/ChangeLineColourDialog';
+import { ConfirmDialog } from '../../products/[id]/ConfirmDialog';
+import type { ApiActiveProduct, ApiPrinter, PlanSubmitResult, ProductionPlan, StockReleasedRow } from '@/lib/types/api';
+import { useOrder, type OrderInvoice, type OrderLine } from './useOrder';
 import { InvoiceList } from './InvoiceList';
 import { ConfigArtifactsCard } from './ConfigArtifactsCard';
+import { PlanProductionDialog } from './PlanProductionDialog';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -30,28 +35,63 @@ const orderStatuses = [
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
 
+const errorText = (err: unknown, fallback = 'Something went wrong') => (err instanceof Error && err.message) || fallback;
+
+/** `Box 2, Lid 1 (PLA Red)`: units per component, the colour once per group. */
+function stockText(rows: Array<{ componentDescription: string; colourLabel: string; units: number }>): string {
+  const byColour = new Map<string, string[]>();
+  for (const r of rows) byColour.set(r.colourLabel, [...(byColour.get(r.colourLabel) ?? []), `${r.componentDescription} ${r.units}`]);
+  return [...byColour.entries()].map(([colour, parts]) => `${parts.join(', ')} (${colour})`).join('; ');
+}
+
 export default function OrderDetailPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
+  const { role } = useAuth();
+  const canEdit = role === 'ADMIN' || role === 'OPERATOR';
   const { id, order, loading, reload } = useOrder();
 
   const [showPlanDialog, setShowPlanDialog] = useState(false);
-  const [plan, setPlan] = useState<any[]>([]);
-  const [planOverrides, setPlanOverrides] = useState<Record<string, any>>({});
+  const [plan, setPlan] = useState<ProductionPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [printers, setPrinters] = useState<any[]>([]);
+  const [printers, setPrinters] = useState<ApiPrinter[]>([]);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [products, setProducts] = useState<ApiActiveProduct[] | null>(null);
+  const [colourLine, setColourLine] = useState<OrderLine | null>(null);
+
+  // Which products have colours (for the Change colour action).
+  useEffect(() => {
+    if (!canEdit) return;
+    api.get<ApiActiveProduct[]>('/products/active').then(setProducts).catch(() => setProducts([]));
+  }, [canEdit]);
+  const hasColours = (productId: string | null) => !!productId && !!products?.find(p => p.id === productId)?.colours.length;
 
   async function updateStatus(status: string) {
+    if (status === 'CANCELLED' && order?.status !== 'CANCELLED') { setConfirmCancel(true); return; }
     setUpdating(true);
     try {
       await api.patch(`/orders/${id}`, { status });
       toast('success', 'Order status updated');
       reload();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function cancelOrder() {
+    setUpdating(true);
+    try {
+      const res = await api.patch<{ stockReleased?: StockReleasedRow[] }>(`/orders/${id}`, { status: 'CANCELLED' });
+      const back = res.stockReleased ?? [];
+      toast('success', back.length ? `Order cancelled — returned to printed stock: ${stockText(back)}` : 'Order cancelled');
+      setConfirmCancel(false);
+      reload();
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     } finally {
       setUpdating(false);
     }
@@ -61,15 +101,15 @@ export default function OrderDetailPage() {
     try {
       await api.post(`/invoices/${invoiceId}/send-email`);
       toast('success', 'Invoice sent via email');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     }
   }
 
-  function whatsAppInvoice(inv: any) {
-    const phone = order.customer?.phone?.replace(/[^0-9+]/g, '').replace(/^\+/, '');
+  function whatsAppInvoice(inv: OrderInvoice) {
+    const phone = order?.customer?.phone?.replace(/[^0-9+]/g, '').replace(/^\+/, '');
     if (!phone) { toast('error', 'Customer has no phone number'); return; }
-    const msg = encodeURIComponent(`Hi ${order.customer?.name}, your invoice ${inv.invoiceNumber} for ${formatCurrency(inv.total)} is ready. Thank you!`);
+    const msg = encodeURIComponent(`Hi ${order?.customer?.name}, your invoice ${inv.invoiceNumber} for ${formatCurrency(inv.total)} is ready. Thank you!`);
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
   }
 
@@ -77,51 +117,26 @@ export default function OrderDetailPage() {
     setPlanLoading(true);
     try {
       const [res, pr] = await Promise.all([
-        api.get<any>(`/jobs/plan/${id}`),
-        api.get<any[]>('/printers'),
+        api.get<ProductionPlan>(`/jobs/plan/${id}`),
+        api.get<ApiPrinter[]>('/printers'),
       ]);
-      setPlan(res.plan);
+      setPlan(res);
       setPrinters(pr);
-      setPlanOverrides({});
       setShowPlanDialog(true);
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     } finally {
       setPlanLoading(false);
     }
   }
 
-  async function createJobs() {
-    setCreating(true);
-    try {
-      const overrides = Object.entries(planOverrides)
-        .filter(([, v]) => v.toProduce > 0)
-        .map(([componentId, v]) => ({
-          componentId,
-          toProduce: v.toProduce,
-          printerId: v.printerId || undefined,
-          spoolId: v.spoolId || undefined,
-        }));
-      const res = await api.post<any>(`/jobs/plan/${id}`, { overrides: overrides.length > 0 ? overrides : undefined });
-      setShowPlanDialog(false);
-      toast('success', `Created ${res.jobsCreated} production job(s)`);
-      reload();
-    } catch (err: any) {
-      toast('error', err.message);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  function updatePlanOverride(componentId: string, field: string, value: any) {
-    setPlanOverrides(prev => ({
-      ...prev,
-      [componentId]: {
-        ...prev[componentId],
-        toProduce: prev[componentId]?.toProduce ?? plan.find(p => p.componentId === componentId)?.toProduce ?? 0,
-        [field]: value,
-      },
-    }));
+  function planCreated(res: PlanSubmitResult) {
+    const taken = res.allocations.reduce((n, a) => n + a.fromStock, 0);
+    setShowPlanDialog(false);
+    toast('success', taken > 0
+      ? `Took ${taken} from stock · created ${res.jobsCreated} production job(s)`
+      : `Created ${res.jobsCreated} production job(s)`);
+    reload();
   }
 
   async function createInvoice() {
@@ -130,8 +145,8 @@ export default function OrderDetailPage() {
       await api.post('/invoices', { orderId: id });
       reload();
       toast('success', 'Invoice created');
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     } finally {
       setCreatingInvoice(false);
     }
@@ -188,15 +203,31 @@ export default function OrderDetailPage() {
                 <TableHead>Qty</TableHead>
                 <TableHead>Unit Price</TableHead>
                 <TableHead>Total</TableHead>
+                {canEdit && <TableHead><span className="sr-only">Actions</span></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(order.items || []).map((item: any) => (
+              {(order.items || []).map(item => (
                 <TableRow key={item.id}>
                   <TableCell>{item.description}</TableCell>
                   <TableCell>{item.quantity}</TableCell>
-                  <TableCell>{formatCurrency(item.unitPrice)}</TableCell>
+                  <TableCell>
+                    {formatCurrency(item.unitPrice)}
+                    <LinePriceHint
+                      readOnly
+                      info={item.priceSource ? { priceSource: item.priceSource, listUnitPrice: item.listUnitPrice ?? null, tierMinQty: item.tierMinQty ?? null, unitPrice: item.unitPrice } : null}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{formatCurrency(item.totalPrice)}</TableCell>
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      {order.status !== 'CANCELLED' && hasColours(item.productId) && (
+                        <button type="button" onClick={() => setColourLine(item)} className="text-sm text-brand-600 hover:underline dark:text-brand-400">
+                          Change colour
+                        </button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -205,7 +236,7 @@ export default function OrderDetailPage() {
       </Card>
 
       {order.materialAvailability && order.materialAvailability.length > 0 && (() => {
-        const allReady = order.materialAvailability.every((m: any) => m.hasEnoughStock);
+        const allReady = order.materialAvailability.every(m => m.hasEnoughStock);
         return (
           <Card>
             <CardHeader>
@@ -233,7 +264,7 @@ export default function OrderDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {order.materialAvailability.map((m: any) => (
+                  {order.materialAvailability.map(m => (
                     <TableRow key={m.materialId}>
                       <TableCell className="font-medium">{m.name}</TableCell>
                       <TableCell>{m.type}</TableCell>
@@ -263,7 +294,7 @@ export default function OrderDetailPage() {
       })()}
 
       {order.partAvailability && order.partAvailability.length > 0 && (() => {
-        const allReady = order.partAvailability.every((p: any) => p.hasEnoughStock);
+        const allReady = order.partAvailability.every(p => p.hasEnoughStock);
         return (
           <Card>
             <CardHeader>
@@ -290,7 +321,7 @@ export default function OrderDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {order.partAvailability.map((p: any) => (
+                  {order.partAvailability.map(p => (
                     <TableRow key={p.partId}>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="font-mono text-xs text-gray-400">{p.sku || '-'}</TableCell>
@@ -325,16 +356,22 @@ export default function OrderDetailPage() {
           <CardHeader><CardTitle>Print Files</CardTitle></CardHeader>
           <CardContent className="p-0">
             <div className="divide-y dark:divide-gray-700">
-              {order.printFiles.map((f: any, i: number) => (
+              {order.printFiles.map((f, i) => (
                 <div key={`${f.attachmentId}-${f.orderItemId}-${i}`} className="flex items-center gap-3 px-4 py-3">
                   <FileDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate dark:text-gray-100">{f.filename}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {f.productName} · {f.component} · ×{f.quantity}
+                      {f.productName}{f.optionLabel ? ` · ${f.optionLabel}` : ''} · {f.component}
+                      {f.kind === 'PLATE_LAYOUT' && f.unitsPerPlate ? ` · ×${f.unitsPerPlate} plate` : ''} · ×{f.quantity}
                       {f.colorChanges > 0 && <> · {f.colorChanges} colour changes</>}
                       {f.sizeBytes > 0 && <> · {(f.sizeBytes / 1024 / 1024).toFixed(1)} MB</>}
                     </p>
+                    {f.printIn.filter(c => c.slicedFor).map(c => (
+                      <p key={c.colorIndex} className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                        print colour {c.colorIndex + 1} in {c.materialLabel} — file sliced for {c.slicedFor}
+                      </p>
+                    ))}
                   </div>
                   <a
                     href={`/api/attachments/${f.attachmentId}/download`}
@@ -368,7 +405,7 @@ export default function OrderDetailPage() {
           <CardHeader><CardTitle>Production Jobs</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {(order.productionJobs || []).map((job: any) => (
+              {(order.productionJobs || []).map(job => (
                 <Link key={job.id} href={`/production/${job.id}`} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
                   <div>
                     <p className="text-sm font-medium">{job.name}</p>
@@ -382,92 +419,38 @@ export default function OrderDetailPage() {
         </Card>
       )}
 
-      <Dialog open={showPlanDialog} onClose={() => setShowPlanDialog(false)} title="Production Plan Preview">
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-          {plan.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No components need production — all items are in stock.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Component</TableHead>
-                  <TableHead>Materials</TableHead>
-                  <TableHead>Need</TableHead>
-                  <TableHead>On Hand</TableHead>
-                  <TableHead>To Produce</TableHead>
-                  <TableHead>Printer</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {plan.map((item: any) => {
-                  const override = planOverrides[item.componentId];
-                  const toProduce = override?.toProduce ?? item.toProduce;
-                  return (
-                    <TableRow key={item.componentId} className={toProduce === 0 ? 'opacity-50' : ''}>
-                      <TableCell>
-                        <div>
-                          <p className="text-sm font-medium">{item.productName}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{item.componentDescription}</p>
-                          {item.isMultiColor && <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 text-xs mt-1">Multicolor</Badge>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          {(item.subMaterials || []).map((sub: any, si: number) => (
-                            <div key={si} className="flex items-center gap-2 text-xs">
-                              <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 text-xs shrink-0">
-                                {sub.materialName}{sub.materialColor ? ` (${sub.materialColor})` : ''}
-                              </Badge>
-                              <span className="font-mono text-gray-500">{Math.round(sub.gramsPerUnit * toProduce)}g</span>
-                              {sub.suggestedSpool ? (
-                                <span className={`font-mono ${sub.suggestedSpool.hasEnough ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                                  → {sub.suggestedSpool.pfid || sub.suggestedSpool.id.slice(0, 6)} ({Math.round(sub.suggestedSpool.currentWeight)}g)
-                                </span>
-                              ) : (
-                                <span className="text-red-500">No spool</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono">{item.needed}</TableCell>
-                      <TableCell className="font-mono">{item.onHand}</TableCell>
-                      <TableCell>
-                        <input
-                          type="number"
-                          min="0"
-                          className="w-16 h-7 text-sm text-center border rounded bg-white dark:bg-gray-800 dark:border-gray-600 font-mono"
-                          value={toProduce}
-                          onChange={(e) => updatePlanOverride(item.componentId, 'toProduce', parseInt(e.target.value) || 0)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          className="h-7 text-xs border rounded px-1 bg-white dark:bg-gray-800 dark:border-gray-600 max-w-[120px]"
-                          value={override?.printerId || item.printerId || ''}
-                          onChange={(e) => updatePlanOverride(item.componentId, 'printerId', e.target.value)}
-                        >
-                          <option value="">None</option>
-                          {printers.map((p: any) => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-          <div className="flex gap-3 justify-end pt-2 border-t dark:border-gray-700">
-            <Button variant="outline" onClick={() => setShowPlanDialog(false)}>Cancel</Button>
-            <Button onClick={createJobs} disabled={creating || plan.every((p: any) => (planOverrides[p.componentId]?.toProduce ?? p.toProduce) <= 0)}>
-              <Factory className="h-4 w-4 mr-2" />
-              {creating ? 'Creating...' : `Create ${plan.filter((p: any) => (planOverrides[p.componentId]?.toProduce ?? p.toProduce) > 0).length} Job(s)`}
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+      <PlanProductionDialog
+        open={showPlanDialog}
+        onClose={() => setShowPlanDialog(false)}
+        orderId={String(id)}
+        plan={plan}
+        printers={printers}
+        onCreated={planCreated}
+        onReload={loadPlan}
+      />
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel order"
+        destructive
+        busy={updating}
+        confirmLabel="Cancel order"
+        message={(order.stockAllocations ?? []).length
+          ? `Returns to printed stock: ${stockText(order.stockAllocations ?? [])}`
+          : 'Nothing to return to printed stock'}
+        onConfirm={cancelOrder}
+        onClose={() => setConfirmCancel(false)}
+      />
+
+      <ChangeLineColourDialog
+        open={!!colourLine}
+        onClose={() => setColourLine(null)}
+        kind="orders"
+        documentId={String(id)}
+        line={colourLine}
+        products={products}
+        onDone={msg => { setColourLine(null); toast('success', msg); reload(); }}
+      />
     </div>
   );
 }
