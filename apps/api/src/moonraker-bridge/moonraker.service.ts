@@ -2,6 +2,27 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isLocalUrl } from '../common/utils/is-local-url';
+import { JobCompletionService } from '../stock-ledger/job-completion.service';
+
+/**
+ * The job a printer's completion event belongs to (§3.6): this printer, this
+ * file, IN_PROGRESS before QUEUED, then the oldest. Shared by both bridges.
+ */
+export async function findJobForCompletion(
+  prisma: Pick<PrismaService, 'productionJob'>,
+  printerId: string,
+  filename: string,
+): Promise<{ id: string } | null> {
+  for (const status of ['IN_PROGRESS', 'QUEUED'] as const) {
+    const job = await prisma.productionJob.findFirst({
+      where: { printerId, status, gcodeFilename: filename },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }).catch(() => null);
+    if (job) return job;
+  }
+  return null;
+}
 
 interface MoonrakerPrinterStatus {
   state: string;                       // ready, printing, paused, error, shutdown, startup
@@ -41,6 +62,7 @@ export class MoonrakerService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private completion: JobCompletionService,
   ) {}
 
   /**
@@ -194,116 +216,82 @@ export class MoonrakerService {
   }
 
   /**
-   * When a Moonraker printer starts printing, find a matching QUEUED production
-   * job by gcodeFilename and auto-transition it to IN_PROGRESS.
+   * When a Moonraker printer starts printing, flip ONE matching job to
+   * IN_PROGRESS: the oldest QUEUED job on this printer with that file (§3.6).
+   * Multi-plate jobs have gcodeFilename null, so they never match.
    */
-  private async handleJobStarted(printerId: string, snapshot: MoonrakerSnapshot) {
+  async handleJobStarted(printerId: string, snapshot: MoonrakerSnapshot) {
     const filename = snapshot.printStats?.filename;
     if (!filename) return;
 
-    const updated = await this.prisma.productionJob.updateMany({
+    const job = await this.prisma.productionJob.findFirst({
       where: { printerId, status: 'QUEUED', gcodeFilename: filename },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }).catch(() => null);
+    if (!job) return;
+
+    const updated = await this.prisma.productionJob.updateMany({
+      where: { id: job.id, status: 'QUEUED' },
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
     }).catch(() => ({ count: 0 }));
 
     if (updated.count > 0) {
-      this.logger.log(`Job auto-started for printer ${printerId}: gcode "${filename}"`);
+      this.logger.log(`Job ${job.id} auto-started for printer ${printerId}: gcode "${filename}"`);
     }
   }
 
   /**
-   * When a Moonraker job completes, sync the data back:
-   * - Find matching production job by gcodeFilename
-   * - Update duration and filament used
-   * - Auto-deduct spool weight
+   * When a Moonraker print completes, complete the matching job through the
+   * shared JobCompletionService (spool deduction, parts, printer hours, stock
+   * credit: one guarded transaction). Only the machine cost and the
+   * notification stay here, after commit. The lookup prefers IN_PROGRESS over
+   * QUEUED, then the oldest; multi-plate jobs (gcodeFilename null) never match.
    */
-  private async handleJobCompleted(printerId: string, snapshot: MoonrakerSnapshot) {
+  async handleJobCompleted(printerId: string, snapshot: MoonrakerSnapshot) {
     const stats = snapshot.printStats;
     if (!stats?.filename) return;
 
-    // Find active job for this printer matching the filename
-    // WARN-22: include spool.material so we can read density
-    const job = await this.prisma.productionJob.findFirst({
-      where: {
-        printerId,
-        status: { in: ['IN_PROGRESS', 'QUEUED'] },
-        gcodeFilename: stats.filename,
-      },
-      include: {
-        materials: { include: { spool: { include: { material: true } } } },
-        printer: true,
-      },
-    });
-
+    const job = await findJobForCompletion(this.prisma, printerId, stats.filename);
     if (!job) {
       this.logger.log(`Completed print "${stats.filename}" on printer ${printerId} — no matching job found`);
       return;
     }
 
-    // BUG-02: idempotency guard — only update when job is still active
     const filamentMm = stats.filament_used || 0;
-    const result = await this.prisma.productionJob.updateMany({
-      where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        printDuration: stats.print_duration,
-        filamentUsedMm: filamentMm,
-      },
+    const result = await this.completion.complete(job.id, {
+      source: 'MOONRAKER',
+      printDurationSec: stats.print_duration,
+      filamentUsedMm: filamentMm,
+    }).catch((err) => {
+      this.logger.warn(`Completion failed for job ${job.id}: ${err.message}`);
+      return null;
     });
-
-    if (result.count === 0) {
+    if (!result) {
       this.logger.log(`Job ${job.id} already completed — skipping duplicate completion`);
       return;
     }
 
-    // BIZ-13: machine cost = print hours × printer hourly rate; also increment printer total hours
+    // BIZ-13: machine cost = print hours × printer hourly rate (after commit).
     const printHours = (stats.print_duration || 0) / 3600;
-    const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
-    await Promise.all([
-      this.prisma.productionJob.update({
-        where: { id: job.id },
-        data: { machineCost },
-      }),
-      this.prisma.printer.update({
-        where: { id: printerId },
-        data: { totalPrintHours: { increment: printHours } },
-      }),
-    ]).catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
+    const machineCost = printHours * (result.job.printer?.hourlyRate ?? 0);
+    await this.prisma.productionJob.update({ where: { id: job.id }, data: { machineCost } })
+      .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
 
-    // WARN-22: use material density from spool if available, fall back to PLA
-    const density =
-      job.materials?.[0]?.spool?.material?.density ??
-      1.24; // fallback to PLA density g/cm³
-
+    // WARN-22: use material density if available, fall back to PLA
+    const density = result.job.materials?.[0]?.material?.density ?? 1.24;
     // Calculate filament grams from mm (1.75mm filament diameter)
     const filamentGrams = filamentMm > 0
       ? (Math.PI * Math.pow(0.0875, 2) * filamentMm * density) / 1000
       : 0;
 
-    // Auto-deduct spool weight for each job material that has a spool assigned
-    for (const jm of job.materials) {
-      if (!jm.spoolId || !jm.spool) continue;
-
-      const deduction = jm.gramsUsed;
-      const newWeight = Math.max(0, jm.spool.currentWeight - deduction);
-
-      await this.prisma.spool.update({
-        where: { id: jm.spoolId },
-        data: { currentWeight: newWeight },
-      });
-
-      this.logger.log(`Deducted ${deduction}g from spool ${jm.spoolId} (now ${newWeight}g)`);
-    }
-
-    // Create completion notification
     await this.notifications.create({
       type: 'JOB_COMPLETED',
       title: 'Print Job Completed',
-      message: `"${job.name}" finished on ${job.printer?.name || 'printer'}. Duration: ${Math.round((stats.print_duration || 0) / 60)}min, Filament: ${filamentGrams.toFixed(1)}g`,
+      message: `"${result.job.name}" finished on ${result.job.printer?.name || 'printer'}. Duration: ${Math.round((stats.print_duration || 0) / 60)}min, Filament: ${filamentGrams.toFixed(1)}g`,
       entityType: 'job',
       entityId: job.id,
-    });
+    }).catch(() => {});
   }
 
   /**

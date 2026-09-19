@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import WebSocket from 'ws';
+import { JobCompletionService } from '../stock-ledger/job-completion.service';
+import { findJobForCompletion } from './moonraker.service';
 
 // Heartbeat sent every 10s to keep the connection alive and receive fresh state
 const HEARTBEAT_MSG = JSON.stringify({ method: 'get', params: { ReqPrinterPara: 1 } });
@@ -42,6 +44,7 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private completion: JobCompletionService,
   ) {}
 
   async onModuleInit() {
@@ -274,85 +277,59 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleJobStarted(printerId: string, snapshot: CrealitySnapshot) {
+  /** Flip ONE job: the oldest QUEUED job on this printer with that file (§3.6). */
+  async handleJobStarted(printerId: string, snapshot: CrealitySnapshot) {
     if (!snapshot.fileName) return;
 
-    const updated = await this.prisma.productionJob.updateMany({
+    const job = await this.prisma.productionJob.findFirst({
       where: { printerId, status: 'QUEUED', gcodeFilename: snapshot.fileName },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }).catch(() => null);
+    if (!job) return;
+
+    const updated = await this.prisma.productionJob.updateMany({
+      where: { id: job.id, status: 'QUEUED' },
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
     }).catch(() => ({ count: 0 }));
 
     if (updated.count > 0) {
-      this.logger.log(`Job auto-started for printer ${printerId}: gcode "${snapshot.fileName}"`);
+      this.logger.log(`Job ${job.id} auto-started for printer ${printerId}: gcode "${snapshot.fileName}"`);
     }
   }
 
-  private async handleJobCompleted(printerId: string, snapshot: CrealitySnapshot) {
+  /**
+   * Complete the matching job through the shared JobCompletionService (one
+   * guarded transaction); only the machine cost and the notification stay here.
+   */
+  async handleJobCompleted(printerId: string, snapshot: CrealitySnapshot) {
     if (!snapshot.fileName) return;
 
-    const job = await this.prisma.productionJob.findFirst({
-      where: {
-        printerId,
-        status: { in: ['IN_PROGRESS', 'QUEUED'] },
-        gcodeFilename: snapshot.fileName,
-      },
-      // BIZ-13: include hourlyRate + totalPrintHours from printer for cost calculation
-      include: { materials: { include: { spool: true } }, printer: { select: { hourlyRate: true, totalPrintHours: true, name: true } } },
-    }).catch(() => null);
-
+    const job = await findJobForCompletion(this.prisma, printerId, snapshot.fileName);
     if (!job) return;
 
-    // Wrap idempotency guard + all writes in a single transaction so a crash
-    // between status update and spool deductions doesn't leave stock inconsistent.
-    const printHours = (snapshot.printJobTime || 0) / 3600;
-    const committed = await this.prisma.$transaction(async (tx) => {
-      // BUG-02: idempotency guard inside tx — only update when job is still active
-      const result = await tx.productionJob.updateMany({
-        where: { id: job.id, status: { in: ['IN_PROGRESS', 'QUEUED'] } },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          printDuration: snapshot.printJobTime,
-        },
-      });
-      if (result.count === 0) return false; // already completed — skip
-
-      // BIZ-13: machine cost = print hours × hourly rate; increment printer total hours
-      const machineCost = printHours * (job.printer?.hourlyRate ?? 0);
-      await Promise.all([
-        tx.productionJob.update({ where: { id: job.id }, data: { machineCost } }),
-        tx.printer.update({ where: { id: printerId }, data: { totalPrintHours: { increment: printHours } } }),
-      ]);
-
-      // ARCH-01 + BUG-04: batch spool reads, deduct atomically within tx
-      const spoolIds = job.materials.filter(m => m.spoolId && m.gramsUsed > 0).map(m => m.spoolId!);
-      const spoolRows = spoolIds.length > 0
-        ? await tx.spool.findMany({ where: { id: { in: spoolIds } }, select: { id: true, currentWeight: true } })
-        : [];
-      const spoolWeights = new Map(spoolRows.map(s => [s.id, s.currentWeight]));
-
-      for (const jm of job.materials) {
-        if (jm.spoolId && jm.gramsUsed > 0) {
-          const newWeight = Math.max(0, (spoolWeights.get(jm.spoolId) ?? 0) - jm.gramsUsed);
-          await tx.spool.update({ where: { id: jm.spoolId }, data: { currentWeight: newWeight } });
-        }
-      }
-
-      return true;
+    const result = await this.completion.complete(job.id, {
+      source: 'CREALITY',
+      printDurationSec: snapshot.printJobTime,
     }).catch((err) => {
-      this.logger.warn(`handleJobCompleted tx failed for job ${job.id}: ${err.message}`);
-      return false;
+      this.logger.warn(`Completion failed for job ${job.id}: ${err.message}`);
+      return null;
     });
-
-    if (!committed) {
-      this.logger.log(`Job ${job.id} already completed or tx failed — skipping notification`);
+    if (!result) {
+      this.logger.log(`Job ${job.id} already completed or completion failed — skipping notification`);
       return;
     }
+
+    // BIZ-13: machine cost = print hours × hourly rate (after commit).
+    const printHours = (snapshot.printJobTime || 0) / 3600;
+    const machineCost = printHours * (result.job.printer?.hourlyRate ?? 0);
+    await this.prisma.productionJob.update({ where: { id: job.id }, data: { machineCost } })
+      .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
 
     await this.notifications.create({
       type: 'JOB_COMPLETED',
       title: 'Print Job Completed',
-      message: `"${job.name}" finished on ${snapshot.printerName}. Duration: ${Math.round(snapshot.printJobTime / 60)}min`,
+      message: `"${result.job.name}" finished on ${snapshot.printerName}. Duration: ${Math.round(snapshot.printJobTime / 60)}min`,
       entityType: 'job',
       entityId: job.id,
     }).catch(() => {});
