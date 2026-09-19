@@ -14,8 +14,6 @@ import {
   CreateProductVariantDto,
   UpdateProductVariantDto,
 } from '@printforge/types';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as ExcelJS from 'exceljs';
 
 /** Strip HTML/script tags from user-supplied strings */
@@ -363,49 +361,6 @@ export class ProductsService {
     return { slicer, results, product: await this.findOne(productId) };
   }
 
-  async uploadImages(productId: string, files: any[]) {
-    await this.findOne(productId);
-    const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
-    const now = new Date();
-    const dateDir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
-    const fullDir = path.join(uploadDir, dateDir);
-
-    if (!fs.existsSync(fullDir)) {
-      fs.mkdirSync(fullDir, { recursive: true });
-    }
-
-    const attachments = [];
-    for (const file of files) {
-      const fileName = `${Date.now()}-${file.originalname}`;
-      const filePath = path.join(fullDir, fileName);
-      fs.writeFileSync(filePath, file.buffer);
-
-      const storagePath = path.join(dateDir, fileName);
-      const attachment = await this.prisma.attachment.create({
-        data: {
-          entityType: 'product',
-          entityId: productId,
-          filename: fileName,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          storagePath,
-        },
-      });
-      attachments.push(attachment);
-    }
-
-    const product = await this.prisma.product.findUnique({ where: { id: productId } });
-    if (product && !product.imageUrl && attachments.length > 0) {
-      await this.prisma.product.update({
-        where: { id: productId },
-        data: { imageUrl: attachments[0].storagePath },
-      });
-    }
-
-    return attachments;
-  }
-
   async uploadBom(fileBuffer: Buffer): Promise<{ created: number; updated: number; errors: string[] }> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(fileBuffer as any);
@@ -540,51 +495,6 @@ export class ProductsService {
     const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
     if (!variant) throw new NotFoundException('Variant not found');
     await this.prisma.productVariant.delete({ where: { id: variantId } });
-    return { deleted: true };
-  }
-
-  async removeImage(productId: string, attachmentId: string) {
-    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
-    if (!attachment || attachment.entityId !== productId) throw new NotFoundException('Image not found');
-
-    // This route deletes IMAGES. Product attachments also include onboarded
-    // slicer files, and deleting one destroys the row and the bytes with no
-    // backup — which is exactly how a set of G-codes was lost when they
-    // rendered in the image grid as deletable tiles. Refuse anything that
-    // isn't an image, and anything a component still references.
-    if (!(attachment.mimeType || '').startsWith('image/')) {
-      throw new BadRequestException(
-        `"${attachment.originalName}" is not an image — it is the stored slicer file. Remove it from its component instead.`,
-      );
-    }
-    const referencedBy = await this.prisma.productComponent.findFirst({
-      where: { attachmentId }, select: { description: true },
-    });
-    if (referencedBy) {
-      throw new BadRequestException(
-        `This file is the print source for component "${referencedBy.description}" and cannot be deleted here.`,
-      );
-    }
-
-    const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
-    const fullPath = path.join(uploadDir, attachment.storagePath);
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-    }
-
-    await this.prisma.attachment.delete({ where: { id: attachmentId } });
-
-    const product = await this.prisma.product.findUnique({ where: { id: productId } });
-    if (product?.imageUrl === attachment.storagePath) {
-      const nextImage = await this.prisma.attachment.findFirst({
-        where: { entityType: 'product', entityId: productId },
-      });
-      await this.prisma.product.update({
-        where: { id: productId },
-        data: { imageUrl: nextImage?.storagePath || null },
-      });
-    }
-
     return { deleted: true };
   }
 }

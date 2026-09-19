@@ -238,22 +238,6 @@ export class ProductsController {
     return this.productsService.onboardFromThreeMf(id, file.buffer, { selectedPlates, plateNames });
   }
 
-  @Post(':id/images')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: 10 * 1024 * 1024 } }))
-  async uploadImages(@Param('id') id: string, @UploadedFiles() files: any[]) {
-    if (!files?.length) throw new BadRequestException('No files uploaded');
-    return this.productsService.uploadImages(id, files);
-  }
-
-  @Delete(':id/images/:attachmentId')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  removeImage(@Param('id') id: string, @Param('attachmentId') attachmentId: string) {
-    return this.productsService.removeImage(id, attachmentId);
-  }
-
   @Post(':id/variants')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')

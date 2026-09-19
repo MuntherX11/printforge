@@ -5,6 +5,8 @@ import * as fs from 'fs/promises';
 import { AttachmentsService } from './attachments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('attachments')
@@ -13,7 +15,8 @@ export class AttachmentsController {
   constructor(private attachmentsService: AttachmentsService) {}
 
   @Post('upload')
-  @UseGuards(StaffGuard)
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
   upload(
     @UploadedFile() file: Express.Multer.File,
@@ -54,7 +57,8 @@ export class AttachmentsController {
   }
 
   @Delete(':id')
-  @UseGuards(StaffGuard)
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   remove(@Param('id') id: string) {
     return this.attachmentsService.remove(id);
   }

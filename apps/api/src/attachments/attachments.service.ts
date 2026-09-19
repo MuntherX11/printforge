@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -22,9 +22,17 @@ const BLOCKED_EXTENSIONS = ['.html', '.htm', '.js', '.jsx', '.ts', '.tsx', '.php
 
 @Injectable()
 export class AttachmentsService {
+  private readonly logger = new Logger(AttachmentsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async upload(file: Express.Multer.File, entityType: string, entityId: string, uploadedById?: string) {
+    // Product files (photos, slicer files, plate renders) have their own routes
+    // with sniffing and ownership rules; this generic route must not bypass them.
+    if (isProductEntity(entityType)) {
+      throw new BadRequestException('Upload product files from the product page');
+    }
+    if (!file) throw new BadRequestException('No file uploaded');
     // MIME type allowlist check
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       throw new BadRequestException('File type not allowed');
@@ -133,12 +141,39 @@ export class AttachmentsService {
 
   async remove(id: string) {
     const attachment = await this.findOne(id);
-    const fullPath = path.join(UPLOAD_DIR, attachment.storagePath);
+    if (isProductEntity(attachment.entityType)) {
+      throw new BadRequestException('Manage product files from the product page');
+    }
+    const [component, layout, jobPlate] = await Promise.all([
+      this.prisma.productComponent.findFirst({
+        where: { OR: [{ attachmentId: id }, { thumbnailAttachmentId: id }] },
+        select: { id: true },
+      }),
+      this.prisma.plateLayout.findFirst({ where: { attachmentId: id }, select: { id: true } }),
+      this.prisma.jobPlate.findFirst({ where: { attachmentId: id }, select: { id: true } }),
+    ]);
+    if (component || layout || jobPlate) {
+      throw new ConflictException('This file is used by a product or job');
+    }
 
-    try {
-      await fs.unlink(fullPath);
-    } catch {}
+    const deleted = await this.prisma.attachment.delete({ where: { id } });
 
-    return this.prisma.attachment.delete({ where: { id } });
+    // Unlink after the row is gone, and only inside UPLOAD_DIR.
+    const root = path.resolve(UPLOAD_DIR);
+    const fullPath = path.resolve(root, attachment.storagePath || '');
+    if (fullPath.startsWith(root + path.sep)) {
+      try {
+        await fs.unlink(fullPath);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          this.logger.warn(`Could not delete the file of attachment ${id}: ${(e as Error)?.message}`);
+        }
+      }
+    }
+    return deleted;
   }
+}
+
+function isProductEntity(entityType: unknown): boolean {
+  return typeof entityType === 'string' && entityType.trim().toLowerCase() === 'product';
 }
