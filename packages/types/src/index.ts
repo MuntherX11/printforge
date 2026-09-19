@@ -1359,3 +1359,73 @@ export interface PlanRow extends OptionPair {
   printerName: string | null;
   warnings: Problem[];
 }
+
+// ============ PRODUCTION: J1 / J2 / J6 / J7 (spec §4.4) ============
+
+/** One entry of a job's plate plan (J1/J2 `plates`, §3.5). layoutId null = the implicit single unit. */
+export interface JobPlateInput {
+  componentId: string;
+  layoutId: string | null;
+  plateCount: number;
+}
+
+/** A layout the planner may use for one component (J2 `layoutsByComponent`; same fields as PlanRow.layouts). */
+export interface ResolvedLayout {
+  layoutId: string | null;
+  label: string;
+  unitsPerPlate: number;
+  plateMinutes: number;
+  plateGrams: number;
+  minutesPerUnit: number;
+  gramsPerUnit: number;
+  hasFile: boolean;
+}
+
+/** POST /jobs/preview (J2): the P20 shape with creditOnComplete filled, plus each component's layouts. */
+export interface JobPreview extends Readiness {
+  layoutsByComponent: Record<string, ResolvedLayout[]>;
+}
+
+/** POST /jobs (J1) body fields this release adds (the rest are as before). */
+export interface CreateJobPairInput {
+  productId: string;
+  sizeOptionId: string | null;
+  colourOptionId: string | null;
+  quantityToProduce: number;
+  purpose: JobPurpose;
+  surplusPolicy?: SurplusPolicy;
+  stockMode?: JobStockMode;
+  printerId?: string;
+  plates?: JobPlateInput[];
+}
+
+/** J1 response addition: how the job's filament lines got spools. */
+export interface JobReservation {
+  lines: number;
+  withSpool: number;
+  short: Array<{ label: string; gramsShort: number }>;
+}
+
+/** J6 response additions. */
+export interface JobStockCredit {
+  componentId: string;
+  colourKey: string | null;
+  delta: number;
+  balanceAfter: number;
+}
+
+export interface JobCompletionExtras {
+  stockCredits: JobStockCredit[];
+  warnings: Problem[];
+}
+
+/** J7 body: plates to reprint (default all at their original counts). */
+export interface ReprintJobInput {
+  plates?: Array<{ jobPlateId: string; plateCount: number }>;
+}
+
+/** M3 response. */
+export interface PlateLayoutCreateResult {
+  layout: ComponentPlateLayout;
+  warnings: Problem[];
+}

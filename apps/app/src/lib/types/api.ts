@@ -5,11 +5,13 @@
  */
 
 import type {
+  ComponentDetail as SharedComponentDetail,
   MaterialLite as SharedMaterialLite,
   OptionCost as SharedOptionCost,
   Problem as SharedProblem,
   ProductCostPayload as CostPayloadForCalculate,
   ProductDetail as SharedProductDetail,
+  ThreeMfAnalysis as SharedThreeMfAnalysis,
   VariantKind as SharedVariantKind,
 } from '@printforge/types';
 
@@ -83,6 +85,18 @@ export type {
   ReadinessPlate,
   Readiness,
   PlanRow,
+  JobPlateInput,
+  ResolvedLayout,
+  JobPreview,
+  CreateJobPairInput,
+  JobReservation,
+  JobStockCredit,
+  JobCompletionExtras,
+  ReprintJobInput,
+  PlateLayoutCreateResult,
+  SlicerImportResult,
+  ThreeMfAnalysis,
+  ThreeMfPlateInfo,
 } from '@printforge/types';
 
 // ============ SHARED PRIMITIVES ============
@@ -709,4 +723,66 @@ export interface ApiColourLinksResult {
 export interface ApiPairCost {
   costVersion: string;
   pair: SharedOptionCost;
+}
+
+// ============ BILL OF MATERIALS (WP9, frontend-only shapes) ============
+
+/** P10 / P11 written: the component plus warnings (STOCK_REKEYED, OPEN_LINES_AFFECTED) and the impact. */
+export type ApiComponentWriteResult = SharedComponentDetail & {
+  warnings: SharedProblem[];
+  impact: ApiOpenLineImpact[];
+};
+
+/** PUT /products/:id/components/:componentId/stock (P13). */
+export interface ApiStockSetResult {
+  stockOnHand: number;
+  movementId: string | null;
+}
+
+/** POST /file-parser/parse-gcode (M6): the fields the plate-layout dialog reads. */
+export interface ApiGcodeAnalysis {
+  slicer: string | null;
+  estimatedTimeSeconds: number | null;
+  filamentUsedGrams: number | null;
+  totalFilamentChanges: number | null;
+  tools: Array<{ index: number; filamentGrams?: number; colorHex?: string; materialType?: string }>;
+  /** null = the file has no object labels (count unknown, not zero). */
+  objectCount: number | null;
+  objectModels: Array<{ model: string; count: number }>;
+  ignoredLabels: string[];
+}
+
+/** POST /file-parser/analyze for a .3mf. */
+export interface ApiThreeMfAnalyzeResult {
+  filename: string;
+  fileSize: number;
+  analysis: SharedThreeMfAnalysis & { type: '3mf' };
+}
+
+/**
+ * GET /products/active row (P2), the fields the size and colour pickers read
+ * (spec §4.1 P2). WP10's order/quote forms adapt it with
+ * `pickerOptionsFromActive` (components/products/option-picker-model.ts).
+ */
+export interface ApiActiveProduct {
+  id: string;
+  name: string;
+  sku: string | null;
+  basePrice: number;
+  baseOptionLabel: string | null;
+  standardColourLabel: string | null;
+  standardColourLabelBySize: Record<string, string> | null;
+  baseSellable: boolean;
+  baseSellableToCustomers: boolean;
+  sizes: Array<{ id: string; name: string; sku: string | null; basePrice: number | null; sortOrder: number; sellableToCustomers: boolean }>;
+  colours: Array<{
+    id: string;
+    name: string;
+    sku: string | null;
+    sortOrder: number;
+    filamentNames: string[];
+    sizeKeys: string[];
+    customerSizeKeys: string[];
+    notSetUp: boolean;
+  }>;
 }
