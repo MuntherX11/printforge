@@ -1,134 +1,143 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { stageLargeFile, CHUNK_THRESHOLD } from '@/lib/chunked-upload';
-import { ThreeMfAnalysis } from '@printforge/types';
-import PlatePreviewCard from './PlatePreviewCard';
+import { api } from '@/lib/api';
+import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
+import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
+import type { ComponentDetail } from '@/lib/types/api';
+import { PlatePreviewCard, NEW_COMPONENT, isSliced, unitsOf, type PlateChoice } from './PlatePreviewCard';
+import { errorText } from './options-ui';
+import { importToasts, type ImportResult, type ThreeMfWizardState } from './useSlicerImport';
 
-interface ThreeMfImportWizardProps {
-  open: boolean;
-  onClose: () => void;
-  analysis: ThreeMfAnalysis | null;
-  file: File | null;
-  /** Set when the file was staged in parts (too big for one request through
-   *  Cloudflare) — the import references it instead of re-uploading. */
-  stagedUploadId?: string | null;
+interface Props {
   productId: string;
-  onSuccess: () => void;
+  state: ThreeMfWizardState | null;
+  /** Import target: null = the standard size. */
+  sizeOptionId: string | null;
+  targetLabel: string;
+  /** Components of the target scope (for `Plate layout of …`). */
+  targetComponents: ComponentDetail[];
+  onClose: () => void;
+  onImported: () => void;
 }
 
-export function ThreeMfImportWizard({
-  open,
-  onClose,
-  analysis,
-  file,
-  stagedUploadId,
-  productId,
-  onSuccess,
-}: ThreeMfImportWizardProps) {
-  const [selectedPlates, setSelectedPlates] = useState<number[]>([]);
-  const [plateNames, setPlateNames] = useState<Record<string, string>>({});
-  const [importing, setImporting] = useState(false);
+function initialChoices(state: ThreeMfWizardState): Record<number, PlateChoice> {
+  return Object.fromEntries(state.analysis.plates.map(p => [p.plateIndex, {
+    selected: true,
+    name: p.name,
+    units: isSliced(p) && p.objectCount != null ? String(p.objectCount) : '',
+    addAs: NEW_COMPONENT,
+  }]));
+}
+
+/**
+ * 3MF import onto the BOM scope (spec §5.1, §3.12, M2): per plate, units on
+ * the plate and whether it becomes a new component or a plate layout of an
+ * existing one. Errors show the server's text.
+ */
+export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabel, targetComponents, onClose, onImported }: Props) {
   const { toast } = useToast();
+  const [choices, setChoices] = useState<Record<number, PlateChoice>>({});
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Select all plates by default when a new analysis arrives; clear state on close
   useEffect(() => {
-    if (open && analysis) {
-      setSelectedPlates(analysis.plates.map((p) => p.plateIndex));
-      const initialNames: Record<string, string> = {};
-      analysis.plates.forEach((p) => {
-        initialNames[String(p.plateIndex)] = p.name;
-      });
-      setPlateNames(initialNames);
-    } else if (!open) {
-      setSelectedPlates([]);
-      setPlateNames({});
+    if (!state) return;
+    setChoices(initialChoices(state));
+    setError(null);
+  }, [state]);
+
+  const plates = useMemo(() => state?.analysis.plates ?? [], [state]);
+  const selected = plates.filter(p => choices[p.plateIndex]?.selected);
+  const summary = useMemo(() => {
+    let grams = 0; let seconds = 0; let components = 0; let layouts = 0;
+    for (const p of selected) {
+      const c = choices[p.plateIndex];
+      grams += p.weightGrams; seconds += p.printSeconds;
+      const u = unitsOf(c);
+      if (!isSliced(p) || c.addAs === NEW_COMPONENT) components += 1;
+      if (isSliced(p) && (c.addAs !== NEW_COMPONENT || (u !== null && u > 1))) layouts += 1;
     }
-  }, [open, analysis]);
+    const existing = targetComponents.reduce((n, c) => n + c.plateLayouts.filter(l => l.isActive).length, 0);
+    return { grams, seconds, components, layouts, existing };
+  }, [selected, choices, targetComponents]);
 
-  function handleToggle(plateIndex: number) {
-    setSelectedPlates((prev) =>
-      prev.includes(plateIndex) ? prev.filter((i) => i !== plateIndex) : [...prev, plateIndex],
-    );
-  }
+  const invalid = selected.some(p => {
+    if (!isSliced(p)) return false;
+    const c = choices[p.plateIndex];
+    const u = unitsOf(c);
+    return Number.isNaN(u) || (c.addAs !== NEW_COMPONENT && u === null);
+  });
 
-  function handleNameChange(plateIndex: number, name: string) {
-    setPlateNames((prev) => ({ ...prev, [String(plateIndex)]: name }));
-  }
+  if (!state) return null;
 
   async function handleImport() {
-    if (!file || selectedPlates.length === 0) return;
+    if (!state || selected.length === 0 || invalid) return;
     setImporting(true);
+    setError(null);
     try {
-      const formData = new FormData();
-      // A big file was already staged once for the analysis step — reference
-      // it rather than uploading it a second time.
-      if (stagedUploadId) {
-        formData.append('assembledUploadId', stagedUploadId);
-      } else if (file.size >= CHUNK_THRESHOLD) {
-        formData.append('assembledUploadId', await stageLargeFile(file));
-      } else {
-        formData.append('file', file);
+      const fd = new FormData();
+      // A big file was staged once for the analysis; reference it instead of re-uploading.
+      if (state.stagedUploadId) fd.append('assembledUploadId', state.stagedUploadId);
+      else if (state.file.size >= CHUNK_THRESHOLD) fd.append('assembledUploadId', await stageLargeFile(state.file));
+      else fd.append('file', state.file);
+      const units: Record<string, number> = {};
+      const targets: Record<string, string> = {};
+      const names: Record<string, string> = {};
+      for (const p of selected) {
+        const c = choices[p.plateIndex];
+        names[String(p.plateIndex)] = c.name.trim() || p.name;
+        if (!isSliced(p)) continue;
+        const u = unitsOf(c);
+        if (u !== null && !Number.isNaN(u) && (u > 1 || c.addAs !== NEW_COMPONENT)) units[String(p.plateIndex)] = u;
+        if (c.addAs !== NEW_COMPONENT) targets[String(p.plateIndex)] = c.addAs;
       }
-      formData.append('selectedPlates', JSON.stringify(selectedPlates));
-      formData.append('plateNames', JSON.stringify(plateNames));
-
-      const res = await fetch(`/api/products/${productId}/onboard-3mf`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `Import failed (${res.status})`);
-      }
-
-      toast('success', `Imported ${selectedPlates.length} plate${selectedPlates.length !== 1 ? 's' : ''} successfully`);
-      onSuccess();
-    } catch (err: unknown) {
-      toast('error', (err as Error).message || 'Failed to import 3MF');
+      fd.append('selectedPlates', JSON.stringify(selected.map(p => p.plateIndex)));
+      fd.append('plateNames', JSON.stringify(names));
+      if (Object.keys(units).length) fd.append('units', JSON.stringify(units));
+      if (Object.keys(targets).length) fd.append('targets', JSON.stringify(targets));
+      if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
+      const r = await api.postForm<ImportResult>(`/products/${productId}/onboard-3mf`, fd);
+      importToasts(r, toast);
+      onImported();
+      onClose();
+    } catch (err) {
+      setError(errorText(err, 'The 3MF import failed'));
     } finally {
       setImporting(false);
     }
   }
 
-  if (!analysis) return null;
-
+  const { analysis } = state;
   return (
-    <Dialog open={open} onClose={onClose} title="Import 3MF Project">
-      <div className="py-2">
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-          Found <strong>{analysis.totalPlates}</strong> plate{analysis.totalPlates !== 1 ? 's' : ''} &middot; Slicer: <strong>{analysis.slicer || 'Unknown'}</strong>
+    <Dialog open onClose={importing ? () => undefined : onClose} title={`Import 3MF onto ${targetLabel}`} className="max-w-4xl">
+      <div className="space-y-3">
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          {plural(analysis.totalPlates, 'plate')} in {state.file.name} · slicer {analysis.slicer || 'unknown'}
         </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto pr-1">
-          {analysis.plates.map((plate) => (
+        <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+          Selected: {plural(selected.length, 'plate')} · total {formatGrams(summary.grams)} · {formatMinutes(summary.seconds / 60)} ·
+          adds {plural(summary.components, 'component')} and {plural(summary.layouts, 'plate layout')} (existing {summary.existing})
+        </p>
+        <div className="grid max-h-[55vh] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
+          {plates.map(p => choices[p.plateIndex] && (
             <PlatePreviewCard
-              key={plate.plateIndex}
-              plate={plate}
-              selected={selectedPlates.includes(plate.plateIndex)}
-              name={plateNames[String(plate.plateIndex)] || plate.name}
-              onToggle={handleToggle}
-              onNameChange={handleNameChange}
+              key={p.plateIndex}
+              plate={p}
+              choice={choices[p.plateIndex]}
+              components={targetComponents}
+              onChange={next => setChoices(prev => ({ ...prev, [p.plateIndex]: { ...prev[p.plateIndex], ...next } }))}
             />
           ))}
         </div>
-      </div>
-
-      <div className="flex items-center justify-between border-t pt-4 mt-2">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {selectedPlates.length} of {analysis.totalPlates} selected
-        </p>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={onClose} disabled={importing}>
-            Cancel
-          </Button>
-          <Button onClick={handleImport} disabled={importing || selectedPlates.length === 0}>
-            {importing ? 'Importing...' : `Import ${selectedPlates.length} plate${selectedPlates.length !== 1 ? 's' : ''}`}
+        {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="flex items-center justify-end gap-2 border-t pt-3 dark:border-gray-700">
+          <Button variant="outline" onClick={onClose} disabled={importing}>Cancel</Button>
+          <Button onClick={() => void handleImport()} disabled={importing || selected.length === 0 || invalid}>
+            {importing ? 'Importing…' : `Import ${plural(selected.length, 'plate')}`}
           </Button>
         </div>
       </div>
