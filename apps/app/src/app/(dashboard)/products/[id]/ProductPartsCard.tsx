@@ -1,215 +1,283 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { AlertTriangle, Minus, Nut, Plus, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { api } from '@/lib/api';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast';
+import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Trash2, Nut, AlertTriangle } from 'lucide-react';
+import type { ApiPart, ApiProductPartLine } from '@/lib/types/api';
+import { ConfirmDialog } from './ConfirmDialog';
 
-interface Part {
-  id: string;
-  name: string;
-  sku?: string | null;
-  unitCost: number;
-  stockQty: number;
-  reorderPoint: number;
+interface Props {
+  productId: string;
+  canEdit: boolean;
+  /** A parts change reprices the product: the page reloads product and cost. */
+  onChanged: () => void;
 }
 
-interface ProductPartLine {
-  id: string;
-  partId: string;
-  quantity: number;
-  part: Part;
+const MAX_QTY = 1000;
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
-/**
- * Non-printed parts on a product's BOM (NFC tags, heat inserts, keyrings…).
- * These are per-unit costs added on top of filament + machine time.
- */
-export function ProductPartsCard({ productId }: { productId: string }) {
+/** Section I (spec §5.2): bought-in parts per product unit, included in the price. */
+export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
 
-  const [lines, setLines] = useState<ProductPartLine[]>([]);
-  const [catalog, setCatalog] = useState<Part[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [lines, setLines] = useState<ApiProductPartLine[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<ApiPart[] | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [partId, setPartId] = useState('');
   const [quantity, setQuantity] = useState('1');
+  const [addError, setAddError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyPartId, setBusyPartId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<ApiProductPartLine | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
-  function load() {
-    api.get<ProductPartLine[]>(`/products/${productId}/parts`)
+  const load = useCallback(() => {
+    setLoadError(null);
+    api.get<ApiProductPartLine[]>(`/products/${productId}/parts`)
       .then(r => setLines(Array.isArray(r) ? r : []))
-      .catch(() => setLines([]))
-      .finally(() => setLoading(false));
-  }
+      .catch(err => setLoadError(errorText(err, 'Couldn\'t load parts')));
+  }, [productId]);
 
-  useEffect(() => {
-    load();
-    api.get<Part[]>('/parts')
-      .then(r => setCatalog(Array.isArray(r) ? r : []))
-      .catch(() => setCatalog([]));
-  }, [productId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  function openAdd() {
+    setPartId('');
+    setQuantity('1');
+    setAddError(null);
+    setShowAdd(true);
+    if (!catalog) {
+      api.get<ApiPart[]>('/parts')
+        .then(r => setCatalog(Array.isArray(r) ? r : []))
+        .catch(err => { setCatalog([]); setAddError(errorText(err, 'Couldn\'t load the parts catalog')); });
+    }
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!partId) return toast('error', 'Pick a part');
-    const qty = parseInt(quantity, 10);
-    if (!qty || qty < 1) return toast('error', 'Quantity must be at least 1');
+    const qty = Number(quantity);
+    if (!partId) { setAddError('Pick a part'); return; }
+    if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) {
+      setAddError('Quantity must be a whole number from 1 to 1000');
+      return;
+    }
     setSaving(true);
+    setAddError(null);
     try {
       await api.post(`/products/${productId}/parts`, { partId, quantity: qty });
-      toast('success', 'Part added to BOM');
       setShowAdd(false);
-      setPartId('');
-      setQuantity('1');
       load();
-    } catch (err: any) {
-      toast('error', err?.message || 'Failed to add part');
+      onChanged();
+    } catch (err) {
+      setAddError(errorText(err, 'Couldn\'t add the part'));
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleRemove(line: ProductPartLine) {
-    setBusyId(line.id);
+  async function setQty(line: ApiProductPartLine, qty: number) {
+    if (qty < 1 || qty > MAX_QTY) return;
+    setBusyPartId(line.partId);
     try {
-      await api.delete(`/products/${productId}/parts/${line.partId}`);
-      setLines(prev => prev.filter(l => l.id !== line.id));
-    } catch (err: any) {
-      toast('error', err?.message || 'Failed to remove part');
+      await api.post(`/products/${productId}/parts`, { partId: line.partId, quantity: qty });
+      load();
+      onChanged();
+    } catch (err) {
+      toast('error', errorText(err, 'Couldn\'t change the quantity'));
     } finally {
-      setBusyId(null);
+      setBusyPartId(null);
     }
   }
 
-  const partsCost = lines.reduce((sum, l) => sum + l.part.unitCost * l.quantity, 0);
-  // Parts already on the BOM shouldn't appear again in the picker
-  const available = catalog.filter(p => !lines.some(l => l.partId === p.id));
+  async function confirmRemove() {
+    if (!removing) return;
+    setBusyPartId(removing.partId);
+    setRemoveError(null);
+    try {
+      await api.delete(`/products/${productId}/parts/${removing.partId}`);
+      setRemoving(null);
+      load();
+      onChanged();
+    } catch (err) {
+      setRemoveError(errorText(err, 'Couldn\'t remove the part'));
+    } finally {
+      setBusyPartId(null);
+    }
+  }
+
+  const partsCost = (lines ?? []).reduce((sum, l) => sum + l.part.unitCost * l.quantity, 0);
+  // Inactive parts can't be added (P21), and parts already on the list aren't offered again.
+  const available = (catalog ?? []).filter(p => p.isActive && !(lines ?? []).some(l => l.partId === p.id));
+
+  let body: React.ReactNode;
+  if (loadError) {
+    body = (
+      <p className="py-8 text-center text-sm text-red-600 dark:text-red-400">
+        Couldn&apos;t load parts — {loadError}.{' '}
+        <button type="button" className="underline" onClick={load}>Retry</button>
+      </p>
+    );
+  } else if (!lines) {
+    body = <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Loading…</div>;
+  } else if (lines.length === 0) {
+    body = (
+      <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+        <p className="text-sm">No parts on this product.</p>
+        <p className="mt-1 text-xs">
+          Bought-in hardware (NFC tags, inserts, keyrings) comes from the{' '}
+          <Link href="/parts" className="text-brand-600 hover:underline dark:text-brand-400">Parts</Link> catalog.
+        </p>
+      </div>
+    );
+  } else {
+    body = (
+      <>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Part</TableHead>
+              <TableHead>Per product unit</TableHead>
+              <TableHead className="text-right">Unit cost</TableHead>
+              <TableHead className="text-right">Line cost</TableHead>
+              <TableHead>Stock</TableHead>
+              {canEdit && <TableHead className="text-right">Actions</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lines.map(line => {
+              const isLow = line.part.reorderPoint > 0 && line.part.stockQty <= line.part.reorderPoint;
+              const busy = busyPartId === line.partId;
+              return (
+                <TableRow key={line.id}>
+                  <TableCell>
+                    <div className="font-medium dark:text-gray-100">{line.part.name}</div>
+                    {line.part.sku && <div className="font-mono text-xs text-gray-400">{line.part.sku}</div>}
+                    {!line.part.isActive && <div className="text-xs text-amber-600 dark:text-amber-400">Inactive in the catalog</div>}
+                  </TableCell>
+                  <TableCell>
+                    {canEdit ? (
+                      <div className="inline-flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="px-2" aria-label={`One fewer ${line.part.name}`}
+                          disabled={busy || line.quantity <= 1} onClick={() => void setQty(line, line.quantity - 1)}>
+                          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                        <span className="w-14 text-center tabular-nums">{line.quantity} pcs</span>
+                        <Button variant="outline" size="sm" className="px-2" aria-label={`One more ${line.part.name}`}
+                          disabled={busy || line.quantity >= MAX_QTY} onClick={() => void setQty(line, line.quantity + 1)}>
+                          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="tabular-nums">{line.quantity} pcs</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(line.part.unitCost)} / pc</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{formatCurrency(line.part.unitCost * line.quantity)}</TableCell>
+                  <TableCell>
+                    <span className={`tabular-nums ${isLow ? 'font-medium text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {line.part.stockQty} pcs in stock
+                    </span>
+                    {isLow && <AlertTriangle className="ml-1 inline h-3.5 w-3.5 text-red-500" aria-label="Low stock" />}
+                  </TableCell>
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      <Button variant="outline" size="sm" disabled={busy} aria-label={`Remove ${line.part.name}`}
+                        onClick={() => { setRemoveError(null); setRemoving(line); }}>
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+        <div className="flex items-center justify-between border-t px-4 py-3 text-sm dark:border-gray-700">
+          <span className="text-gray-500 dark:text-gray-400">Parts cost per product unit</span>
+          <span className="font-semibold tabular-nums dark:text-gray-100">{formatCurrency(partsCost)}</span>
+        </div>
+      </>
+    );
+  }
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2">
-          <Nut className="h-4 w-4" /> Parts &amp; Hardware
+        <CardTitle className="flex items-center gap-2 dark:text-gray-100">
+          <Nut className="h-4 w-4" aria-hidden="true" /> Parts &amp; hardware
         </CardTitle>
-        <Button size="sm" onClick={() => setShowAdd(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Add Part
-        </Button>
+        {canEdit && (
+          <Button size="sm" onClick={openAdd}>
+            <Plus className="mr-2 h-4 w-4" aria-hidden="true" /> Add part
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="p-0">
-        {loading ? (
-          <div className="py-8 text-center text-sm text-gray-500">Loading…</div>
-        ) : lines.length === 0 ? (
-          <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-            <p className="text-sm">No parts on this product.</p>
-            <p className="text-xs mt-1">
-              Add bought-in hardware (NFC tags, inserts, keyrings) from the{' '}
-              <Link href="/parts" className="text-brand-600 dark:text-brand-400 hover:underline">Parts</Link> catalog.
-            </p>
-          </div>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Part</TableHead>
-                  <TableHead>Qty / unit</TableHead>
-                  <TableHead>Unit Cost</TableHead>
-                  <TableHead>Line Cost</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lines.map(line => {
-                  const isLow = line.part.reorderPoint > 0 && line.part.stockQty <= line.part.reorderPoint;
-                  return (
-                    <TableRow key={line.id}>
-                      <TableCell>
-                        <div className="font-medium dark:text-gray-100">{line.part.name}</div>
-                        {line.part.sku && <div className="text-xs text-gray-400 font-mono">{line.part.sku}</div>}
-                      </TableCell>
-                      <TableCell className="tabular-nums">{line.quantity}</TableCell>
-                      <TableCell className="tabular-nums">{formatCurrency(line.part.unitCost)}</TableCell>
-                      <TableCell className="tabular-nums font-medium">
-                        {formatCurrency(line.part.unitCost * line.quantity)}
-                      </TableCell>
-                      <TableCell>
-                        <span className={`tabular-nums ${isLow ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 dark:text-gray-400'}`}>
-                          {line.part.stockQty}
-                        </span>
-                        {isLow && <AlertTriangle className="inline h-3.5 w-3.5 ml-1 text-red-500" aria-label="Low stock" />}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="destructive" size="sm" disabled={busyId === line.id} onClick={() => handleRemove(line)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            <div className="flex justify-between items-center px-4 py-3 border-t dark:border-gray-700 text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Parts cost per unit</span>
-              <span className="font-semibold tabular-nums dark:text-gray-100">{formatCurrency(partsCost)}</span>
-            </div>
-            <p className="px-4 pb-3 text-xs text-gray-400">
-              Included in the product cost. Stock is deducted automatically when a production job for this product completes.
-            </p>
-          </>
-        )}
+        {body}
+        <p className="px-4 pb-3 pt-2 text-xs text-gray-500 dark:text-gray-400">
+          Included in the product price (recalculated automatically). Stock is deducted when a job started from this page
+          or from Production → Build Stock completes. Jobs created from an order&apos;s production plan do not deduct parts yet.
+        </p>
       </CardContent>
 
-      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add Part to BOM">
-        {catalog.length === 0 ? (
+      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add part">
+        {catalog && catalog.length === 0 && !addError ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
             No parts in the catalog yet. Create one on the{' '}
-            <Link href="/parts" className="text-brand-600 dark:text-brand-400 hover:underline">Parts</Link> page first.
+            <Link href="/parts" className="text-brand-600 hover:underline dark:text-brand-400">Parts</Link> page first.
           </p>
         ) : (
-          <form onSubmit={handleAdd} className="space-y-4">
+          <form onSubmit={handleAdd} className="space-y-4" noValidate>
             <Select
               label="Part"
               value={partId}
               onChange={e => setPartId(e.target.value)}
               options={[
-                { value: '', label: '— select a part —' },
+                { value: '', label: catalog ? '— select a part —' : 'Loading parts…' },
                 ...available.map(p => ({
                   value: p.id,
-                  label: `${p.name}${p.sku ? ` (${p.sku})` : ''} — ${p.unitCost.toFixed(3)} / pc, ${p.stockQty} in stock`,
+                  label: `${p.name}${p.sku ? ` (${p.sku})` : ''} — ${formatCurrency(p.unitCost)} / pc, ${p.stockQty} pcs in stock`,
                 })),
               ]}
             />
-            {available.length === 0 && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                Every part in the catalog is already on this BOM.
-              </p>
+            {catalog && catalog.length > 0 && available.length === 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">Every active part in the catalog is already on this product.</p>
             )}
-            <Input
-              label="Quantity per product unit"
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={e => setQuantity(e.target.value)}
-            />
-            <div className="flex gap-3 justify-end pt-2">
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving || !partId}>{saving ? 'Adding…' : 'Add Part'}</Button>
+            <Input label="Pieces per product unit" type="number" min={1} max={MAX_QTY} step={1}
+              value={quantity} onChange={e => setQuantity(e.target.value)} />
+            {addError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{addError}</p>}
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={() => setShowAdd(false)} disabled={saving}>Cancel</Button>
+              <Button type="submit" disabled={saving || !partId}>{saving ? 'Adding…' : 'Add part'}</Button>
             </div>
           </form>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove part?"
+        message={removing ? `Remove ${removing.part.name} (${removing.quantity} pcs per unit) from this product? The price is recalculated.` : ''}
+        confirmLabel="Remove"
+        destructive
+        busy={removing !== null && busyPartId === removing.partId}
+        error={removeError}
+        onConfirm={() => void confirmRemove()}
+        onClose={() => setRemoving(null)}
+      />
     </Card>
   );
 }
