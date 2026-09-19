@@ -1,74 +1,61 @@
-import { Controller, Post, Body, Param, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Param, Post, UploadedFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-
-import { ProductsService } from './products.service';
+import type { ProductDetail, SlicerImportResult } from '@printforge/types';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
+import { ProductOnboardingService, type ImportFile } from './product-onboarding.service';
+import { ProductsService } from './products.service';
+import { MAX_IMPORT_FILES, parseGcodeImport, parseThreeMfImport } from './slicer-import-input';
+
+const MAX_BYTES = 200 * 1024 * 1024;
 
 /**
- * Slicer imports (spec §4.3 M1, M2). Moved verbatim from ProductsController by
- * WP4 — same paths, guards and bodies. WP5 owns every behavioural change.
+ * Slicer imports (spec §4.3 M1, M2, §3.12). Every field is validated first;
+ * staged uploads are then read with `{ keep: true }` and discarded only after
+ * the import commits, so a large staged file survives a failed or rejected
+ * attempt and can be retried without uploading it again.
  */
 @Controller('products')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'OPERATOR')
 export class ProductImportsController {
   constructor(
-    private productsService: ProductsService,
-    private chunkUploads: ChunkUploadsService,
+    private readonly productsService: ProductsService,
+    private readonly onboarding: ProductOnboardingService,
+    private readonly chunkUploads: ChunkUploadsService,
   ) {}
 
+  /** M1 */
   @Post(':id/onboard-gcode')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FilesInterceptor('files', 20, { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async onboardGcode(
-    @Param('id') id: string,
-    @UploadedFiles() files: any[],
-    @Body('assembledUploadIds') assembledIdsRaw?: string,
-  ) {
-    // Files above Cloudflare's per-request cap arrive pre-staged via
-    // /chunk-uploads; both forms can mix in one call.
-    if (assembledIdsRaw) {
-      let ids: string[];
-      try { ids = JSON.parse(assembledIdsRaw); } catch { throw new BadRequestException('assembledUploadIds must be JSON'); }
-      if (!Array.isArray(ids)) throw new BadRequestException('assembledUploadIds must be an array');
-      files = [...(files ?? [])];
-      for (const cid of ids) files.push(await this.chunkUploads.consume(String(cid), 200 * 1024 * 1024));
-    }
-    if (!files?.length) throw new BadRequestException('No files uploaded');
-    return this.productsService.onboardFromGcode(id, files);
+  @UseInterceptors(FilesInterceptor('files', MAX_IMPORT_FILES, { limits: { fileSize: MAX_BYTES } }))
+  async onboardGcode(@Param('id') id: string, @UploadedFiles() uploaded: any[], @Body() body: unknown): Promise<SlicerImportResult<ProductDetail>> {
+    const direct: ImportFile[] = uploaded ?? [];
+    const input = parseGcodeImport(body, direct.length);
+    const files: ImportFile[] = [...direct];
+    for (const cid of input.assembledUploadIds) files.push(await this.chunkUploads.consume(cid, MAX_BYTES, { keep: true }));
+    if (!files.length) throw new BadRequestException('No files uploaded');
+    const out = await this.onboarding.onboardFromGcode(id, files, input);
+    for (const cid of input.assembledUploadIds) await this.chunkUploads.discard(cid);
+    return { ...out, product: await this.productsService.findOne(id) };
   }
 
+  /** M2 */
   @Post(':id/onboard-3mf')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
   async onboardThreeMf(
     @Param('id') id: string,
-    @UploadedFile() file: any,
-    @Body('selectedPlates') selectedPlatesRaw: string,
-    @Body('plateNames') plateNamesRaw?: string,
+    @UploadedFile() uploaded: any,
+    @Body() body: unknown,
     @Body('assembledUploadId') assembledId?: string,
-  ) {
-    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
-    if (!file) throw new BadRequestException('No file uploaded');
-    if (!file.originalname?.toLowerCase().endsWith('.3mf')) {
-      throw new BadRequestException('File must be a .3mf');
-    }
-    let selectedPlates: number[];
-    let plateNames: Record<string, string>;
-    try {
-      selectedPlates = JSON.parse(selectedPlatesRaw || '[]');
-      plateNames = plateNamesRaw ? JSON.parse(plateNamesRaw) : {};
-    } catch {
-      throw new BadRequestException('selectedPlates and plateNames must be valid JSON');
-    }
-    if (!Array.isArray(selectedPlates) || !selectedPlates.every((n) => typeof n === 'number')) {
-      throw new BadRequestException('selectedPlates must be an array of numbers');
-    }
-    if (!selectedPlates.length) throw new BadRequestException('No plates selected');
-    return this.productsService.onboardFromThreeMf(id, file.buffer, { selectedPlates, plateNames });
+  ): Promise<SlicerImportResult<ProductDetail>> {
+    const input = parseThreeMfImport(body);
+    if (!uploaded && !assembledId) throw new BadRequestException('No file uploaded');
+    const file: ImportFile = uploaded ?? (await this.chunkUploads.consume(String(assembledId), MAX_BYTES, { keep: true }));
+    if (!String(file.originalname ?? '').toLowerCase().endsWith('.3mf')) throw new BadRequestException('File must be a .3mf');
+    const out = await this.onboarding.onboardFromThreeMf(id, file.buffer, input);
+    if (!uploaded && assembledId) await this.chunkUploads.discard(String(assembledId));
+    return { ...out, product: await this.productsService.findOne(id) };
   }
 }

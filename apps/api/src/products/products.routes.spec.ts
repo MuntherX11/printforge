@@ -71,6 +71,9 @@ describe('ProductsModule routes', () => {
       'GET /products/:id/components/:componentId/thumbnail',
       'GET /products/:id/bulk-floor',
       'GET /products/:id/cost',
+      'POST /products/:id/components/:componentId/plate-layouts',
+      'PATCH /products/:id/components/:componentId/plate-layouts/:layoutId',
+      'DELETE /products/:id/components/:componentId/plate-layouts/:layoutId',
     ]));
   });
 

@@ -11,7 +11,6 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { paginatedResponse } from '../common/dto/pagination.dto';
 import { PartsService } from '../parts/parts.service';
 import { parseColourKey } from '../stock-ledger/colour-key';
-import { OnboardThreeMfDto } from '@printforge/types';
 import { activeProductView, catalogDetailView, catalogProductView } from './product-catalog-views';
 import { buildProductDetail, coverUrl, DETAIL_INCLUDE, type AttachmentLite } from './product-detail';
 import { containedUploadPath } from './product-images.service';
@@ -19,7 +18,6 @@ import {
   parseMinQtys, parsePage, pairParam, parseProductCreate, parseProductPatch, parseReadinessQty, parseTiers, rejectStaleQuery,
 } from './product-input';
 import { assertSkuFree, lockOptions, lockProduct, photoPaths, productHistory, TX_OPTS, unlinkAfterCommit } from './product-locks';
-import { ProductOnboardingService } from './product-onboarding.service';
 
 /**
  * Products API, product level (spec §4.1 P1–P8, P16–P21). Components live in
@@ -36,7 +34,6 @@ export class ProductsService {
     private readonly resolver: BomResolverService,
     private readonly pricing: PricingService,
     private readonly planner: ProductionPlannerService,
-    private readonly productOnboarding: ProductOnboardingService,
     private readonly parts: PartsService,
   ) {}
 
@@ -274,18 +271,6 @@ export class ProductsService {
     const out = await this.parts.removeProductPart(id, partId);
     await this.reprice(id);
     return out;
-  }
-
-  // --------------------------------------------------------- slicer imports
-
-  async onboardFromGcode(productId: string, files: any[]) {
-    const { results } = await this.productOnboarding.onboardFromGcode(productId, files);
-    return { results, product: await this.findOne(productId) };
-  }
-
-  async onboardFromThreeMf(productId: string, fileBuffer: Buffer, dto: OnboardThreeMfDto) {
-    const { slicer, results } = await this.productOnboarding.onboardFromThreeMf(productId, fileBuffer, dto);
-    return { slicer, results, product: await this.findOne(productId) };
   }
 
   /**
