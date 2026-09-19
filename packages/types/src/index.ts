@@ -172,6 +172,10 @@ export interface ThreeMfPlateInfo {
   toolChanges: number;
   tools: ThreeMfToolInfo[];
   thumbnailBase64?: string; // 'data:image/png;base64,...'
+  /** Object labels of the embedded Metadata/plate_N.gcode (spec §4.3 M7); null/empty when unsliced or unlabelled. */
+  objectCount?: number | null;
+  objectModels?: Array<{ model: string; count: number }>;
+  ignoredLabels?: string[];
 }
 
 export interface ThreeMfAnalysis {
@@ -183,6 +187,18 @@ export interface ThreeMfAnalysis {
 export interface OnboardThreeMfDto {
   selectedPlates: number[];
   plateNames?: Record<string, string>; // key = plateIndex as string
+}
+
+/** Response of M1/M2 slicer imports (spec §3.12). `product` is the refreshed ProductDetail. */
+export interface SlicerImportResult<TProduct = unknown> {
+  slicer?: string | null;
+  results: Array<{ fileName?: string; plateIndex?: number; name: string; componentsCreated: number; componentId?: string; layoutId?: string }>;
+  layoutsCreated: Array<{ componentId: string; layoutId: string; unitsPerPlate: number }>;
+  skipped: Array<{ fileName?: string; plateIndex?: number; reason: string }>;
+  warnings: Array<{ code: string; message: string; componentId?: string; materialId?: string; colourSlotId?: string }>;
+  createdMaterials: Array<{ id: string; name: string; colorHex: string | null }>;
+  defaultPrinterAssigned: { id: string; name: string } | null;
+  product: TProduct;
 }
 
 // ============ PLATE COSTING ============

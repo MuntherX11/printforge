@@ -142,6 +142,19 @@ export class ChunkUploadsService implements OnModuleInit, OnModuleDestroy {
     } as Express.Multer.File;
   }
 
+  /**
+   * Remove a staged upload (spec §4.3). Imports consume with `{ keep: true }`
+   * and call this only after their transaction commits, so a failed or
+   * rejected first attempt leaves a large staged file in place for a retry.
+   * Validates the id format; a missing directory is not an error.
+   */
+  async discard(id: string): Promise<void> {
+    const dir = this.dirFor(String(id ?? ''));
+    await fs.rm(dir, { recursive: true, force: true }).catch((e) => {
+      this.logger.warn(`Could not discard staged upload ${id}: ${(e as Error)?.message}`);
+    });
+  }
+
   private async sweep() {
     const entries = await fs.readdir(CHUNK_DIR).catch(() => [] as string[]);
     const cutoff = Date.now() - STALE_MS;

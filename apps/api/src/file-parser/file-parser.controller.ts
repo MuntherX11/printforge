@@ -56,7 +56,9 @@ export class FileParserController {
       throw new BadRequestException('File must be .gcode, .stl, or .3mf');
     }
 
-    // 3MF — return full plate analysis, no cost estimate at this stage
+    // 3MF — return full plate analysis, no cost estimate at this stage. Each
+    // plate carries the object labels of its embedded G-code (M7), which the
+    // import wizard uses to prefill "Units on this plate".
     if (is3mf) {
       const analysis = await this.threeMfParser.parse(file.buffer);
       return {
@@ -108,9 +110,16 @@ export class FileParserController {
     };
   }
 
+  /**
+   * M6: a plate G-code's header plus its object labels (objectCount,
+   * objectModels, ignoredLabels). A large plate arrives pre-staged via
+   * /chunk-uploads; it is read with `keep` so the layout or import step that
+   * follows can consume the same upload.
+   */
   @Post('parse-gcode')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async parseGcode(@UploadedFile() file: any) {
+  async parseGcode(@UploadedFile() file: any, @Body('assembledUploadId') assembledId?: string) {
+    if (!file && assembledId) file = await this.chunkUploads.consume(String(assembledId), 200 * 1024 * 1024, { keep: true });
     if (!file) throw new BadRequestException('No file uploaded');
     const name = (file?.originalname || '').toLowerCase();
     if (!name.endsWith('.gcode') && !name.endsWith('.gco') && !name.endsWith('.g')) {

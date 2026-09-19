@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import JSZip from 'jszip';
 import { GcodeParserService } from './gcode-parser.service';
-import { ThreeMfAnalysis, ThreeMfPlateInfo } from '@printforge/types';
+import { ThreeMfAnalysis, ThreeMfPlateInfo, ThreeMfToolInfo } from '@printforge/types';
 
 @Injectable()
 export class ThreeMfParserService {
@@ -31,7 +31,7 @@ export class ThreeMfParserService {
 
     const plateRegex = /<plate>([\s\S]*?)<\/plate>/g;
     let match: RegExpExecArray | null;
-    const plateStats = new Map<number, { printSeconds: number; weightGrams: number; toolChanges: number }>();
+    const plateStats = new Map<number, { printSeconds: number; weightGrams: number; toolChanges: number; filaments: ThreeMfToolInfo[] }>();
 
     while ((match = plateRegex.exec(xmlData)) !== null) {
       const plateContent = match[1];
@@ -47,6 +47,7 @@ export class ThreeMfParserService {
           printSeconds: predictionMatch ? parseInt(predictionMatch[1], 10) : 0,
           weightGrams: weightMatch ? parseFloat(weightMatch[1]) : 0,
           toolChanges: toolChangesMatch ? parseInt(toolChangesMatch[1], 10) : 0,
+          filaments: this.sliceInfoFilaments(plateContent),
         });
       }
     }
@@ -59,7 +60,7 @@ export class ThreeMfParserService {
         if (m) {
           const idx = parseInt(m[1], 10);
           if (!plateStats.has(idx)) {
-            plateStats.set(idx, { printSeconds: 0, weightGrams: 0, toolChanges: 0 });
+            plateStats.set(idx, { printSeconds: 0, weightGrams: 0, toolChanges: 0, filaments: [] });
           }
         }
       });
@@ -77,7 +78,13 @@ export class ThreeMfParserService {
           printSeconds: stats.printSeconds,
           weightGrams: stats.weightGrams,
           toolChanges: stats.toolChanges,
-          tools: [],
+          // Projects downloaded sliced often carry no embedded G-code; their
+          // slice_info still lists each used filament (id is 1-based).
+          tools: stats.filaments,
+          // Unsliced or unlabelled plates: unknown count, not zero (spec §4.3 M7).
+          objectCount: null,
+          objectModels: [],
+          ignoredLabels: [],
         };
 
         // Parse embedded G-code and extract thumbnail in parallel per plate
@@ -98,6 +105,11 @@ export class ThreeMfParserService {
               materialType: t.materialType,
             }));
           }
+
+          // parseHeader counts object labels over the whole embedded G-code.
+          plate.objectCount = gcodeAnalysis.objectCount;
+          plate.objectModels = gcodeAnalysis.objectModels;
+          plate.ignoredLabels = gcodeAnalysis.ignoredLabels;
 
           if (!plate.weightGrams && gcodeAnalysis.filamentUsedGrams) {
             plate.weightGrams = gcodeAnalysis.filamentUsedGrams;
@@ -122,5 +134,38 @@ export class ThreeMfParserService {
     analysis.plates = plateResults.sort((a: ThreeMfPlateInfo, b: ThreeMfPlateInfo) => a.plateIndex - b.plateIndex);
 
     return analysis;
+  }
+
+  /** `<filament id="2" type="PLA" color="#FFFFFF" used_g="307.52"/>` entries of one slice_info plate. */
+  private sliceInfoFilaments(plateXml: string): ThreeMfToolInfo[] {
+    const out: ThreeMfToolInfo[] = [];
+    const re = /<filament\s([^>]*)>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(plateXml)) !== null) {
+      const attrs = m[1];
+      const attr = (k: string) => attrs.match(new RegExp(`(?:^|\\s)${k}="([^"]*)"`))?.[1];
+      const id = parseInt(attr('id') ?? '', 10);
+      const grams = parseFloat(attr('used_g') ?? '');
+      if (!Number.isInteger(id) || id < 1 || !(grams > 0)) continue;
+      out.push({ index: id - 1, filamentGrams: grams, colorHex: attr('color') || undefined, materialType: attr('type')?.toUpperCase() || undefined });
+    }
+    return out.sort((a, b) => a.index - b.index);
+  }
+
+  /**
+   * The sliced G-code embedded for one plate (`Metadata/plate_N.gcode`), or null
+   * when the plate isn't sliced. Imports store it as the component's or the
+   * layout's print file (spec §3.12 "Component files").
+   */
+  async extractPlateGcode(buffer: Buffer, plateIndex: number): Promise<Buffer | null> {
+    if (!Number.isInteger(plateIndex) || plateIndex < 0) return null;
+    let zip: JSZip;
+    try {
+      zip = await JSZip.loadAsync(buffer);
+    } catch {
+      throw new BadRequestException('Invalid or corrupt .3mf file — could not unzip');
+    }
+    const f = zip.file(`Metadata/plate_${plateIndex}.gcode`);
+    return f ? f.async('nodebuffer') : null;
   }
 }
