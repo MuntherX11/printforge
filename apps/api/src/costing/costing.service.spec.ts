@@ -1,6 +1,21 @@
 import { Test } from '@nestjs/testing';
 import { CostingService } from './costing.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
+
+/** In-memory stand-in for RedisCacheService: same getOrSet/invalidate contract. */
+function memoryCache() {
+  const store = new Map<string, unknown>();
+  return {
+    getOrSet: async (key: string, _ttl: number, factory: () => Promise<unknown>) => {
+      if (store.has(key)) return store.get(key);
+      const v = await factory();
+      store.set(key, v);
+      return v;
+    },
+    invalidate: async (key: string) => { store.delete(key); },
+  };
+}
 
 describe('CostingService', () => {
   let service: CostingService;
@@ -26,10 +41,15 @@ describe('CostingService', () => {
       printer: { findUnique: jest.fn() },
     };
 
+    // The real SettingsService over the mocked Prisma, so the settings lookups the
+    // tests assert on still go through prisma.systemSetting.findUnique.
+    const settings = new SettingsService(prisma, memoryCache() as any);
+
     const module = await Test.createTestingModule({
       providers: [
         CostingService,
         { provide: PrismaService, useValue: prisma },
+        { provide: SettingsService, useValue: settings },
       ],
     }).compile();
 
@@ -237,6 +257,46 @@ describe('CostingService', () => {
         (c: any) => c[0].where.key === 'overhead_percent'
       );
       expect(overheadCalls.length).toBe(1);
+    });
+  });
+  describe('loadSettings (spec §0.2 "Settings read once")', () => {
+    it('reads the five cost settings plus thin_margin_percent (default 20)', async () => {
+      expect(await service.loadSettings()).toEqual({
+        overheadPercent: 15,
+        purgeWasteGrams: 5,
+        electricityRateKwh: 0.025,
+        machineHourlyRate: 0.4,
+        markupMultiplier: 2.5,
+        thinMarginPercent: 20,
+      });
+    });
+
+    it.each(['abc', '150', '-1'])('thin_margin_percent stored as %p → 20 and one warning', async (raw) => {
+      const base = prisma.systemSetting.findUnique.getMockImplementation();
+      prisma.systemSetting.findUnique.mockImplementation(({ where }: any) =>
+        where.key === 'thin_margin_percent' ? Promise.resolve({ key: where.key, value: raw }) : base({ where }));
+      const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      const s = await service.loadSettings();
+      expect(s.thinMarginPercent).toBe(20);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('a stored thin_margin_percent of 35 is used', async () => {
+      const base = prisma.systemSetting.findUnique.getMockImplementation();
+      prisma.systemSetting.findUnique.mockImplementation(({ where }: any) =>
+        where.key === 'thin_margin_percent' ? Promise.resolve({ key: where.key, value: '35' }) : base({ where }));
+      expect((await service.loadSettings()).thinMarginPercent).toBe(35);
+    });
+
+    it('calculateJobCost with preloaded settings reads nothing', async () => {
+      const settings = await service.loadSettings();
+      prisma.systemSetting.findUnique.mockClear();
+      const r = await service.calculateJobCost(
+        { printDuration: 3600, colorChanges: 0, purgeWasteGrams: 0, printer: null, materials: [{ gramsUsed: 100, costPerGram: 0.025 }] },
+        { ...settings, overheadPercent: 0 },
+      );
+      expect(prisma.systemSetting.findUnique).not.toHaveBeenCalled();
+      expect(r.overheadCost).toBe(0);
     });
   });
 });

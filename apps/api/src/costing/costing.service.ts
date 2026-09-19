@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import {
@@ -12,8 +12,32 @@ import {
   PlateCostResult,
 } from '@printforge/types';
 
+/**
+ * The cost settings, read once per request (spec §0.2 "Settings read once").
+ * thinMarginPercent is optional in Settings (no UI); default 20.
+ */
+export interface CostSettings {
+  overheadPercent: number;
+  purgeWasteGrams: number;
+  electricityRateKwh: number;
+  machineHourlyRate: number;
+  markupMultiplier: number;
+  thinMarginPercent: number;
+}
+
+const COST_SETTING_DEFAULTS = {
+  overhead_percent: 15,
+  purge_waste_grams: 5,
+  electricity_rate_kwh: 0.025,
+  machine_hourly_rate: 0.4,
+  markup_multiplier: 2.5,
+  thin_margin_percent: 20,
+} as const;
+
 @Injectable()
 export class CostingService {
+  private readonly logger = new Logger(CostingService.name);
+
   constructor(
     private prisma: PrismaService,
     private readonly settingsService: SettingsService,
@@ -55,6 +79,42 @@ export class CostingService {
     return basePurgeGrams * Math.max(0.5, multiplier);
   }
 
+  /**
+   * Load every cost setting once. Unparseable values fall back to the default,
+   * so a typo in Settings never turns a price into NaN. thin_margin_percent must
+   * be 0-100; anything else uses 20 and logs one warning.
+   */
+  async loadSettings(): Promise<CostSettings> {
+    const read = async (key: keyof typeof COST_SETTING_DEFAULTS) => {
+      const raw = await this.settingsService.get(key, String(COST_SETTING_DEFAULTS[key]));
+      const n = parseFloat(raw);
+      return Number.isFinite(n) ? n : null;
+    };
+    const [overhead, purge, electricity, machine, markup, thin] = await Promise.all([
+      read('overhead_percent'),
+      read('purge_waste_grams'),
+      read('electricity_rate_kwh'),
+      read('machine_hourly_rate'),
+      read('markup_multiplier'),
+      read('thin_margin_percent'),
+    ]);
+    let thinMarginPercent: number = COST_SETTING_DEFAULTS.thin_margin_percent;
+    if (thin === null || thin < 0 || thin > 100) {
+      const raw = await this.settingsService.get('thin_margin_percent', '');
+      this.logger.warn(`thin_margin_percent "${raw}" is not a percentage from 0 to 100 — using 20`);
+    } else {
+      thinMarginPercent = thin;
+    }
+    return {
+      overheadPercent: overhead ?? COST_SETTING_DEFAULTS.overhead_percent,
+      purgeWasteGrams: purge ?? COST_SETTING_DEFAULTS.purge_waste_grams,
+      electricityRateKwh: electricity ?? COST_SETTING_DEFAULTS.electricity_rate_kwh,
+      machineHourlyRate: machine ?? COST_SETTING_DEFAULTS.machine_hourly_rate,
+      markupMultiplier: markup ?? COST_SETTING_DEFAULTS.markup_multiplier,
+      thinMarginPercent,
+    };
+  }
+
   async calculateJobCost(job: {
     printDuration?: number | null;
     colorChanges: number;
@@ -62,12 +122,13 @@ export class CostingService {
     purgeVolumeGrams?: number;
     printer?: { hourlyRate: number; wattage?: number } | null;
     materials: Array<{ gramsUsed: number; costPerGram: number }>;
-  }): Promise<CostBreakdown> {
-    const overheadPercent = parseFloat(await this.settingsService.get('overhead_percent', '15'));
-    const purgeWastePerChange = parseFloat(await this.settingsService.get('purge_waste_grams', '5'));
-    const electricityRate = parseFloat(await this.settingsService.get('electricity_rate_kwh', '0.025'));
+  }, settings?: CostSettings): Promise<CostBreakdown> {
+    const s = settings ?? (await this.loadSettings());
+    const overheadPercent = s.overheadPercent;
+    const purgeWastePerChange = s.purgeWasteGrams;
+    const electricityRate = s.electricityRateKwh;
     // Machine hourly rate from settings (covers wear, depreciation, maintenance)
-    const settingsHourlyRate = parseFloat(await this.settingsService.get('machine_hourly_rate', '0.400'));
+    const settingsHourlyRate = s.machineHourlyRate;
 
     // Material cost: sum of all job materials (costPerGram comes from material/spool)
     const materialCost = job.materials.reduce(
@@ -294,7 +355,9 @@ export class CostingService {
       ? await this.prisma.printer.findUnique({ where: { id: dto.printerId } })
       : null;
 
-    const globalMarkup = parseFloat(await this.settingsService.get('markup_multiplier', '2.5'));
+    // Settings are read once for every plate (spec §0.2).
+    const settings = await this.loadSettings();
+    const globalMarkup = settings.markupMultiplier;
     const markupMultiplier =
       printer?.markupMultiplier && printer.markupMultiplier > 0
         ? printer.markupMultiplier
@@ -329,7 +392,7 @@ export class CostingService {
         // we use the average transition purge between all distinct pairs of tools.
         let purgeWasteGrams = 0;
         if (plate.toolChanges > 0 && isMultiColor) {
-          const basePurge = parseFloat(await this.settingsService.get('purge_waste_grams', '5'));
+          const basePurge = settings.purgeWasteGrams;
           let totalPurgeRate = 0;
           let pairCount = 0;
           for (let i = 0; i < plate.tools.length; i++) {
@@ -355,7 +418,7 @@ export class CostingService {
             ? { hourlyRate: printer.hourlyRate, wattage: printer.wattage }
             : null,
           materials,
-        });
+        }, settings);
 
         const suggestedPrice = breakdown.totalCost * markupMultiplier;
 
