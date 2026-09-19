@@ -1,13 +1,29 @@
-import { Injectable, NotFoundException, BadRequestException, Optional, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, Optional } from '@nestjs/common';
+import type { OrderStatus, Problem } from '@printforge/types';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateOrderDto, UpdateOrderDto, OrderStatus, CustomerCreateOrderDto } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
+import { requiredEnum } from '../common/utils/validate-number';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { DiscordNotificationService } from '../communications/discord-notification.service';
 import { SettingsService } from '../settings/settings.service';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
+import { BomResolverService } from '../catalog-core/bom-resolver.service';
+import { CatalogRequestContext } from '../catalog-core/catalog-context';
+import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
+import { PricingService, type ResolvedLine } from '../catalog-core/pricing.service';
+import { ProductionPlannerService } from '../catalog-core/production-planner.service';
+import { ProductStockService } from '../stock-ledger/product-stock.service';
+import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE } from '../production/job-transitions';
+import { lockOptions, lockProduct, TX_OPTS } from '../products/product-locks';
+import {
+  documentTotals, lineOptionsOf, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit, parseCustomerLine,
+  parseItemsArray, parseStaffLine, priceWarningsOf, splitLineByColour, taxRateOf,
+} from './order-lines';
+import {
+  labelStock, materialAvailability, netAllocations, printFilesFor, resolveOrderLines, type PlannedLine,
+} from './order-insights';
 
 /** Minimal shape of a customer row returned via Prisma include. */
 interface CustomerRecord {
@@ -16,10 +32,53 @@ interface CustomerRecord {
   phone: string | null;
 }
 
+const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const;
+const STARTED_JOB = ['IN_PROGRESS', 'PAUSED', 'COMPLETED'];
+
+/**
+ * What a customer route returns for an order (§0.2 "Customer responses", S5):
+ * an explicit select, never pricing metadata, costs or the customer row.
+ */
+export const CUSTOMER_ORDER_SELECT = {
+  id: true,
+  orderNumber: true,
+  status: true,
+  subtotal: true,
+  tax: true,
+  total: true,
+  createdAt: true,
+  items: { select: { description: true, quantity: true, unitPrice: true, totalPrice: true } },
+} as const;
+
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+function optionalText(raw: unknown, max: number): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).replace(/<[^>]*>/g, '').trim().slice(0, max);
+  return s || undefined;
+}
+
+function optionalDate(raw: unknown, field: string): Date | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const d = new Date(String(raw));
+  if (Number.isNaN(d.getTime())) throw new BadRequestException(`${field} must be a date`);
+  return d;
+}
+
+function requiredId(raw: unknown, field: string): string {
+  const id = optionalId(raw, field);
+  if (!id) throw new BadRequestException(`${field} is required`);
+  return id;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
     private prisma: PrismaService,
+    private pricing: PricingService,
+    private resolver: BomResolverService,
+    private planner: ProductionPlannerService,
+    private stock: ProductStockService,
     @Optional() private emailNotifications?: EmailNotificationService,
     @Optional() private whatsapp?: WhatsAppService,
     @Optional() private settingsService?: SettingsService,
@@ -27,58 +86,64 @@ export class OrdersService {
     @Optional() private cache?: RedisCacheService,
   ) {}
 
-  async create(dto: CreateOrderDto) {
-    let orderNumber: string | undefined;
+  private async nextOrderNumber(): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
-        break;
+        return await generateNumber(this.prisma, 'ORD', 'order');
       } catch (e: unknown) {
         if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
       }
     }
-    if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
+    throw new InternalServerErrorException('Failed to generate unique document number');
+  }
 
-    const items = dto.items.map(item => ({
-      productId: item.productId,
-      variantId: item.variantId,
-      description: item.description,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.quantity * item.unitPrice,
-    }));
+  /**
+   * S2. The server prices every line itself (§3.9): tiers count across the lines
+   * of one product and size, a client unitPrice counts only for an explicit
+   * override (recorded MANUAL with its reason) or a custom line. Lines are
+   * resolved after the FOR SHARE locks, on the locked rows.
+   */
+  async create(body: unknown) {
+    const b = isObject(body) ? body : {};
+    const customerId = requiredId(b.customerId, 'customerId');
+    const items = parseItemsArray(b.items, { max: MAX_LINES, tooMany: 'An order can have at most 100 lines' }).map(parseStaffLine);
+    const notes = optionalText(b.notes, 5000);
+    const dueDate = optionalDate(b.dueDate, 'dueDate');
+    const orderNumber = await this.nextOrderNumber();
 
-    const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
-    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
-    const tax = subtotal * taxRate;
-    const total = subtotal + tax;
-
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber,
-        customerId: dto.customerId,
-        quoteId: dto.quoteId,
-        notes: dto.notes,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        subtotal,
-        tax,
-        total,
-        items: { create: items },
-      },
-      include: { customer: true, items: true },
-    });
+    const { orderId, lines } = await this.prisma.$transaction(async (tx: any) => {
+      await lockLineRows(tx, items);
+      const lines = await this.pricing.resolveLines(items, { audience: 'STAFF', db: tx, ctx: new CatalogRequestContext() });
+      const totals = documentTotals(lines, await taxRateOf(tx));
+      const order = await tx.order.create({ data: { orderNumber, customerId, notes, dueDate, ...totals } });
+      for (const l of lines) await tx.orderItem.create({ data: { orderId: order.id, ...orderItemColumns(l) } });
+      return { orderId: order.id as string, lines };
+    }, TX_OPTS);
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
 
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true, items: true } });
     // Advisory only. The order stands; staff just need to know they have to
     // buy filament before this one can be printed.
-    const stock = await this.checkStock(items).catch(() => null);
-    return { ...order, stockWarnings: stock?.shortages ?? [] };
+    const stock = await this.availabilityOf(this.productLines(lines), null, new CatalogRequestContext()).catch(() => null);
+    return {
+      ...order,
+      stockWarnings: stock?.materials.filter((m) => !m.hasEnoughStock) ?? [],
+      priceWarnings: priceWarningsOf(lines),
+    };
+  }
+
+  private productLines(lines: ReadonlyArray<ResolvedLine>): PlannedLine[] {
+    return lines
+      .filter((l) => l.productId)
+      .map((l) => ({ productId: l.productId!, sizeOptionId: l.sizeOptionId, colourOptionId: l.colourOptionId, quantity: l.quantity }));
+  }
+
+  private availabilityOf(lines: PlannedLine[], excludeOrderId: string | null, ctx: CatalogRequestContext) {
+    return materialAvailability(this.planner, lines, excludeOrderId, ctx);
   }
 
   async findAll(query: PaginationDto, status?: string) {
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
-    const where = status && validStatuses.includes(status) ? { status: status as OrderStatus } : {};
+    const where = status && (ORDER_STATUSES as readonly string[]).includes(status) ? { status: status as OrderStatus } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -94,6 +159,7 @@ export class OrdersService {
     return paginatedResponse(data, total, query);
   }
 
+  /** S4: staff order view with pairs, availability, print files by size and printed-stock allocations. */
   async findOne(id: string) {
     const order = await this.prisma.order.findUnique({
       where: { id },
@@ -110,229 +176,66 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException('Order not found');
 
-    const materialAvailability = await this.computeMaterialAvailability(order.items, id);
+    const ctx = new CatalogRequestContext();
+    const options = await lineOptionsOf(this.resolver, order.items, ctx);
+    const items = order.items.map((i: any) => ({ ...i, ...options.get(i.id) }));
+
+    const { resolved, warnings } = await resolveOrderLines(this.resolver, order.orderNumber, order.items, ctx);
+    const planned = resolved.map(({ item, res }) => ({ productId: res.bom.productId, ...res.pair, quantity: item.quantity }));
+    const availability = await this.availabilityOf(planned, id, ctx);
     const partAvailability = await this.getPartAvailability(id, order.items);
-    const printFiles = await this.getPrintFiles(order.items);
+    const printFiles = await printFilesFor(this.prisma, this.resolver, resolved, ctx);
+    const stockAllocations = (await labelStock(this.prisma, await netAllocations(this.prisma, order.items.map((i: any) => i.id)))).map((a) => ({
+      orderItemId: a.orderItemId,
+      componentId: a.componentId,
+      componentDescription: a.componentDescription,
+      colourLabel: a.colourLabel,
+      units: a.units,
+    }));
 
-    return { ...order, materialAvailability, partAvailability, printFiles };
-  }
-
-  /**
-   * Filament needed by a set of order lines, netted against what is actually
-   * free: total active spool weight minus what other open orders and queued
-   * jobs have already spoken for.
-   *
-   * `excludeOrderId` keeps an order from reserving against itself. Pass null
-   * when checking an order that does not exist yet.
-   */
-  private async computeMaterialAvailability(
-    items: Array<{ productId: string | null; quantity: number }>,
-    excludeOrderId: string | null,
-  ) {
-    // Aggregate material requirements across all order items via their products' BOM
-    const productIds = items
-      .map((item) => item.productId)
-      .filter((pid): pid is string => !!pid);
-
-    const materialNeeds = new Map<string, { materialId: string; name: string; type: string; color: string | null; gramsNeeded: number }>();
-
-    if (productIds.length > 0) {
-      const products = await this.prisma.product.findMany({
-        where: { id: { in: productIds } },
-        include: { components: { include: { material: true } } },
-      });
-      const productMap = new Map(products.map(p => [p.id, p]));
-
-      for (const item of items) {
-        if (!item.productId) continue;
-        const product = productMap.get(item.productId);
-        if (!product?.components) continue;
-        for (const comp of product.components) {
-          if (!comp.materialId) continue; // multicolor — handled via ComponentMaterial
-          const key = comp.materialId;
-          const existing = materialNeeds.get(key);
-          const gramsForItem = comp.gramsUsed * comp.quantity * item.quantity;
-          if (existing) {
-            existing.gramsNeeded += gramsForItem;
-          } else {
-            materialNeeds.set(key, {
-              materialId: comp.materialId,
-              name: comp.material?.name || 'Unknown',
-              type: comp.material?.type || '',
-              color: comp.material?.color || null,
-              gramsNeeded: gramsForItem,
-            });
-          }
-        }
-      }
-    }
-
-    // Fetch active stock for all needed materials in one query
-    const materialIds = Array.from(materialNeeds.keys());
-    type MaterialAvailability = {
-      materialId: string; name: string; type: string; color: string | null;
-      gramsNeeded: number; totalStock: number; reservedStock: number;
-      freeStock: number; hasEnoughStock: boolean;
+    return {
+      ...order,
+      items,
+      materialAvailability: availability.materials,
+      partAvailability,
+      printFiles,
+      stockAllocations,
+      warnings: dedupe([...warnings, ...availability.warnings]),
     };
-    let materialAvailability: MaterialAvailability[] = [];
-    if (materialIds.length > 0) {
-      // 1. Get total available stock
-      const stockData = await this.prisma.spool.groupBy({
-        by: ['materialId'],
-        where: { materialId: { in: materialIds }, isActive: true },
-        _sum: { currentWeight: true },
-      });
-      const stockMap = new Map(stockData.map(s => [s.materialId, s._sum.currentWeight || 0]));
+  }
 
-      // 2. Calculate reserved stock from other open orders (CONFIRMED, IN_PRODUCTION)
-      const reservingOrders = await this.prisma.order.findMany({
-        where: {
-          ...(excludeOrderId ? { id: { not: excludeOrderId } } : {}),
-          status: { in: ['CONFIRMED', 'IN_PRODUCTION'] },
-        },
-        select: {
-          id: true,
-          items: { select: { productId: true, quantity: true } },
-        },
-      });
-
-      // Gather all product IDs from reserving orders
-      const reservingProductIds = new Set<string>();
-      for (const ro of reservingOrders) {
-        for (const item of ro.items) {
-          if (item.productId) reservingProductIds.add(item.productId);
-        }
-      }
-
-      // Fetch BOM for all reserving products in one query
-      const reservingProducts = reservingProductIds.size > 0
-        ? await this.prisma.product.findMany({
-            where: { id: { in: Array.from(reservingProductIds) } },
-            include: { components: { select: { materialId: true, gramsUsed: true, quantity: true } } },
-          })
-        : [];
-      const reservingProductMap = new Map(reservingProducts.map(p => [p.id, p]));
-
-      const reservedByOrders = new Map<string, number>();
-      const reservingOrderIds = new Set<string>();
-      for (const ro of reservingOrders) {
-        reservingOrderIds.add(ro.id);
-        for (const item of ro.items) {
-          if (!item.productId) continue;
-          const product = reservingProductMap.get(item.productId);
-          if (!product?.components) continue;
-          for (const comp of product.components) {
-            if (!comp.materialId || !materialIds.includes(comp.materialId)) continue;
-            const grams = comp.gramsUsed * comp.quantity * item.quantity;
-            reservedByOrders.set(comp.materialId, (reservedByOrders.get(comp.materialId) || 0) + grams);
-          }
-        }
-      }
-
-      // 3. Add reserved stock from standalone jobs (not tied to reserving orders)
-      const reservingJobs = await this.prisma.productionJob.findMany({
-        where: {
-          status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] },
-          // Exclude jobs tied to the current order
-          ...(excludeOrderId ? { NOT: { orderId: excludeOrderId } } : {}),
-        },
-        select: {
-          orderId: true,
-          materials: {
-            select: { materialId: true, gramsUsed: true },
-          },
-        },
-      });
-
-      for (const job of reservingJobs) {
-        // Skip jobs already counted via reserving orders
-        if (job.orderId && reservingOrderIds.has(job.orderId)) continue;
-        for (const jm of job.materials) {
-          if (!materialIds.includes(jm.materialId)) continue;
-          reservedByOrders.set(jm.materialId, (reservedByOrders.get(jm.materialId) || 0) + jm.gramsUsed);
-        }
-      }
-
-      materialAvailability = Array.from(materialNeeds.values()).map(need => {
-        const available = stockMap.get(need.materialId) || 0;
-        const reserved = reservedByOrders.get(need.materialId) || 0;
-        const freeStock = Math.max(0, available - reserved);
-        return {
-          ...need,
-          gramsNeeded: Math.round(need.gramsNeeded),
-          totalStock: Math.round(available),
-          reservedStock: Math.round(reserved),
-          freeStock: Math.round(freeStock),
-          hasEnoughStock: freeStock >= need.gramsNeeded,
-        };
-      });
+  /**
+   * S3. Preflight for the New Order screen: what would be short if this order
+   * were placed right now. Advisory, not a block — a print farm takes the order
+   * and buys filament, it does not turn the customer away.
+   */
+  async checkStock(body: unknown) {
+    const b = isObject(body) ? body : {};
+    const raw = parseItemsArray(b.items, { min: 0, max: MAX_LINES, tooMany: 'Check at most 100 lines at a time' });
+    const ctx = new CatalogRequestContext();
+    const lines: PlannedLine[] = [];
+    await this.resolver.preloadVariants(raw.map((it) => (typeof it.variantId === 'string' ? it.variantId : '')).filter(Boolean), ctx);
+    for (let i = 0; i < raw.length; i++) {
+      const it = raw[i];
+      const prefix = `items[${i}]: `;
+      const q = it.quantity;
+      // Lines still being typed (quantity missing, empty or 0) are skipped, as before.
+      if (q === undefined || q === null || q === '' || q === 0 || q === '0') continue;
+      const n = typeof q === 'number' ? q : typeof q === 'string' ? Number(q) : NaN;
+      if (!Number.isInteger(n) || n < 1 || n > 100_000) throw new BadRequestException(`${prefix}quantity must be a whole number from 1 to 100000`);
+      const line = parseStaffLine(it, i);
+      if (!line.productId && !line.variantId) continue; // custom line: nothing to print
+      if (!line.productId && (line.sizeOptionId || line.colourOptionId)) throw new BadRequestException(`${prefix}choose the product for this size or colour`);
+      const mapped = mapLegacyVariantId(line, (id) => ctx.variants.get(id) ?? null, prefix);
+      const config = mapped.productId ? await this.resolver.loadConfig(mapped.productId, ctx) : null;
+      if (!config) throw new BadRequestException(`${prefix}product not found`);
+      validatePair(this.resolver.pairContext(config), mapped.sizeOptionId, mapped.colourOptionId, { audience: 'STAFF', prefix });
+      lines.push({ productId: config.product.id, sizeOptionId: mapped.sizeOptionId, colourOptionId: mapped.colourOptionId, quantity: n });
     }
-
-    return materialAvailability;
-  }
-
-  /**
-   * Preflight for the New Order screen: what would be short if this order were
-   * placed right now. Advisory, not a block — a print farm takes the order and
-   * buys filament, it does not turn the customer away.
-   */
-  async checkStock(items: Array<{ productId?: string | null; quantity: number }>) {
-    const normalised = (items || [])
-      .filter(i => i && Number.isFinite(i.quantity) && i.quantity > 0)
-      .map(i => ({ productId: i.productId ?? null, quantity: i.quantity }));
-    if (normalised.length === 0) return { materials: [], shortages: [], ok: true };
-
-    const materials = await this.computeMaterialAvailability(normalised, null);
-    const shortages = materials.filter(m => !m.hasEnoughStock);
-    return { materials, shortages, ok: shortages.length === 0 };
-  }
-
-  /**
-   * The slicer files needed to actually print this order, so the operator does
-   * not have to go hunting through the product catalogue for them. One entry
-   * per component that was onboarded from a 3MF/G-code upload.
-   */
-  private async getPrintFiles(items: Array<{ id: string; productId: string | null; quantity: number }>) {
-    const productIds = Array.from(
-      new Set(items.map(i => i.productId).filter((p): p is string => !!p)),
-    );
-    if (productIds.length === 0) return [];
-
-    const components = await this.prisma.productComponent.findMany({
-      where: { productId: { in: productIds }, attachmentId: { not: null } },
-      select: {
-        id: true, productId: true, description: true, gcodeFilename: true,
-        colorChanges: true, attachmentId: true,
-        product: { select: { name: true } },
-      },
-      orderBy: { sortOrder: 'asc' },
-    });
-    if (components.length === 0) return [];
-
-    // The attachment may have been deleted out from under the component; only
-    // offer links that will actually resolve.
-    const attachments = await this.prisma.attachment.findMany({
-      where: { id: { in: components.map(c => c.attachmentId!) } },
-      select: { id: true, originalName: true, sizeBytes: true },
-    });
-    const byId = new Map(attachments.map(a => [a.id, a]));
-
-    return components.flatMap(c => {
-      const file = byId.get(c.attachmentId!);
-      if (!file) return [];
-      return items
-        .filter(i => i.productId === c.productId)
-        .map(i => ({
-          orderItemId: i.id,
-          productName: c.product?.name ?? 'Product',
-          component: c.description,
-          quantity: i.quantity,
-          attachmentId: c.attachmentId!,
-          filename: c.gcodeFilename || file.originalName,
-          sizeBytes: file.sizeBytes,
-          colorChanges: c.colorChanges,
-        }));
-    });
+    if (!lines.length) return { materials: [], shortages: [], ok: true, warnings: [] };
+    const { materials, warnings } = await this.availabilityOf(lines, null, ctx);
+    const shortages = materials.filter((m) => !m.hasEnoughStock);
+    return { materials, shortages, ok: shortages.length === 0, warnings: dedupe(warnings) };
   }
 
   /**
@@ -414,6 +317,7 @@ export class OrdersService {
     });
   }
 
+  /** Customer "My orders": explicit select (§0.2), no pricing metadata. */
   async findForCustomer(customerId: string) {
     return this.prisma.order.findMany({
       where: { customerId },
@@ -429,94 +333,30 @@ export class OrdersService {
     });
   }
 
-  async createForCustomer(customerId: string, dto: CustomerCreateOrderDto) {
-    if (!dto.items?.length) throw new BadRequestException('Order must have at least one item');
+  /**
+   * S5. Customers pay the size's standard price — never a tier, never an
+   * override (§3.9) — and their lines carry the server label only. The pair is
+   * checked with the CUSTOMER rules after the FOR SHARE locks.
+   */
+  async createForCustomer(customerId: string, body: unknown) {
+    const b = isObject(body) ? body : {};
+    const items = parseItemsArray(b.items, { max: 50, tooMany: 'An order can have at most 50 lines' }).map(parseCustomerLine);
+    const notes = optionalText(b.notes, 1000);
+    const orderNumber = await this.nextOrderNumber();
 
-    for (const item of dto.items) {
-      if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 50) {
-        throw new BadRequestException('Quantity must be a whole number between 1 and 50');
-      }
-    }
+    const order = await this.prisma.$transaction(async (tx: any) => {
+      await lockLineRows(tx, items);
+      const lines = await this.pricing.resolveLines(items, { audience: 'CUSTOMER', db: tx, ctx: new CatalogRequestContext() });
+      const totals = documentTotals(lines, await taxRateOf(tx));
+      const created = await tx.order.create({ data: { orderNumber, customerId, notes, ...totals } });
+      for (const l of lines) await tx.orderItem.create({ data: { orderId: created.id, ...orderItemColumns(l) } });
+      return tx.order.findUnique({ where: { id: created.id }, select: CUSTOMER_ORDER_SELECT });
+    }, TX_OPTS);
 
-    // Resolve prices from DB — never trust client-supplied prices
-    const resolvedItems = await Promise.all(
-      dto.items.map(async item => {
-        if (item.variantId) {
-          const variant = await this.prisma.productVariant.findFirst({
-            where: { id: item.variantId, isActive: true },
-            select: { id: true, name: true, basePrice: true, product: { select: { id: true, name: true } } },
-          });
-          if (!variant) throw new BadRequestException('Selected option is no longer available');
-          const variantPrice = variant.basePrice ?? 0;
-          if (variantPrice <= 0) throw new BadRequestException(`"${variant.name}" has no price set — please contact us for a quote`);
-          return {
-            productId: variant.product.id,
-            variantId: variant.id,
-            description: `${variant.product.name} — ${variant.name}`,
-            quantity: item.quantity,
-            unitPrice: variantPrice,
-            totalPrice: Math.round(item.quantity * variantPrice * 1000) / 1000,
-          };
-        } else if (item.productId) {
-          const product = await this.prisma.product.findFirst({
-            where: { id: item.productId, isActive: true },
-            select: { id: true, name: true, basePrice: true },
-          });
-          if (!product) throw new BadRequestException('Selected product is no longer available');
-          if (product.basePrice <= 0) throw new BadRequestException(`"${product.name}" has no price set — please contact us for a quote`);
-          return {
-            productId: product.id,
-            variantId: undefined,
-            description: product.name,
-            quantity: item.quantity,
-            unitPrice: product.basePrice,
-            totalPrice: Math.round(item.quantity * product.basePrice * 1000) / 1000,
-          };
-        }
-        throw new BadRequestException('Each item must have variantId or productId');
-      }),
-    );
-
-    let orderNumber: string | undefined;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        orderNumber = await generateNumber(this.prisma, 'ORD', 'order');
-        break;
-      } catch (e: unknown) {
-        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
-      }
-    }
-    if (!orderNumber) throw new InternalServerErrorException('Failed to generate unique document number');
-
-    const subtotal = Math.round(resolvedItems.reduce((sum, item) => sum + item.totalPrice, 0) * 1000) / 1000;
-    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
-    const taxRateRaw = parseFloat(taxRateSetting?.value || '0');
-    const taxRate = (taxRateRaw >= 0 && taxRateRaw <= 100) ? taxRateRaw / 100 : 0;
-    const tax = Math.round(subtotal * taxRate * 1000) / 1000;
-    const total = Math.round((subtotal + tax) * 1000) / 1000;
-    const sanitizedNotes = dto.notes
-      ? dto.notes.replace(/<[^>]*>/g, '').trim().slice(0, 1000) || undefined
-      : undefined;
-
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber,
-        customerId,
-        notes: sanitizedNotes,
-        subtotal,
-        tax,
-        total,
-        items: { create: resolvedItems },
-      },
-      include: {
-        items: true,
-        customer: { select: { name: true } },
-      },
-    });
-
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { name: true } }).catch(() => null);
     this.discord?.notifyNewPortalOrder({
       orderNumber: order.orderNumber,
-      customerName: (order.customer as { name: string } | null)?.name ?? 'Customer',
+      customerName: customer?.name ?? 'Customer',
       total: order.total,
       itemCount: order.items.length,
     }).catch(() => {});
@@ -524,24 +364,38 @@ export class OrdersService {
     return order;
   }
 
-  async update(id: string, dto: UpdateOrderDto) {
-    const existing = await this.findOne(id);
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+  /**
+   * S9. Moving an order to CANCELLED (from any other status) and returning its
+   * printed-stock allocations happen in one transaction; the guarded status
+   * change comes first, so a second cancel releases nothing.
+   */
+  async update(id: string, body: unknown) {
+    const b = isObject(body) ? body : {};
+    const status = b.status === undefined || b.status === null || b.status === '' ? undefined : (requiredEnum(b.status, 'status', ORDER_STATUSES) as OrderStatus);
+    const notes = b.notes === undefined ? undefined : b.notes === null ? null : String(b.notes).slice(0, 5000);
+    const dueDate = optionalDate(b.dueDate, 'dueDate');
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: {
-        status: dto.status ?? undefined,
-        notes: dto.notes,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-      },
-      include: { customer: true, items: true },
-    });
+    const existing = await this.prisma.order.findUnique({ where: { id }, select: { status: true } });
+    if (!existing) throw new NotFoundException('Order not found');
+
+    let released: Array<{ componentId: string; colourKey: string; units: number }> = [];
+    if (status === 'CANCELLED' && existing.status !== 'CANCELLED') {
+      released = await this.prisma.$transaction(async (tx: any) => {
+        const flipped = await tx.order.updateMany({ where: { id, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED', notes, dueDate } });
+        if (flipped.count === 0) return [];
+        const credits = await this.stock.releaseForOrder(tx, id);
+        return credits.map((c) => ({ componentId: c.componentId, colourKey: c.colourKey, units: c.quantity }));
+      }, TX_OPTS);
+    } else {
+      await this.prisma.order.update({ where: { id }, data: { status: status ?? undefined, notes, dueDate } });
+    }
+    const updated = await this.prisma.order.findUnique({ where: { id }, include: { customer: true, items: true } });
+    if (!updated) throw new NotFoundException('Order not found');
 
     // Fire customer notifications on status transitions
     const prevStatus = existing.status;
     const newStatus = updated.status;
-    if (dto.status && newStatus !== prevStatus) {
+    if (status && newStatus !== prevStatus) {
       const customer = updated.customer as CustomerRecord | null;
       const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
 
@@ -567,6 +421,130 @@ export class OrdersService {
     }
 
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
-    return updated;
+    const stockReleased = (await labelStock(this.prisma, released)).map((r) => ({ componentDescription: r.componentDescription, colourLabel: r.colourLabel, units: r.units }));
+    return { ...updated, stockReleased };
   }
+
+  /**
+   * S11 for orders (§3.9 "Changing a sold line's colour"). Splits a product line
+   * into same-size colour lines without re-pricing. In one transaction: FOR SHARE
+   * locks, pair validation on the locked rows, WP6's cancelQueuedJobsForItem
+   * (409 if a job of the line has started), releaseForItem, then the line writes.
+   * `dryRun` lists the jobs and stock without writing; the write needs `confirm`
+   * when either list is non-empty.
+   */
+  async changeLineColour(orderId: string, itemId: string, body: unknown, dryRun = false, userId?: string | null) {
+    const out = await this.prisma.$transaction(async (tx: any) => {
+      const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
+      if (!item || item.orderId !== orderId) throw new NotFoundException('Order line not found');
+      if (item.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');
+      if (!item.productId) throw new BadRequestException('Only product lines have colours');
+      const input = parseColourSplit(body, item.quantity);
+
+      const ctx = new CatalogRequestContext();
+      await this.resolver.preloadVariants([item.variantId, item.sizeOptionId, item.colourOptionId].filter((x: string | null): x is string => !!x), ctx, tx);
+      const eff = this.resolver.effectiveOptions(item, ctx);
+      if (eff.skip) throw new BadRequestException("This line's size or colour no longer exists");
+
+      if (!(await lockProduct(tx, item.productId, 'SHARE'))) throw new BadRequestException("This line's product no longer exists");
+      const optionIds = [...new Set([eff.sizeOptionId, eff.colourOptionId, ...input.colours.map((c) => c.colourOptionId)].filter((x): x is string => !!x))].sort();
+      const locked = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
+      for (const c of input.colours) {
+        if (c.colourOptionId && !locked.has(c.colourOptionId)) throw new BadRequestException('That colour no longer exists');
+      }
+
+      const config = await this.resolver.requireConfig(item.productId, ctx, tx);
+      const pc = this.resolver.pairContext(config);
+      const size = eff.sizeOptionId ? config.options.find((o) => o.id === eff.sizeOptionId) ?? null : null;
+      if (eff.sizeOptionId && !size) throw new BadRequestException("This line's size no longer exists");
+      const oldColour = eff.colourOptionId ? config.options.find((o) => o.id === eff.colourOptionId) ?? null : null;
+      const split = splitLineByColour(pc, item, size, oldColour, eff.colourOptionId ? ctx.variants.get(eff.colourOptionId)?.name ?? null : null, input.colours);
+      const warnings: Problem[] = [];
+      for (const s of split) {
+        const bom = this.resolver.resolveWithConfig(config, { sizeOptionId: size?.id ?? null, colourOptionId: s.colourOptionId });
+        for (const w of bom.warnings) if (w.code === 'COLOUR_OPTION_NOT_SET_UP') warnings.push(w);
+      }
+
+      const jobs: Array<{ id: string; name: string; status: string }> = await tx.productionJob.findMany({
+        where: { orderItemId: itemId },
+        select: { id: true, name: true, status: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (jobs.some((j) => STARTED_JOB.includes(j.status))) throw new ConflictException(LINE_STARTED_MESSAGE);
+      const queued = jobs.filter((j) => j.status === 'QUEUED').map((j) => ({ id: j.id, name: j.name }));
+      const allocations = await netAllocations(tx, [itemId]);
+
+      if (dryRun) {
+        return { dryRun: true as const, cancelledJobs: queued, released: allocations, split, warnings };
+      }
+      if ((queued.length || allocations.length) && !input.confirm) throw new BadRequestException('Confirm the jobs and stock listed first');
+
+      const cancelledJobs = await cancelQueuedJobsForItem(tx, itemId);
+      const credits = await this.stock.releaseForItem(tx, itemId, userId ?? null);
+
+      const sizeOptionId = size?.id ?? null;
+      const [first, ...rest] = split;
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: {
+          sizeOptionId,
+          colourOptionId: first.colourOptionId,
+          variantId: sizeOptionId ?? first.colourOptionId,
+          quantity: first.quantity,
+          totalPrice: first.totalPrice,
+          description: first.description,
+        },
+      });
+      for (const s of rest) {
+        await tx.orderItem.create({
+          data: {
+            orderId,
+            productId: item.productId,
+            sizeOptionId,
+            colourOptionId: s.colourOptionId,
+            variantId: sizeOptionId ?? s.colourOptionId,
+            description: s.description,
+            quantity: s.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: s.totalPrice,
+            listUnitPrice: item.listUnitPrice,
+            priceSource: item.priceSource,
+            tierMinQty: item.tierMinQty,
+            priceOverrideReason: item.priceOverrideReason,
+          },
+        });
+      }
+      return {
+        dryRun: false as const,
+        cancelledJobs,
+        released: credits.map((c) => ({ componentId: c.componentId, colourKey: c.colourKey, units: c.quantity })),
+        split,
+        warnings,
+      };
+    }, TX_OPTS);
+
+    const stockReleased = (await labelStock(this.prisma, out.released)).map((r) => ({ componentDescription: r.componentDescription, colourLabel: r.colourLabel, units: r.units }));
+    if (out.dryRun) {
+      return {
+        dryRun: true,
+        lines: out.split.map((s) => ({ colourOptionId: s.colourOptionId, quantity: s.quantity, totalPrice: s.totalPrice, description: s.description })),
+        cancelledJobs: out.cancelledJobs,
+        stockReleased,
+        warnings: out.warnings,
+      };
+    }
+    this.cache?.invalidate('dashboard:kpis').catch(() => {});
+    const order = await this.findOne(orderId);
+    return { ...order, cancelledJobs: out.cancelledJobs, stockReleased, warnings: dedupe([...order.warnings, ...out.warnings]) };
+  }
+}
+
+function dedupe(list: Problem[]): Problem[] {
+  const seen = new Set<string>();
+  return list.filter((w) => {
+    const k = `${w.code}|${w.message}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }

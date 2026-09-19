@@ -10,10 +10,12 @@
  */
 
 type Row = Record<string, any>;
-interface Rel { model: string; many: boolean; fk: string; local?: string }
+interface Rel { model: string; many: boolean; fk: string; local?: string; reverse?: boolean }
 
 const many = (model: string, fk: string): Rel => ({ model, many: true, fk });
 const one = (model: string, local: string): Rel => ({ model, many: false, fk: 'id', local });
+/** to-one where the OTHER row holds the foreign key (Quote.order via Order.quoteId) */
+const oneReverse = (model: string, fk: string): Rel => ({ model, many: false, fk, reverse: true });
 
 const RELATIONS: Record<string, Record<string, Rel>> = {
   product: {
@@ -46,8 +48,13 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   colourOptionSlot: { material: one('material', 'materialId'), variant: one('productVariant', 'variantId'), colourSlot: one('productColourSlot', 'colourSlotId') },
   plateLayout: { slots: many('plateLayoutSlot', 'layoutId') },
   productPart: { part: one('part', 'partId'), product: one('product', 'productId') },
-  orderItem: { order: one('order', 'orderId') },
+  orderItem: { order: one('order', 'orderId'), productionJobs: many('productionJob', 'orderItemId') },
   quoteItem: { quote: one('quote', 'quoteId') },
+  // orders and quotes specs (WP7)
+  quote: {
+    items: many('quoteItem', 'quoteId'), customer: one('customer', 'customerId'),
+    attachments: many('attachment', 'quoteId'), order: oneReverse('order', 'quoteId'),
+  },
   productionJob: {
     plates: many('jobPlate', 'jobId'), materials: many('jobMaterial', 'jobId'),
     // production specs (WP6)
@@ -58,7 +65,10 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   jobMaterial: { job: one('productionJob', 'jobId'), material: one('material', 'materialId'), spool: one('spool', 'spoolId'), slicedMaterial: one('material', 'slicedMaterialId') },
   material: { spools: many('spool', 'materialId') },
   spool: { material: one('material', 'materialId'), location: one('location', 'locationId') },
-  order: { items: many('orderItem', 'orderId'), customer: one('customer', 'customerId') },
+  order: {
+    items: many('orderItem', 'orderId'), customer: one('customer', 'customerId'),
+    productionJobs: many('productionJob', 'orderId'), invoices: many('invoice', 'orderId'), quote: one('quote', 'quoteId'),
+  },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -81,7 +91,7 @@ const MODELS = [
   'colourSizeExclusion', 'priceTier', 'variantPriceTier', 'componentColourStock', 'componentStockMovement',
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
-  'jobPart', 'user', 'location', 'customer',
+  'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
 ];
 
 const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material' };
@@ -106,6 +116,7 @@ export function fakeCatalogDb() {
   function related(model: string, row: Row, key: string): Row[] | Row | null {
     const r = rel(model, key)!;
     if (r.many) return tables[r.model].filter((c) => c[r.fk] === row.id);
+    if (r.reverse) return tables[r.model].find((c) => c[r.fk] === row.id) ?? null;
     const v = row[r.local!];
     return v == null ? null : tables[r.model].find((c) => c.id === v) ?? null;
   }
