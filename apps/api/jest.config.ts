@@ -8,6 +8,9 @@ const config: Config = {
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.module.ts', '!src/main.ts'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  // Half the cores: with one worker per core the catalog-core timing budgets
+  // (§7.1 item 43) measure scheduler contention instead of the code.
+  maxWorkers: '50%',
   moduleNameMapper: {
     '^@printforge/types$': '<rootDir>/../../packages/types/src/index.ts',
   },
