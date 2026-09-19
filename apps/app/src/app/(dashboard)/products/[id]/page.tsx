@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { notFound, useParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,11 @@ import { ProductPartsCard } from './ProductPartsCard';
 import { ProductPhotosCard } from './ProductPhotosCard';
 import { OptionsCard } from './OptionsCard';
 import { useBomScope } from './useBomScope';
+import { ComponentsCard } from './ComponentsCard';
+import { ReadinessCard } from './ReadinessCard';
+import { BulkPricingCard } from './BulkPricingCard';
+import { NewJobDialog, type NewJobPrefill } from './NewJobDialog';
+import { defaultPair, pickerOptionsFromDetail } from '@/components/products/OptionPickers';
 
 /**
  * Product detail page (spec §5.1/§5.2): a composition only. Sections, top to
@@ -23,9 +29,9 @@ import { useBomScope } from './useBomScope';
  *   H  BulkPricingCard      (WP9  — Bulk pricing)
  *   I  ProductPartsCard     (WP8)
  *   J  ProductPhotosCard    (WP8)
- * Sections C–H take `data` (ProductPageData from useProduct) and call
- * data.reload() / data.reloadCost() after writes. Until they land they render
- * nothing, and the page calls none of the routes the backend removed.
+ * Sections C–H take `data` (or the fields they need) and call
+ * data.reload() / data.reloadCost() after writes. The New job dialog (G) is
+ * opened by the header's `New job` and by F's `Create job for this`.
  *
  * BOM scope (which size section D shows) is page state from useBomScope:
  * `bomScope` ('standard' or a size id) and `setBomScope` go to WP9's
@@ -36,6 +42,7 @@ export default function ProductDetailPage() {
   const data = useProduct(params.id);
   const { product } = data;
   const scope = useBomScope(product);
+  const [newJob, setNewJob] = useState<NewJobPrefill | null>(null);
 
   if (data.status === 'notFound') notFound();
   if (data.status === 'loading') return <Loading />;
@@ -59,6 +66,7 @@ export default function ProductDetailPage() {
         canEdit={data.canEdit}
         isAdmin={data.isAdmin}
         onChanged={() => void data.reload()}
+        onNewJob={() => setNewJob({ ...defaultPair(pickerOptionsFromDetail(product)), quantity: 1 })}
       />
 
       <PricingCard
@@ -73,9 +81,11 @@ export default function ProductDetailPage() {
 
       <OptionsCard data={data} product={product} onConfigureSize={scope.onConfigureSize} />
 
-      {/* D. Bill of materials — <ComponentsCard data={data} scope={scope.bomScope} onScopeChange={scope.setBomScope} … /> (WP9) */}
-      {/* F. Production readiness — <ReadinessCard data={data} /> (WP9) */}
-      {/* H. Bulk pricing — <BulkPricingCard data={data} /> (WP9) */}
+      <ComponentsCard data={data} product={product} scope={scope.bomScope} onScopeChange={scope.setBomScope} />
+
+      <ReadinessCard product={product} costVersion={data.costVersion} canEdit={data.canEdit} onCreateJob={setNewJob} />
+
+      <BulkPricingCard product={product} costVersion={data.costVersion} canEdit={data.canEdit} onSaved={() => void data.reloadCost()} />
 
       <ProductPartsCard productId={product.id} canEdit={data.canEdit} onChanged={() => void data.reloadCost()} />
 
@@ -86,6 +96,10 @@ export default function ProductDetailPage() {
         canEdit={data.canEdit}
         onChanged={data.reloadImages}
       />
+
+      {data.canEdit && (
+        <NewJobDialog product={product} prefill={newJob} loadPrinters={data.loadPrinters} onClose={() => setNewJob(null)} />
+      )}
     </div>
   );
 }

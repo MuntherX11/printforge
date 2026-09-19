@@ -1,145 +1,208 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
+import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Trash2, AlertTriangle, TrendingDown } from 'lucide-react';
+import { bandLabel, formatAmount, formatPct } from '@/lib/product-format';
+import type { BulkFloor, PriceTierRow, ProductDetail } from '@/lib/types/api';
+import { errorText } from './options-ui';
+import { STANDARD_KEY } from './options-model';
+import { scopeLabel, scopeOptions } from './bom-model';
+import {
+  basisLine, checkTiers, draftsOf, marginTone, newDraft, sameTiers, sortDrafts, tiersBody, type TierDraft,
+} from './bulk-pricing-model';
 
-interface Tier { minQty: number | ''; unitPrice: number | ''; }
-interface FloorRow { qty: number; unitCost: number; calibrated: boolean; }
-
-/**
- * Staff-set quantity price breaks, checked live against the true cost floor.
- *
- * The floor comes from /bulk-costs: components with plate calibration amortise
- * setup and colour-change time across the plate; uncalibrated ones are assumed
- * linear, which over-states cost — so a green margin here is trustworthy, and
- * a red one is a real loss, not an estimate artefact.
- */
-export function BulkPricingCard({ productId, basePrice, initialTiers, onSaved }: {
-  productId: string;
-  basePrice: number;
-  initialTiers: Array<{ minQty: number; unitPrice: number }>;
+interface Props {
+  product: ProductDetail;
+  costVersion: string | null;
+  canEdit: boolean;
   onSaved: () => void;
-}) {
+}
+
+const COPY = 'Staff-only. Applied automatically on New Order and New Quote lines. The quantity counts every line of this size on the order, whatever the colour (for example 15 Red + 10 Black = 25). Different sizes never count together. Customers never see tiers; the customer shop always charges the list price. Staff can still type a different line price — they\'ll see a warning below cost.';
+const TONE = { below: 'text-red-600 dark:text-red-400', thin: 'text-amber-700 dark:text-amber-300', ok: 'text-green-700 dark:text-green-400' };
+const cellInput = 'h-8 w-24 rounded-md border bg-white px-2 text-sm tabular-nums dark:bg-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+
+/** Section H (spec §5.2 H): fixed unit prices per quantity band, per size; margins warn, never block. */
+export function BulkPricingCard({ product, costVersion, canEdit, onSaved }: Props) {
   const { toast } = useToast();
-  const formatCurrency = useFormatCurrency();
-  const [tiers, setTiers] = useState<Tier[]>(initialTiers.map(t => ({ ...t })));
-  const [floors, setFloors] = useState<Record<number, FloorRow>>({});
+  const fmt = useFormatCurrency();
+  const [sizeKey, setSizeKey] = useState(STANDARD_KEY);
+  const saved: PriceTierRow[] = useMemo(
+    () => (sizeKey === STANDARD_KEY ? product.priceTiers : product.sizes.find(s => s.id === sizeKey)?.priceTiers ?? []),
+    [product, sizeKey],
+  );
+  const savedKey = JSON.stringify(saved.map(t => [t.minQty, t.unitPrice]));
+  const [rows, setRows] = useState<TierDraft[]>(() => draftsOf(saved));
+  const [floor, setFloor] = useState<{ data: BulkFloor | null; error: string | null }>({ data: null, error: null });
+  const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { setTiers(initialTiers.map(t => ({ ...t }))); }, [JSON.stringify(initialTiers)]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setRows(draftsOf(saved)); }, [sizeKey, savedKey]);
+  useEffect(() => { if (!product.sizes.some(s => s.id === sizeKey)) setSizeKey(STANDARD_KEY); }, [product.sizes, sizeKey]);
 
-  // Refresh the floor for the quantities on screen (debounced — it prices a
-  // whole BOM per quantity).
-  const qtyKey = tiers.map(t => t.minQty).filter(q => q !== '' && Number(q) >= 2).join(',');
+  const listPrice = floor.data?.size.listPrice ?? null;
+  const checks = checkTiers(rows, listPrice, fmt);
+  const body = tiersBody(checks);
+  const dirty = !body || !sameTiers(body, saved);
+  const qtys = [...new Set(checks.map(c => c.minQty).filter((q): q is number => q !== null))].sort((a, b) => a - b);
+  const qtyKey = qtys.slice(0, 20).join(',');
+
   useEffect(() => {
-    if (!qtyKey) { setFloors({}); return; }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      api.get<any>(`/products/${productId}/bulk-costs?qtys=1,${qtyKey}`)
-        .then(r => {
-          if (cancelled) return;
-          const map: Record<number, FloorRow> = {};
-          for (const row of r?.results || []) map[row.qty] = row;
-          setFloors(map);
-        })
-        .catch(() => { if (!cancelled) setFloors({}); });
+    let live = true;
+    const t = window.setTimeout(() => {
+      const q = new URLSearchParams();
+      if (sizeKey !== STANDARD_KEY) q.set('sizeOptionId', sizeKey);
+      if (qtyKey) q.set('minQtys', qtyKey);
+      api.get<BulkFloor>(`/products/${product.id}/bulk-floor?${q}`)
+        .then(data => { if (live) setFloor({ data, error: null }); })
+        .catch(err => { if (live) setFloor(f => ({ data: f.data, error: errorText(err, 'Couldn\'t load the cost floor') })); });
     }, 400);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [qtyKey, productId]);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [product.id, sizeKey, qtyKey, costVersion, retry]);
 
-  function marginFor(t: Tier): { pct: number; calibrated: boolean } | null {
-    if (t.minQty === '' || t.unitPrice === '' || !Number(t.unitPrice)) return null;
-    const f = floors[Number(t.minQty)];
-    if (!f) return null;
-    return { pct: ((Number(t.unitPrice) - f.unitCost) / Number(t.unitPrice)) * 100, calibrated: f.calibrated };
-  }
-
-  async function save() {
+  const update = (key: number, patch: Partial<TierDraft>) => setRows(rs => rs.map(r => (r.key === key ? { ...r, ...patch } : r)));
+  const save = useCallback(async () => {
+    if (!body) return;
     setSaving(true);
     try {
-      const clean = tiers
-        .filter(t => t.minQty !== '' && t.unitPrice !== '')
-        .map(t => ({ minQty: Number(t.minQty), unitPrice: Number(t.unitPrice) }));
-      await api.put(`/products/${productId}/price-tiers`, { tiers: clean });
-      toast('success', clean.length ? `${clean.length} price tier${clean.length === 1 ? '' : 's'} saved` : 'Bulk pricing cleared');
+      await api.put(`/products/${product.id}/price-tiers`, { sizeOptionId: sizeKey === STANDARD_KEY ? null : sizeKey, tiers: body });
+      toast('success', body.length ? `Saved ${body.length} tier${body.length === 1 ? '' : 's'} for ${scopeLabel(product, sizeKey)}` : 'Bulk pricing cleared');
       onSaved();
-    } catch (err: unknown) {
-      toast('error', (err as Error).message);
+    } catch (err) {
+      toast('error', errorText(err, 'Couldn\'t save the tiers'));
     } finally {
       setSaving(false);
     }
-  }
+  }, [body, product, sizeKey, toast, onSaved]);
+
+  const f = floor.data;
+  const multiColour = (f?.colours.length ?? 0) > 1;
+  const unknown = f?.problems.filter(p => p.code === 'COLOUR_COST_UNKNOWN') ?? [];
+  const blocking = f && !f.available ? f.problems.filter(p => p.code !== 'COLOUR_COST_UNKNOWN') : [];
+  const thin = f?.thinMarginPct ?? 20;
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2"><TrendingDown className="h-4 w-4" /> Bulk Pricing</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setTiers(prev => [...prev, { minQty: '', unitPrice: '' }])}>
-            <Plus className="h-4 w-4 mr-1" /> Add Tier
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle>Bulk pricing (staff only)</CardTitle>
+            {product.sizes.length > 0 && (
+              <select aria-label="Size" value={sizeKey} onChange={e => setSizeKey(e.target.value)}
+                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+                {scopeOptions(product).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            )}
+            {canEdit && dirty && <Badge variant="warning">Unsaved changes</Badge>}
+          </div>
+          {canEdit && (
+            <Button variant="outline" size="sm" onClick={() => setRows(rs => [...rs, newDraft()])} disabled={rows.length >= 20}>
+              <Plus className="mr-1 h-4 w-4" /> Add tier
+            </Button>
+          )}
         </div>
       </CardHeader>
-      <CardContent>
-        <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
-          Applied automatically on the staff order form by line quantity. Customers never see these —
-          single price is {formatCurrency(basePrice)}.
-        </p>
-        {tiers.length === 0 ? (
-          <p className="py-4 text-center text-sm text-gray-500">No tiers — every quantity pays {formatCurrency(basePrice)}.</p>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-gray-600 dark:text-gray-400">{COPY}{product.sizes.length > 0 && ' Each size has its own tiers.'}</p>
+        {floor.error && (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            Couldn&apos;t load the cost floor — <button type="button" className="font-medium underline" onClick={() => setRetry(n => n + 1)}>Retry</button>
+          </p>
+        )}
+        {blocking.map((p, i) => <p key={i} className="text-sm text-red-600 dark:text-red-400">{p.message}</p>)}
+        {unknown.map((p, i) => (
+          <p key={i} className="text-sm text-amber-700 dark:text-amber-300">{p.message} — set its cost per gram on the Filaments page; it is not in the worst case.</p>
+        ))}
+
+        {rows.length === 0 ? (
+          <p className="py-3 text-center text-sm text-gray-500 dark:text-gray-400">
+            No tiers — every quantity of {scopeLabel(product, sizeKey)} pays the list price{listPrice !== null ? ` (${fmt(listPrice)})` : ''}.
+          </p>
         ) : (
-          <div className="space-y-2">
-            <div className="grid grid-cols-[90px_1fr_1fr_36px] gap-2 text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-              <span>Min qty</span><span>Price / unit</span><span>Margin vs true cost</span><span />
-            </div>
-            {tiers.map((t, i) => {
-              const m = marginFor(t);
-              return (
-                <div key={i} className="grid grid-cols-[90px_1fr_1fr_36px] items-center gap-2">
-                  <input
-                    type="number" min={2} step={1} value={t.minQty}
-                    onChange={e => setTiers(prev => prev.map((x, j) => j === i ? { ...x, minQty: e.target.value === '' ? '' : parseInt(e.target.value) } : x))}
-                    className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                  <input
-                    type="number" min={0.001} step={0.001} value={t.unitPrice}
-                    onChange={e => setTiers(prev => prev.map((x, j) => j === i ? { ...x, unitPrice: e.target.value === '' ? '' : parseFloat(e.target.value) } : x))}
-                    className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                  <span className="text-sm tabular-nums">
-                    {m === null ? (
-                      <span className="text-gray-400">—</span>
-                    ) : m.pct < 0 ? (
-                      <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                        <AlertTriangle className="h-3.5 w-3.5" /> {m.pct.toFixed(0)}% — below cost
-                      </span>
-                    ) : m.pct < 20 ? (
-                      <span className="text-amber-600 dark:text-amber-400">{m.pct.toFixed(0)}% — thin</span>
-                    ) : (
-                      <span className="text-green-600 dark:text-green-400">{m.pct.toFixed(0)}%{m.calibrated ? '' : ' (uncalibrated — real margin is higher)'}</span>
-                    )}
-                  </span>
-                  <button type="button" aria-label="Remove tier"
-                    onClick={() => setTiers(prev => prev.filter((_, j) => j !== i))}
-                    className="flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <th className="py-2 pr-3">Band</th><th className="pr-3">Min qty</th><th className="pr-3">Price / unit</th>
+                  <th className="pr-3">vs list</th><th className="pr-3">Example order</th><th className="pr-3">Cost / unit (worst in band)</th>
+                  <th className="pr-3">Profit / unit</th><th className="pr-3">Margin</th><th className="pr-3">Lowest price at {thin} % margin</th>
+                  {canEdit && <th />}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const c = checks[i];
+                  const next = qtys.find(q => c.minQty !== null && q > c.minQty);
+                  const band = c.minQty !== null ? f?.bands.find(b => b.minQty === c.minQty) : undefined;
+                  const price = c.unitPrice;
+                  const margin = band && price ? ((price - band.worstUnitCost) / price) * 100 : null;
+                  return (
+                    <tr key={r.key} className="border-b align-top last:border-0 dark:border-gray-800">
+                      <td className="py-2 pr-3 whitespace-nowrap">{c.minQty !== null ? bandLabel(c.minQty, next) : '—'}</td>
+                      <td className="py-2 pr-3">
+                        {canEdit ? (
+                          <input aria-label={`Tier ${i + 1} minimum quantity`} inputMode="numeric" value={r.minQty}
+                            onChange={e => update(r.key, { minQty: e.target.value })} onBlur={() => setRows(sortDrafts)}
+                            className={cn(cellInput, c.errors.minQty ? 'border-red-500' : 'border-gray-300 dark:border-gray-600')} />
+                        ) : c.minQty}
+                        {canEdit && c.errors.minQty && <p className="text-xs text-red-600 dark:text-red-400">{c.errors.minQty}</p>}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {canEdit ? (
+                          <input aria-label={`Tier ${i + 1} price per unit`} inputMode="decimal" value={r.unitPrice}
+                            onChange={e => update(r.key, { unitPrice: e.target.value })}
+                            className={cn(cellInput, c.errors.unitPrice ? 'border-red-500' : 'border-gray-300 dark:border-gray-600')} />
+                        ) : price !== null ? fmt(price) : '—'}
+                        {canEdit && c.errors.unitPrice && <p className="text-xs text-red-600 dark:text-red-400">{c.errors.unitPrice}</p>}
+                        {c.warnings.map(w => <p key={w} className="text-xs text-amber-700 dark:text-amber-300">{w}</p>)}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">{price !== null && listPrice ? `${price < listPrice ? '−' : '+'}${Math.abs(Math.round(((price - listPrice) / listPrice) * 100))} %` : '—'}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap tabular-nums">
+                        {price !== null && c.minQty !== null ? `${c.minQty} × ${formatAmount(price)} = ${formatAmount(Math.round(c.minQty * price * 1000) / 1000)}` : '—'}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">
+                        {band ? (
+                          <>
+                            <span>{fmt(band.worstUnitCost)} at qty {band.worstAtQty}{multiColour ? ` · ${band.worstColour.label}` : ''}</span>
+                            {multiColour && <p className="text-xs text-gray-500 dark:text-gray-400">standard colour {fmt(band.standardWorstUnitCost)}</p>}
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{basisLine(band)}</p>
+                          </>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">{band && price !== null ? fmt(price - band.worstUnitCost) : '—'}</td>
+                      <td className={cn('py-2 pr-3 whitespace-nowrap tabular-nums', margin !== null && TONE[marginTone(margin, thin)])}>
+                        {margin === null ? '—' : `${formatPct(margin)}${margin < 0 ? ' below cost' : margin < thin ? ' thin' : ''}`}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">{band && thin < 100 ? fmt(band.worstUnitCost / (1 - thin / 100)) : '—'}</td>
+                      {canEdit && (
+                        <td className="py-2">
+                          <button type="button" aria-label={`Remove tier ${i + 1}`} onClick={() => setRows(rs => rs.filter(x => x.key !== r.key))}
+                            className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-        <div className="mt-4 flex items-center gap-3">
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Tiers'}</Button>
-          {floors[1] && (
+
+        <div className="flex flex-wrap items-center gap-3">
+          {canEdit && <Button onClick={() => void save()} disabled={saving || !body || !dirty}>{saving ? 'Saving…' : 'Save tiers'}</Button>}
+          {f?.unitCostAtOne != null && (
             <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
-              True cost per unit at qty 1: {formatCurrency(floors[1].unitCost)}
-              {!floors[1].calibrated && ' (linear estimate — calibrate component plates for the real curve)'}
+              Cost per unit at qty 1 for {f.size.label}, standard colour: {fmt(f.unitCostAtOne)}{sizeKey === STANDARD_KEY ? ' (same as the Pricing card)' : ''}
             </span>
           )}
         </div>
