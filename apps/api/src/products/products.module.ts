@@ -11,6 +11,7 @@ import { ProductImageBackfillService } from './product-image-backfill.service';
 import { ProductImagesController } from './product-images.controller';
 import { ProductImagesService } from './product-images.service';
 import { ProductImportsController } from './product-imports.controller';
+import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { PlateLayoutsController } from './plate-layouts.controller';
 import { PlateLayoutsService } from './plate-layouts.service';
 import { ProductOnboardingService } from './product-onboarding.service';
@@ -24,7 +25,7 @@ import { VariantsService } from './variants.service';
   controllers: [ProductsController, ProductImagesController, VariantsController, ColourSlotsController, ProductImportsController, PlateLayoutsController],
   providers: [
     ProductsService, ProductComponentsService, VariantsService, ColourSlotsService,
-    ProductOnboardingService, ProductImagesService, ProductImageBackfillService, PlateLayoutsService,
+    ProductOnboardingService, ProductImagesService, ProductImageBackfillService, PlateLayoutsService, PlateLayoutBackfillService,
   ],
   exports: [ProductsService, ProductImagesService],
 })

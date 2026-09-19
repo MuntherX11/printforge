@@ -404,7 +404,7 @@ export function seedProduct(db: FakeCatalogDb, row: Row) {
   for (const c of components) {
     const { material, materials = [], plateLayouts = [], colourStock = [], ...rest } = c;
     mat(material);
-    db.insert('productComponent', { thumbnailAttachmentId: null, platedUnits: null, platedMinutes: null, platedGrams: null, ...rest, productId: row.id });
+    db.insert('productComponent', { thumbnailAttachmentId: null, ...rest, productId: row.id });
     materials.forEach((m: Row, i: number) => {
       mat(m.material);
       const { material: _m, ...cm } = m;

@@ -9,6 +9,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { WatchFolderService } from '../file-parser/watch-folder.service';
 import { ProductImageBackfillService } from './product-image-backfill.service';
+import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { ProductsController } from './products.controller';
 import { ProductsModule } from './products.module';
 
@@ -32,6 +33,7 @@ describe('ProductsModule routes', () => {
       .overrideProvider(ChunkUploadsService).useValue({ consume: jest.fn() })
       .overrideProvider(WatchFolderService).useValue({})
       .overrideProvider(ProductImageBackfillService).useValue({})
+      .overrideProvider(PlateLayoutBackfillService).useValue({})
       .compile();
     app = moduleRef.createNestApplication({ logger: false });
     await app.init();
