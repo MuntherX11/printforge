@@ -2,6 +2,20 @@ import type { ApiResponse, PaginatedResponse } from '@printforge/types';
 
 const API_BASE = '/api';
 
+/**
+ * Thrown for every non-2xx response. `message` is the server's `error` text
+ * (the envelope's `error` field); `status` lets callers tell a 404 from other
+ * failures (e.g. the product page shows notFound() only on 404).
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -14,7 +28,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `HTTP ${res.status}`);
+    throw new ApiError(error.error || `HTTP ${res.status}`, res.status);
   }
 
   const json = await res.json();
@@ -35,7 +49,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || error.message || `HTTP ${res.status}`);
+      throw new ApiError(error.error || error.message || `HTTP ${res.status}`, res.status);
     }
     const json = await res.json();
     return (json.data !== undefined ? json.data : json) as T;

@@ -4,6 +4,8 @@
  * models, since the API selects/includes specific fields per endpoint.
  */
 
+import type { ProductCostPayload as CostPayloadForCalculate } from '@printforge/types';
+
 // ============ ENUMS ============
 
 export type Role = 'ADMIN' | 'ACCOUNTING' | 'OPERATOR' | 'VIEWER';
@@ -569,4 +571,42 @@ export interface ApiProductMargin {
   cogs: number;
   grossProfit: number;
   margin: number;
+}
+
+// ============ PRODUCT PAGE (frontend-only shapes) ============
+
+/** GET /parts row (flat array when no page is requested). */
+export interface ApiPart {
+  id: string;
+  name: string;
+  sku: string | null;
+  category: string;
+  description: string | null;
+  unitCost: number;
+  stockQty: number;
+  reorderPoint: number;
+  isActive: boolean;
+}
+
+/** GET /products/:id/parts row (P21). */
+export interface ApiProductPartLine {
+  id: string;
+  productId: string;
+  partId: string;
+  quantity: number;
+  sortOrder: number;
+  part: ApiPart;
+}
+
+/** GET /products/:id/history (P7). */
+export interface ApiProductHistory {
+  orderLines: number;
+  quoteLines: number;
+  jobs: number;
+  canDelete: boolean;
+}
+
+/** POST /products/:id/calculate (P17): the P16 payload plus what was applied per size. */
+export interface ApiCalculateResult extends CostPayloadForCalculate {
+  applied: Array<{ sizeOptionId: string | null; applied: boolean; price: number | null }>;
 }
