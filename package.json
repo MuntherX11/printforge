@@ -1,5 +1,6 @@
 {
   "name": "printforge",
+  "version": "2.16.0",
   "private": true,
   "workspaces": [
     "packages/*",
