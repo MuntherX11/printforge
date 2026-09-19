@@ -20,6 +20,7 @@ export class PartsController {
   }
 
   @Get()
+  @UseGuards(StaffGuard)
   findAll(
     @Query() pagination: PaginationDto,
     @Query('page') rawPage?: string,
@@ -35,6 +36,7 @@ export class PartsController {
   }
 
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.partsService.findOne(id);
   }

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreatePartDto, UpdatePartDto, SetProductPartDto, PART_CATEGORIES } from '@printforge/types';
+import { CreatePartDto, UpdatePartDto, PART_CATEGORIES } from '@printforge/types';
+import { parsePartLine } from '../products/product-input';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { optionalNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
 
@@ -165,22 +166,25 @@ export class PartsService {
     });
   }
 
-  /** Add a part to a product's BOM, or update its quantity if already present. */
-  async setProductPart(productId: string, dto: SetProductPartDto) {
-    if (!Number.isInteger(dto.quantity) || dto.quantity < 1) {
-      throw new BadRequestException('Quantity must be a whole number of 1 or more');
-    }
+  /**
+   * Add a part to a product's BOM, or change its quantity if already present
+   * (P21). Allowlisted body; quantity is a whole number from 1 to 1000; an
+   * inactive part can't be added. The caller reprices after this write.
+   */
+  async setProductPart(productId: string, body: unknown) {
+    const { partId, quantity } = parsePartLine(body);
     const [product, part] = await Promise.all([
       this.prisma.product.findUnique({ where: { id: productId }, select: { id: true } }),
-      this.prisma.part.findUnique({ where: { id: dto.partId }, select: { id: true } }),
+      this.prisma.part.findUnique({ where: { id: partId }, select: { id: true, name: true, isActive: true } }),
     ]);
     if (!product) throw new NotFoundException('Product not found');
     if (!part) throw new NotFoundException('Part not found');
+    if (part.isActive === false) throw new BadRequestException(`"${part.name}" is inactive`);
 
     return this.prisma.productPart.upsert({
-      where: { productId_partId: { productId, partId: dto.partId } },
-      create: { productId, partId: dto.partId, quantity: dto.quantity },
-      update: { quantity: dto.quantity },
+      where: { productId_partId: { productId, partId } },
+      create: { productId, partId, quantity },
+      update: { quantity },
       include: { part: true },
     });
   }

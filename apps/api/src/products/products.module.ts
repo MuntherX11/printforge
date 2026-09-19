@@ -1,20 +1,30 @@
 import { Module } from '@nestjs/common';
+import { CatalogCoreModule } from '../catalog-core/catalog-core.module';
 import { ChunkUploadsModule } from '../chunk-uploads/chunk-uploads.module';
-import { ProductsService } from './products.service';
-import { ProductCostingService } from './product-costing.service';
-import { ProductOnboardingService } from './product-onboarding.service';
-import { ProductsController } from './products.controller';
-import { ProductImagesController } from './product-images.controller';
-import { ProductImagesService } from './product-images.service';
-import { ProductImageBackfillService } from './product-image-backfill.service';
 import { CostingModule } from '../costing/costing.module';
 import { FileParserModule } from '../file-parser/file-parser.module';
 import { PartsModule } from '../parts/parts.module';
+import { ColourSlotsController } from './colour-slots.controller';
+import { ColourSlotsService } from './colour-slots.service';
+import { ProductComponentsService } from './product-components.service';
+import { ProductCostingService } from './product-costing.service';
+import { ProductImageBackfillService } from './product-image-backfill.service';
+import { ProductImagesController } from './product-images.controller';
+import { ProductImagesService } from './product-images.service';
+import { ProductImportsController } from './product-imports.controller';
+import { ProductOnboardingService } from './product-onboarding.service';
+import { ProductsController } from './products.controller';
+import { ProductsService } from './products.service';
+import { VariantsController } from './variants.controller';
+import { VariantsService } from './variants.service';
 
 @Module({
-  imports: [CostingModule, FileParserModule, PartsModule, ChunkUploadsModule],
-  controllers: [ProductsController, ProductImagesController],
-  providers: [ProductsService, ProductCostingService, ProductOnboardingService, ProductImagesService, ProductImageBackfillService],
+  imports: [CostingModule, FileParserModule, PartsModule, ChunkUploadsModule, CatalogCoreModule],
+  controllers: [ProductsController, ProductImagesController, VariantsController, ColourSlotsController, ProductImportsController],
+  providers: [
+    ProductsService, ProductComponentsService, VariantsService, ColourSlotsService,
+    ProductCostingService, ProductOnboardingService, ProductImagesService, ProductImageBackfillService,
+  ],
   exports: [ProductsService, ProductCostingService, ProductImagesService],
 })
 export class ProductsModule {}

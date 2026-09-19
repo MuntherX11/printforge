@@ -1,72 +1,68 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, UploadedFiles, BadRequestException } from '@nestjs/common';
-import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-
-import { ProductsService } from './products.service';
-import { ProductCostingService } from './product-costing.service';
+import {
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle } from '@nestjs/throttler';
+import { Response } from 'express';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CustomerGuard } from '../auth/guards/customer.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
-import { CustomerGuard } from '../auth/guards/customer.guard';
-import {
-  CreateProductDto,
-  UpdateProductDto,
-  AddProductComponentDto,
-  UpdateProductComponentDto,
-  CreateProductVariantDto,
-  UpdateProductVariantDto,
-  SetProductPartDto,
-} from '@printforge/types';
-import { PartsService } from '../parts/parts.service';
-import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
+import { ProductComponentsService } from './product-components.service';
+import { sendImageFile } from './product-images.controller';
+import { ProductImagesService } from './product-images.service';
+import { flag } from './product-input';
+import { ProductsService } from './products.service';
 
+/**
+ * Products API (spec §4.1 P1–P21). Options live in VariantsController, colour
+ * slots in ColourSlotsController, slicer imports in ProductImportsController,
+ * photos in ProductImagesController. Every body goes through an allowlist parser.
+ */
 @Controller('products')
 @UseGuards(JwtAuthGuard)
 export class ProductsController {
   constructor(
-    private productsService: ProductsService,
-    private partsService: PartsService,
-    private chunkUploads: ChunkUploadsService,
-    private productCostingService: ProductCostingService,
+    private readonly products: ProductsService,
+    private readonly components: ProductComponentsService,
+    private readonly images: ProductImagesService,
   ) {}
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  create(@Body() dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  create(@Body() body: unknown) {
+    return this.products.create(body);
   }
 
+  /** P1 */
   @Get()
   @UseGuards(StaffGuard)
   findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
-    // Return paginated response when ?page= is given (dashboard list),
-    // flat array otherwise (backwards-compat for older callers)
-    if (page !== undefined) {
-      return this.productsService.findAllPaginated(
-        parseInt(page) || 1,
-        parseInt(limit ?? '25') || 25,
-      );
-    }
-    return this.productsService.findAll();
+    return this.products.list(page, limit);
   }
 
+  /** P2 */
   @Get('active')
   @UseGuards(StaffGuard)
   findAllActive() {
-    return this.productsService.findAllActive();
+    return this.products.active();
   }
 
+  /** P3 */
   @Get('customer/catalog')
   @UseGuards(CustomerGuard)
   findPublicCatalog() {
-    return this.productsService.findPublicCatalog();
+    return this.products.catalog();
   }
 
+  /** P4 */
   @Get('customer/:id')
   @UseGuards(CustomerGuard)
   findOnePublic(@Param('id') id: string) {
-    return this.productsService.findOnePublic(id);
+    return this.products.catalogDetail(id);
   }
 
   @Post('upload-bom')
@@ -74,210 +70,172 @@ export class ProductsController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
   async uploadBom(@UploadedFile() file: any) {
     if (!file) throw new BadRequestException('No file uploaded');
-    if (!file.originalname?.toLowerCase().endsWith('.xlsx')) {
-      throw new BadRequestException('File must be a .xlsx Excel file');
-    }
-    return this.productsService.uploadBom(file.buffer);
+    if (!file.originalname?.toLowerCase().endsWith('.xlsx')) throw new BadRequestException('File must be a .xlsx Excel file');
+    return this.products.uploadBom(file.buffer);
   }
 
-  @Get(':id')
-  @UseGuards(StaffGuard)
-  findOne(@Param('id') id: string) {
-    return this.productsService.findOne(id);
-  }
-
-  @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(id, dto);
-  }
-
+  /** P10 alias */
   @Patch('components/:componentId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  updateComponent(
-    @Param('componentId') componentId: string,
-    @Body() dto: UpdateProductComponentDto,
-  ) {
-    return this.productsService.updateComponent(componentId, dto);
+  updateComponentAlias(@Param('componentId') componentId: string, @Body() body: unknown, @Query('dryRun') dryRun?: string, @CurrentUser() user?: any) {
+    return this.components.update(null, componentId, body, flag(dryRun), user?.id ?? null);
   }
 
+  /** P14 alias */
   @Delete('components/:componentId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  removeComponent(@Param('componentId') componentId: string) {
-    return this.productsService.removeComponent(componentId);
+  removeComponentAlias(@Param('componentId') componentId: string) {
+    return this.components.remove(null, componentId);
   }
 
+  /** P5 */
+  @Get(':id')
+  @UseGuards(StaffGuard)
+  findOne(@Param('id') id: string) {
+    return this.products.findOne(id);
+  }
+
+  /** P6 */
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.products.update(id, body);
+  }
+
+  /** P7 */
+  @Get(':id/history')
+  @UseGuards(StaffGuard)
+  history(@Param('id') id: string) {
+    return this.products.history(id);
+  }
+
+  /** P8 */
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   remove(@Param('id') id: string) {
-    return this.productsService.remove(id);
+    return this.products.remove(id);
   }
 
+  /** P9 */
   @Post(':id/components')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  addComponent(@Param('id') id: string, @Body() dto: AddProductComponentDto) {
-    return this.productsService.addComponent(id, dto);
+  addComponent(@Param('id') id: string, @Body() body: unknown) {
+    return this.components.add(id, body);
   }
 
+  /** P12 (declared before the :componentId routes) */
+  @Put(':id/components/order')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  reorderComponents(@Param('id') id: string, @Body() body: unknown) {
+    return this.components.reorder(id, body);
+  }
+
+  /** P10 */
   @Patch(':id/components/:componentId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  updateComponentNested(
-    @Param('id') _id: string,
-    @Param('componentId') componentId: string,
-    @Body() dto: UpdateProductComponentDto,
-  ) {
-    return this.productsService.updateComponent(componentId, dto);
+  updateComponent(@Param('id') id: string, @Param('componentId') componentId: string, @Body() body: unknown, @Query('dryRun') dryRun?: string, @CurrentUser() user?: any) {
+    return this.components.update(id, componentId, body, flag(dryRun), user?.id ?? null);
   }
 
-  // ---- Non-printed parts on the product BOM (NFC tags, inserts, keyrings…) ----
+  /** P11 */
+  @Put(':id/components/:componentId/materials')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  setComponentMaterials(@Param('id') id: string, @Param('componentId') componentId: string, @Body() body: unknown, @Query('dryRun') dryRun?: string, @CurrentUser() user?: any) {
+    return this.components.setMaterials(id, componentId, body, flag(dryRun), user?.id ?? null);
+  }
 
-  @Get(':id/parts')
+  /** P13 */
+  @Put(':id/components/:componentId/stock')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  setComponentStock(@Param('id') id: string, @Param('componentId') componentId: string, @Body() body: unknown, @CurrentUser() user?: any) {
+    return this.components.setStock(id, componentId, body, user?.id ?? null);
+  }
+
+  /** P14 */
+  @Delete(':id/components/:componentId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  removeComponent(@Param('id') id: string, @Param('componentId') componentId: string) {
+    return this.components.remove(id, componentId);
+  }
+
+  /**
+   * P15: the component's 3MF plate render, staff only. PNG bytes through the
+   * shared image helper (§4.6 headers), authorised on every request. Throttling
+   * is skipped for all named tiers, as for the photo route (§0.2).
+   */
+  @Get(':id/components/:componentId/thumbnail')
   @UseGuards(StaffGuard)
-  listParts(@Param('id') id: string) {
-    return this.partsService.listForProduct(id);
+  @SkipThrottle({ short: true, medium: true, long: true })
+  async thumbnail(@Param('id') id: string, @Param('componentId') componentId: string, @Res() res: Response): Promise<void> {
+    const img = await this.images.resolveComponentThumbnail(id, componentId);
+    sendImageFile(res, img.absPath, img.mime);
   }
 
-  // Bulk pricing: staff-set quantity tiers, validated in the UI against the
-  // true cost floor from bulk-costs.
+  /** P16 */
+  @Get(':id/cost')
+  @UseGuards(StaffGuard)
+  cost(@Param('id') id: string, @Query() query: Record<string, unknown>) {
+    return this.products.cost(id, query ?? {});
+  }
+
+  /** P17 */
+  @Post(':id/calculate')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  calculate(@Param('id') id: string) {
+    return this.products.calculate(id);
+  }
+
+  /** P18 (replaces the removed bulk-costs route) */
+  @Get(':id/bulk-floor')
+  @UseGuards(StaffGuard)
+  bulkFloor(@Param('id') id: string, @Query() query: Record<string, unknown>) {
+    return this.products.bulkFloor(id, query ?? {});
+  }
+
+  /** P19 */
   @Put(':id/price-tiers')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  setPriceTiers(@Param('id') id: string, @Body() body: { tiers?: Array<{ minQty: number; unitPrice: number }> }) {
-    return this.productsService.setPriceTiers(id, body?.tiers ?? []);
+  setPriceTiers(@Param('id') id: string, @Body() body: unknown) {
+    return this.products.setPriceTiers(id, body);
   }
 
-  @Get(':id/bulk-costs')
+  /** P20 */
+  @Get(':id/readiness')
   @UseGuards(StaffGuard)
-  bulkCosts(@Param('id') id: string, @Query('qtys') qtysRaw?: string) {
-    const qtys = (qtysRaw ?? '1')
-      .split(',')
-      .map((q) => parseInt(q.trim(), 10))
-      .filter((q) => Number.isInteger(q) && q >= 1 && q <= 1_000_000)
-      .slice(0, 20);
-    if (!qtys.length) throw new BadRequestException('qtys must be a comma-separated list of quantities');
-    return this.productCostingService.bulkCosts(id, qtys);
+  readiness(@Param('id') id: string, @Query() query: Record<string, unknown>) {
+    return this.products.readiness(id, query ?? {});
+  }
+
+  /** P21 */
+  @Get(':id/parts')
+  @UseGuards(StaffGuard)
+  listParts(@Param('id') id: string) {
+    return this.products.listParts(id);
   }
 
   @Post(':id/parts')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  setPart(@Param('id') id: string, @Body() dto: SetProductPartDto) {
-    return this.partsService.setProductPart(id, dto);
+  setPart(@Param('id') id: string, @Body() body: unknown) {
+    return this.products.setPart(id, body);
   }
 
   @Delete(':id/parts/:partId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
   removePart(@Param('id') id: string, @Param('partId') partId: string) {
-    return this.partsService.removeProductPart(id, partId);
-  }
-
-  @Post(':id/calculate')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  calculateCost(@Param('id') id: string) {
-    return this.productsService.calculateCost(id);
-  }
-
-  @Post(':id/onboard-gcode')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FilesInterceptor('files', 20, { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async onboardGcode(
-    @Param('id') id: string,
-    @UploadedFiles() files: any[],
-    @Body('assembledUploadIds') assembledIdsRaw?: string,
-  ) {
-    // Files above Cloudflare's per-request cap arrive pre-staged via
-    // /chunk-uploads; both forms can mix in one call.
-    if (assembledIdsRaw) {
-      let ids: string[];
-      try { ids = JSON.parse(assembledIdsRaw); } catch { throw new BadRequestException('assembledUploadIds must be JSON'); }
-      if (!Array.isArray(ids)) throw new BadRequestException('assembledUploadIds must be an array');
-      files = [...(files ?? [])];
-      for (const cid of ids) files.push(await this.chunkUploads.consume(String(cid), 200 * 1024 * 1024));
-    }
-    if (!files?.length) throw new BadRequestException('No files uploaded');
-    return this.productsService.onboardFromGcode(id, files);
-  }
-
-  @Post(':id/onboard-3mf')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async onboardThreeMf(
-    @Param('id') id: string,
-    @UploadedFile() file: any,
-    @Body('selectedPlates') selectedPlatesRaw: string,
-    @Body('plateNames') plateNamesRaw?: string,
-    @Body('assembledUploadId') assembledId?: string,
-  ) {
-    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
-    if (!file) throw new BadRequestException('No file uploaded');
-    if (!file.originalname?.toLowerCase().endsWith('.3mf')) {
-      throw new BadRequestException('File must be a .3mf');
-    }
-    let selectedPlates: number[];
-    let plateNames: Record<string, string>;
-    try {
-      selectedPlates = JSON.parse(selectedPlatesRaw || '[]');
-      plateNames = plateNamesRaw ? JSON.parse(plateNamesRaw) : {};
-    } catch {
-      throw new BadRequestException('selectedPlates and plateNames must be valid JSON');
-    }
-    if (!Array.isArray(selectedPlates) || !selectedPlates.every((n) => typeof n === 'number')) {
-      throw new BadRequestException('selectedPlates must be an array of numbers');
-    }
-    if (!selectedPlates.length) throw new BadRequestException('No plates selected');
-    return this.productsService.onboardFromThreeMf(id, file.buffer, { selectedPlates, plateNames });
-  }
-
-  @Post(':id/variants')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  addVariant(@Param('id') id: string, @Body() dto: CreateProductVariantDto) {
-    return this.productsService.addVariant(id, dto);
-  }
-
-  @Post(':id/variants/:variantId/calculate')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  calculateVariantCost(@Param('id') id: string, @Param('variantId') variantId: string) {
-    return this.productsService.calculateVariantCost(id, variantId);
-  }
-
-  @Post(':id/variants/:variantId/onboard-gcode')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async onboardVariantGcode(
-    @Param('id') id: string,
-    @Param('variantId') variantId: string,
-    @UploadedFile() file: any,
-    @Body('assembledUploadId') assembledId?: string,
-  ) {
-    if (!file && assembledId) file = await this.chunkUploads.consume(assembledId, 200 * 1024 * 1024);
-    if (!file) throw new BadRequestException('No file uploaded');
-    return this.productsService.onboardVariantFromGcode(id, variantId, file);
-  }
-
-  @Patch(':id/variants/:variantId')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  updateVariant(@Param('id') id: string, @Param('variantId') variantId: string, @Body() dto: UpdateProductVariantDto) {
-    return this.productsService.updateVariant(variantId, dto);
-  }
-
-  @Delete(':id/variants/:variantId')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN')
-  removeVariant(@Param('id') id: string, @Param('variantId') variantId: string) {
-    return this.productsService.removeVariant(variantId);
+    return this.products.removePart(id, partId);
   }
 }
