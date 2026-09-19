@@ -9,13 +9,15 @@ import { ProductHeader } from './ProductHeader';
 import { PricingCard } from './PricingCard';
 import { ProductPartsCard } from './ProductPartsCard';
 import { ProductPhotosCard } from './ProductPhotosCard';
+import { OptionsCard } from './OptionsCard';
+import { useBomScope } from './useBomScope';
 
 /**
  * Product detail page (spec §5.1/§5.2): a composition only. Sections, top to
  * bottom:
  *   A  ProductHeader        (WP8)
  *   B  PricingCard          (WP8)
- *   C  OptionsCard          (WP9b — Sizes & colours; adds page state bomScope/setBomScope)
+ *   C  OptionsCard          (WP9b — Sizes & colours; `Configure` sets the page's bomScope)
  *   D  ComponentsCard       (WP9  — Bill of materials, id="bill-of-materials"; opens E PlateLayoutsDialog)
  *   F  ReadinessCard        (WP9  — Production readiness; opens G NewJobDialog)
  *   H  BulkPricingCard      (WP9  — Bulk pricing)
@@ -24,11 +26,16 @@ import { ProductPhotosCard } from './ProductPhotosCard';
  * Sections C–H take `data` (ProductPageData from useProduct) and call
  * data.reload() / data.reloadCost() after writes. Until they land they render
  * nothing, and the page calls none of the routes the backend removed.
+ *
+ * BOM scope (which size section D shows) is page state from useBomScope:
+ * `bomScope` ('standard' or a size id) and `setBomScope` go to WP9's
+ * ComponentsCard; `onConfigureSize` is what the Sizes table's Configure calls.
  */
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
   const data = useProduct(params.id);
   const { product } = data;
+  const scope = useBomScope(product);
 
   if (data.status === 'notFound') notFound();
   if (data.status === 'loading') return <Loading />;
@@ -64,8 +71,9 @@ export default function ProductDetailPage() {
         onChanged={data.reloadCost}
       />
 
-      {/* C. Sizes & colours — <OptionsCard data={data} … /> (WP9b) */}
-      {/* D. Bill of materials — <ComponentsCard data={data} scope={bomScope} … /> (WP9) */}
+      <OptionsCard data={data} product={product} onConfigureSize={scope.onConfigureSize} />
+
+      {/* D. Bill of materials — <ComponentsCard data={data} scope={scope.bomScope} onScopeChange={scope.setBomScope} … /> (WP9) */}
       {/* F. Production readiness — <ReadinessCard data={data} /> (WP9) */}
       {/* H. Bulk pricing — <BulkPricingCard data={data} /> (WP9) */}
 
