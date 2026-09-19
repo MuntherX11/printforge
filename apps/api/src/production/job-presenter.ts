@@ -116,6 +116,8 @@ export async function buildFilamentPlan(job: any, bom: ResolvedBom | null, plann
 
   if (job.materials?.length) {
     const wanted = new Set<string>(bom ? bom.components.flatMap((c) => c.slots.map((s) => s.materialId)) : []);
+    const planned = new Map(bom ? bom.components.flatMap((c) => c.slots.map((s) => [s.materialId, s.material] as const)) : []);
+    const colourOf = (m: any) => (m ? [m.color, m.type].filter(Boolean).join(' ') || m.name : null);
     return job.materials.map((jm: any) => ({
       ...fmt(jm.material, jm.spool, jm.gramsUsed, true, jm.spool ? jm.spool.currentWeight >= jm.gramsUsed : false),
       lineId: jm.id,
@@ -124,6 +126,8 @@ export async function buildFilamentPlan(job: any, bom: ResolvedBom | null, plann
       optionColour: !!jm.plannedSlicedMaterialId,
       swapped: !!jm.plannedMaterialId && jm.materialId !== jm.plannedMaterialId,
       slicedColour: jm.slicedMaterial ? [jm.slicedMaterial.color, jm.slicedMaterial.type].filter(Boolean).join(' ') : null,
+      // The planned filament of a swapped line (§5.3 `changed to … (planned …)`), when the pair still resolves to it.
+      plannedColour: jm.plannedMaterialId && jm.plannedMaterialId !== jm.materialId ? colourOf(planned.get(jm.plannedMaterialId)) : null,
     }));
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,19 @@ import { api } from '@/lib/api';
 import { JOB_PURPOSES } from '@printforge/types';
 import { ShoppingCart, Package, FlaskConical } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { ColourSelect, SizeSelect, pickerOptionsFromActive, useOptionPair, type PickerOptions } from '@/components/products/OptionPickers';
+import type { ApiActiveProduct, ApiPrinter, ApiUser, ComponentDetail, ProductDetail } from '@/lib/types/api';
 
 type Mode = 'order' | 'stock' | 'test';
+
+interface OrderOption {
+  id: string;
+  orderNumber: string;
+  customer?: { name: string } | null;
+}
+
+const NO_PRODUCT: PickerOptions = { productId: '', hasSizes: false, hasColours: false, sizes: [], colours: [] };
+const errorText = (err: unknown, fallback = 'Failed to load') => (err instanceof Error && err.message) || fallback;
 
 interface SpoolOption {
   id: string;
@@ -29,13 +40,15 @@ export default function NewJobPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [mode, setMode] = useState<Mode | null>(null);
-  const [printers, setPrinters] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [printers, setPrinters] = useState<ApiPrinter[]>([]);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [orders, setOrders] = useState<OrderOption[]>([]);
+  const [products, setProducts] = useState<ApiActiveProduct[]>([]);
   const [jobName, setJobName] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [selectedVariantId, setSelectedVariantId] = useState('');
+  const selectedProduct = products.find(p => p.id === selectedProductId);
+  const pickerOptions = useMemo(() => (selectedProduct ? pickerOptionsFromActive(selectedProduct) : NO_PRODUCT), [selectedProduct]);
+  const pair = useOptionPair(pickerOptions);
   const [spools, setSpools] = useState<SpoolOption[]>([]);
   const [testSpoolId, setTestSpoolId] = useState('');
   const [testGrams, setTestGrams] = useState('');
@@ -47,31 +60,31 @@ export default function NewJobPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get<any[]>('/printers').then(setPrinters),
-      api.get<any[]>('/users').then(setUsers),
-    ]).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+      api.get<ApiPrinter[]>('/printers').then(setPrinters),
+      api.get<ApiUser[]>('/users').then(setUsers),
+    ]).catch((err: unknown) => toast('error', errorText(err)));
   }, []);
 
   useEffect(() => {
     setJobName(''); // reset name when switching modes
     if (mode === 'order') {
-      api.get<any>('/orders?status=CONFIRMED&status=IN_PRODUCTION&limit=100')
-        .then(r => setOrders(r?.data || r || []))
-        .catch((err: any) => toast('error', err?.message || 'Failed to load'));
+      api.get<OrderOption[] | { data: OrderOption[] }>('/orders?status=CONFIRMED&status=IN_PRODUCTION&limit=100')
+        .then(r => setOrders(Array.isArray(r) ? r : r?.data ?? []))
+        .catch((err: unknown) => toast('error', errorText(err)));
     }
     if (mode === 'stock') {
-      api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+      api.get<ApiActiveProduct[]>('/products/active').then(setProducts).catch((err: unknown) => toast('error', errorText(err)));
     }
     if (mode === 'test') {
       setJobName('Test print');
       api.get<SpoolOption[]>('/spools')
         .then((r) => setSpools((Array.isArray(r) ? r : []).filter((s) => s.currentWeight > 0)))
-        .catch((err: any) => toast('error', err?.message || 'Failed to load spools'));
+        .catch((err: unknown) => toast('error', errorText(err, 'Failed to load spools')));
     }
   }, [mode]);
 
   function handleOrderChange(orderId: string) {
-    const order = orders.find((o: any) => o.id === orderId);
+    const order = orders.find(o => o.id === orderId);
     if (order) {
       const customerPart = order.customer?.name ? ` — ${order.customer.name}` : '';
       setJobName(`${order.orderNumber}${customerPart}`);
@@ -81,45 +94,42 @@ export default function NewJobPage() {
   }
 
   function handleProductChange(productId: string) {
-    const product = products.find((p: any) => p.id === productId);
     setSelectedProductId(productId);
-    setSelectedVariantId('');
-    setJobName(product?.name ?? '');
-    applyFileDefaults(productId);
+    if (!productId) { setJobName(''); setGcodeFilename(''); setColorChanges('0'); }
   }
+
+  // The name follows the product and the chosen size and colour (§3.1 rule 11).
+  useEffect(() => {
+    if (!selectedProduct) return;
+    const size = pair.sizeOptionId ? selectedProduct.sizes.find(s => s.id === pair.sizeOptionId) : null;
+    const colour = pair.colourOptionId ? selectedProduct.colours.find(c => c.id === pair.colourOptionId) : null;
+    setJobName(`${selectedProduct.name}${size ? ` — ${size.name}` : ''}${colour ? ` — ${colour.name}` : ''}`);
+  }, [selectedProduct?.id, pair.sizeOptionId, pair.colourOptionId]);
+
+  // Files follow the size only; a colour never changes them.
+  useEffect(() => {
+    if (selectedProduct) applyFileDefaults(selectedProduct.id, pair.sizeOptionId);
+  }, [selectedProduct?.id, pair.sizeOptionId]);
 
   /**
-   * Pull the slicer filename and colour changes off the product rather than
-   * making the operator retype what was already captured at import.
-   *
-   * The list endpoint doesn't carry components, so fetch the product detail.
-   * A product built from several files has no single filename — in that case
-   * only the colour-change total is filled, and the field is left for the
-   * operator to choose.
+   * Pull the slicer filename and colour changes off the selected size's
+   * components rather than making the operator retype what was already
+   * captured at import. A size built from several files has no single
+   * filename — then only the colour-change total is filled, and the field is
+   * left for the operator to choose.
    */
-  async function applyFileDefaults(productId: string) {
-    if (!productId) { setGcodeFilename(''); setColorChanges('0'); return; }
+  async function applyFileDefaults(productId: string, sizeOptionId: string | null) {
     try {
-      const full = await api.get<any>(`/products/${productId}`);
-      const comps: any[] = full?.components ?? [];
-      const named = comps.filter((c) => c.gcodeFilename);
-      setGcodeFilename(named.length === 1 ? named[0].gcodeFilename : '');
+      const full = await api.get<ProductDetail>(`/products/${productId}`);
+      const own = sizeOptionId ? full.sizes.find(s => s.id === sizeOptionId)?.components ?? [] : full.components;
+      // A size without components of its own is printed from the standard ones.
+      const comps: ComponentDetail[] = own.length ? own : full.components;
+      const named = comps.filter(c => c.file);
+      setGcodeFilename(named.length === 1 ? named[0].file!.filename : '');
       const changes = comps.reduce((sum, c) => sum + (c.colorChanges || 0), 0);
-      setColorChanges(String(changes || full?.colorChanges || 0));
+      setColorChanges(String(changes || full.colorChanges || 0));
     } catch {
       // Non-fatal: the operator can still type them in.
-    }
-  }
-
-  function handleVariantChange(variantId: string) {
-    setSelectedVariantId(variantId);
-    if (variantId) {
-      const product = products.find((p: any) => p.id === selectedProductId);
-      const variant = product?.variants?.find((v: any) => v.id === variantId);
-      if (variant) setJobName(`${product.name} — ${variant.name}`);
-    } else {
-      const product = products.find((p: any) => p.id === selectedProductId);
-      setJobName(product?.name ?? '');
     }
   }
 
@@ -129,7 +139,7 @@ export default function NewJobPage() {
     setError('');
     const form = new FormData(e.currentTarget);
 
-    const payload: any = {
+    const payload: Record<string, unknown> = {
       name: form.get('name'),
       printerId: form.get('printerId') || undefined,
       assignedToId: form.get('assignedToId') || undefined,
@@ -157,7 +167,9 @@ export default function NewJobPage() {
       payload.materials = [{ spoolId: testSpoolId, gramsUsed: grams }];
     } else {
       payload.productId = form.get('productId') || undefined;
-      if (selectedVariantId) payload.variantId = selectedVariantId;
+      payload.sizeOptionId = pair.sizeOptionId;
+      payload.colourOptionId = pair.colourOptionId;
+      payload.stockMode = 'BUILD_STOCK';
     }
 
     if (mode !== 'test' && !payload.orderId && !payload.productId) {
@@ -169,8 +181,8 @@ export default function NewJobPage() {
     try {
       await api.post('/jobs', payload);
       router.push('/production');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(errorText(err, 'Failed to create the job'));
     } finally {
       setLoading(false);
     }
@@ -243,7 +255,7 @@ export default function NewJobPage() {
                 required
                 options={[
                   { value: '', label: 'Select an order...' },
-                  ...orders.map((o: any) => ({ value: o.id, label: `${o.orderNumber} — ${o.customer?.name || ''}` })),
+                  ...orders.map(o => ({ value: o.id, label: `${o.orderNumber} — ${o.customer?.name || ''}` })),
                 ]}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleOrderChange(e.target.value)}
               />
@@ -252,7 +264,7 @@ export default function NewJobPage() {
                 <Select
                   label="Kind of print *"
                   value={testPurpose}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTestPurpose(e.target.value as any)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTestPurpose(e.target.value as 'TEST' | 'SAMPLE' | 'WASTE')}
                   options={JOB_PURPOSES.map((p) => ({ value: p.value, label: p.label }))}
                 />
                 {/* Colour · type · brand · grams left — how a spool is identified on the shelf */}
@@ -287,26 +299,12 @@ export default function NewJobPage() {
                   required
                   options={[
                     { value: '', label: 'Select a product...' },
-                    ...products.map((p: any) => ({ value: p.id, label: p.name })),
+                    ...products.map(p => ({ value: p.id, label: p.name })),
                   ]}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProductChange(e.target.value)}
                 />
-                {(() => {
-                  const prod = products.find((p: any) => p.id === selectedProductId);
-                  const variants = (prod as any)?.variants;
-                  if (!variants?.length) return null;
-                  return (
-                    <Select
-                      label="Variant"
-                      options={[
-                        { value: '', label: 'No variant (use product defaults)' },
-                        ...variants.map((v: any) => ({ value: v.id, label: `${v.name} — ${v.sku}` })),
-                      ]}
-                      value={selectedVariantId}
-                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleVariantChange(e.target.value)}
-                    />
-                  );
-                })()}
+                <SizeSelect options={pickerOptions} value={pair.sizeKey} onChange={pair.setSizeKey} />
+                <ColourSelect options={pickerOptions} sizeKey={pair.sizeKey} value={pair.colourKey} onChange={pair.setColourKey} note={pair.note} />
               </>
             )}
 

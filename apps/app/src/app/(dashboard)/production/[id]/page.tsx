@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
@@ -18,6 +18,13 @@ import { Calculator, Plus, AlertTriangle, RefreshCw, Camera, CheckCircle, XCircl
 import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useWebSocket } from '@/lib/use-websocket';
+import type { ApiMaterial, ApiSpool, JobCompletionExtras, ReprintJobInput } from '@/lib/types/api';
+import { loadMaterials, type JobDetail } from './job-detail';
+import { JobPlatesCard } from './JobPlatesCard';
+import { JobFilamentCard } from './JobFilamentCard';
+import { ReprintDialog } from './ReprintDialog';
+
+const errorText = (err: unknown, fallback = 'Something went wrong') => (err instanceof Error && err.message) || fallback;
 
 /** Format seconds into "1h 23m remaining" */
 function fmtRemaining(secs: number): string {
@@ -39,7 +46,7 @@ export default function JobDetailPage() {
   const formatCurrency = useFormatCurrency();
   const { id } = useParams();
   const { toast } = useToast();
-  const [job, setJob] = useState<any>(null);
+  const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showFailDialog, setShowFailDialog] = useState(false);
@@ -50,15 +57,21 @@ export default function JobDetailPage() {
   const [submittingReprint, setSubmittingReprint] = useState(false);
   const [savingMaterial, setSavingMaterial] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [materials, setMaterials] = useState<any[]>([]);
-  const [spools, setSpools] = useState<any[]>([]);
+  const [materials, setMaterials] = useState<ApiMaterial[]>([]);
+  const [spools, setSpools] = useState<ApiSpool[]>([]);
   const [showCamera, setShowCamera] = useState(false);
   const [gcodeCheck, setGcodeCheck] = useState<{ loading: boolean; match: boolean | null; printing: string | null }>({ loading: false, match: null, printing: null });
 
   const ws = useWebSocket();
   const liveProgress = ws.jobProgress[id as string];
 
-  const load = () => api.get(`/jobs/${id}`).then(setJob).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
+  const load = () => api.get<JobDetail>(`/jobs/${id}`).then(setJob).catch((err: unknown) => toast('error', errorText(err, 'Failed to load'))).finally(() => setLoading(false));
+
+  /** Server message as a toast; a 409 (someone or a printer got there first) also reloads the job. */
+  function fail(err: unknown) {
+    toast('error', errorText(err));
+    if (err instanceof ApiError && err.status === 409) load();
+  }
   useEffect(() => { load(); }, [id]);
 
   // Auto-reload when the job completes/fails via WebSocket
@@ -84,7 +97,7 @@ export default function JobDetailPage() {
     if (!job.printer?.moonrakerUrl || !job.gcodeFilename) return;
 
     setGcodeCheck({ loading: true, match: null, printing: null });
-    api.get<any>(`/moonraker/status/${job.printer.id}`)
+    api.get<{ snapshot?: { printStats?: { filename?: string | null } } }>(`/moonraker/status/${job.printer.id}`)
       .then(res => {
         const printing = res?.snapshot?.printStats?.filename ?? null;
         const match = printing ? printing === job.gcodeFilename : null;
@@ -96,23 +109,29 @@ export default function JobDetailPage() {
   async function handleComplete() {
     setSubmittingComplete(true);
     try {
-      await api.post(`/jobs/${id}/complete`);
-      toast('success', 'Job marked as completed');
+      const res = await api.post<JobCompletionExtras>(`/jobs/${id}/complete`);
+      const nameOf = (componentId: string) => job?.surplusByComponent.find(s => s.componentId === componentId)?.description
+        ?? job?.plates.find(p => p.componentId === componentId)?.componentDescription ?? 'component';
+      const credits = (res.stockCredits ?? []).filter(c => c.delta > 0);
+      toast('success', credits.length
+        ? `Job marked as completed — ${credits.map(c => `+${c.delta} ${nameOf(c.componentId)}`).join(', ')} to printed stock`
+        : 'Job marked as completed');
+      for (const w of res.warnings ?? []) toast('warning', w.message);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     } finally {
       setSubmittingComplete(false);
     }
   }
 
-  async function updateJob(data: any) {
+  async function updateJob(data: Record<string, unknown>) {
     try {
       await api.patch(`/jobs/${id}`, data);
       toast('success', 'Job updated');
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     }
   }
 
@@ -121,48 +140,13 @@ export default function JobDetailPage() {
       await api.post(`/jobs/${id}/calculate-cost`);
       toast('success', 'Cost calculated');
       load();
-    } catch (err: any) {
-      toast('error', err.message);
-    }
-  }
-
-  // Which picking-list line has its colour picker open, and the same-type
-  // colour options for it.
-  const [swapLine, setSwapLine] = useState<string | null>(null);
-  const [swapOptions, setSwapOptions] = useState<any[]>([]);
-  const [swapping, setSwapping] = useState(false);
-
-  async function openSwap(f: any) {
-    const matsRes = await api.get<any>('/materials?limit=500');
-    const mats = Array.isArray(matsRes) ? matsRes : (matsRes?.data ?? []);
-    // Same material type only — a colour is the operator's call, a different
-    // plastic is not. And only colours with an active spool to pull.
-    setSwapOptions(mats.filter((m: any) =>
-      m.type === f.type && m.id !== f.materialId &&
-      (m.spools ?? []).some((sp: any) => sp.isActive !== false && sp.currentWeight > 0),
-    ));
-    setSwapLine(f.lineId);
-  }
-
-  async function handleSwap(lineId: string, materialId: string) {
-    if (!materialId) return;
-    setSwapping(true);
-    try {
-      await api.patch(`/jobs/materials/${lineId}/colour`, { materialId });
-      toast('success', 'Filament changed — new spool reserved');
-      setSwapLine(null);
-      load();
-    } catch (err: any) {
-      toast('error', err.message);
-    } finally {
-      setSwapping(false);
+    } catch (err: unknown) {
+      toast('error', errorText(err));
     }
   }
 
   async function openAddMaterial() {
-    const matsRes = await api.get<any>('/materials?limit=500');
-    const mats = Array.isArray(matsRes) ? matsRes : (matsRes?.data ?? []);
-    setMaterials(mats);
+    setMaterials(await loadMaterials());
     setShowAddMaterial(true);
   }
 
@@ -179,15 +163,15 @@ export default function JobDetailPage() {
       });
       setShowAddMaterial(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     } finally {
       setSavingMaterial(false);
     }
   }
 
   async function onMaterialChange(materialId: string) {
-    const s = await api.get<any[]>(`/spools?materialId=${materialId}`);
+    const s = await api.get<ApiSpool[]>(`/spools?materialId=${encodeURIComponent(materialId)}`);
     setSpools(s);
   }
 
@@ -202,8 +186,8 @@ export default function JobDetailPage() {
       });
       setShowFailDialog(false);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     } finally {
       setSubmittingFail(false);
     }
@@ -216,22 +200,22 @@ export default function JobDetailPage() {
       setShowCancelDialog(false);
       toast('success', 'Job cancelled');
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     } finally {
       setCancelling(false);
     }
   }
 
-  async function handleReprint() {
+  async function handleReprint(body: ReprintJobInput) {
     setSubmittingReprint(true);
     try {
-      const newJob = await api.post<any>(`/jobs/${id}/reprint`);
+      const newJob = await api.post<{ name: string }>(`/jobs/${id}/reprint`, body);
       setShowReprintDialog(false);
       toast('success', `Reprint job created: ${newJob.name}`);
       load();
-    } catch (err: any) {
-      toast('error', err.message);
+    } catch (err: unknown) {
+      fail(err);
     } finally {
       setSubmittingReprint(false);
     }
@@ -246,6 +230,7 @@ export default function JobDetailPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{job.name}</h1>
           <p className="text-sm text-gray-500">
+            {job.optionLabel && <>{job.optionLabel} | </>}
             {job.printer?.name || 'No printer'} | {job.assignedTo?.name || 'Unassigned'}
             {job.order && <> | <Link href={`/orders/${job.order.id}`} className="text-brand-600 hover:underline">{job.order.orderNumber}</Link></>}
           </p>
@@ -394,7 +379,7 @@ export default function JobDetailPage() {
                 {job.reprints && job.reprints.length > 0 && (
                   <div className="mt-2">
                     <p className="text-xs font-medium text-red-600">Reprints:</p>
-                    {job.reprints.map((r: any) => (
+                    {job.reprints.map(r => (
                       <Link key={r.id} href={`/production/${r.id}`} className="text-xs text-brand-600 hover:underline block">{r.name} — <StatusBadge status={r.status} /></Link>
                     ))}
                   </div>
@@ -410,113 +395,20 @@ export default function JobDetailPage() {
           <CardHeader><CardTitle>Cost Breakdown</CardTitle></CardHeader>
           <CardContent className="p-0">
             <dl className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800">
-              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Material</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.materialCost)}</dd></div>
-              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Machine</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.machineCost)}</dd></div>
-              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Waste</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.wasteCost)}</dd></div>
-              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overhead</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.overheadCost)}</dd></div>
-              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</dt><dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(job.totalCost)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Material</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.materialCost ?? 0)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Machine</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.machineCost ?? 0)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Waste</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.wasteCost ?? 0)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overhead</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(job.overheadCost ?? 0)}</dd></div>
+              <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</dt><dd className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{formatCurrency(job.totalCost ?? 0)}</dd></div>
             </dl>
           </CardContent>
         </Card>
       )}
 
+      <JobPlatesCard plates={job.plates ?? []} surplus={job.surplusByComponent ?? []} policy={job.surplusPolicy} />
+
       {/* Picking list: which filament, which spool, and where it is. */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Filament Required</CardTitle>
-            <Button variant="outline" size="sm" onClick={openAddMaterial}><Plus className="h-4 w-4 mr-1" /> Add</Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {(job.filamentPlan || []).length === 0 ? (
-            <p className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">
-              No filament recorded for this job yet.
-            </p>
-          ) : (
-            <>
-              <div className="divide-y dark:divide-gray-700">
-                {job.filamentPlan.map((f: any, i: number) => (
-                  <div key={f.materialId ?? i} className="flex items-center gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium dark:text-gray-100">
-                        {f.label}
-                        {f.overridden ? (
-                          <span className="ml-2 text-[11px] font-normal text-blue-600 dark:text-blue-400">
-                            customer change — file sliced for {f.slicedColour}
-                          </span>
-                        ) : f.substituted && (
-                          <span className="ml-2 text-[11px] font-normal text-amber-600 dark:text-amber-400">
-                            closest colour — file asked for another
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {f.spoolRef ? (
-                          <>
-                            <span className="font-mono">{f.spoolRef}</span>
-                            {f.location ? <> · {f.location}</> : <> · <span className="text-amber-600 dark:text-amber-400">no location set</span></>}
-                            {f.spoolRemaining != null && <> · {f.spoolRemaining}g on spool</>}
-                          </>
-                        ) : (
-                          <span className="text-amber-600 dark:text-amber-400">No spool available in stock</span>
-                        )}
-                      </p>
-                      {f.assigned && f.lineId && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status) && (
-                        swapLine === f.lineId ? (
-                          <span className="mt-1 flex items-center gap-2">
-                            <select
-                              autoFocus
-                              disabled={swapping}
-                              defaultValue=""
-                              onChange={(e) => handleSwap(f.lineId, e.target.value)}
-                              className="h-7 rounded border border-gray-300 bg-white px-1.5 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                            >
-                              <option value="">Pick new colour…</option>
-                              {swapOptions.map((m: any) => (
-                                <option key={m.id} value={m.id}>
-                                  {[m.color, m.brand].filter(Boolean).join(' · ') || m.name}
-                                </option>
-                              ))}
-                            </select>
-                            <button type="button" className="text-xs text-gray-500 hover:underline"
-                              onClick={() => setSwapLine(null)}>cancel</button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => openSwap(f)}
-                            className="mt-1 block text-xs text-blue-600 hover:underline dark:text-blue-400"
-                          >
-                            Change colour
-                          </button>
-                        )
-                      )}
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold tabular-nums dark:text-gray-100">{f.gramsNeeded}g</p>
-                      {f.hasEnough ? (
-                        <span className="text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1 justify-end">
-                          <CheckCircle className="h-3 w-3" /> {f.assigned ? 'reserved' : 'in stock'}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 justify-end">
-                          <AlertTriangle className="h-3 w-3" /> short
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="px-4 py-2.5 text-xs text-gray-400 border-t dark:border-gray-700">
-                {job.filamentPlan.some((f: any) => f.assigned)
-                  ? 'Reserved for this job — the smallest spool that still covers it, so part-used spools get finished first. Deducted when the job is marked complete.'
-                  : 'Suggested from the product’s bill of materials. Nothing is deducted until the job is completed.'}
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      <JobFilamentCard job={job} onAdd={openAddMaterial} onChanged={load} onError={fail} />
 
       {job.startedAt && (
         <Card>
@@ -554,13 +446,14 @@ export default function JobDetailPage() {
         </div>
       </Dialog>
 
-      <Dialog open={showReprintDialog} onClose={() => setShowReprintDialog(false)} title="Create Reprint Job">
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">This will clone <strong>{job.name}</strong> as a new QUEUED job. Continue?</p>
-        <div className="flex gap-3 justify-end">
-          <Button variant="outline" onClick={() => setShowReprintDialog(false)}>Back</Button>
-          <Button disabled={submittingReprint} onClick={handleReprint}><RefreshCw className="h-4 w-4 mr-2" />{submittingReprint ? 'Creating...' : 'Create Reprint'}</Button>
-        </div>
-      </Dialog>
+      <ReprintDialog
+        open={showReprintDialog}
+        jobName={job.name}
+        plates={job.plates ?? []}
+        busy={submittingReprint}
+        onClose={() => setShowReprintDialog(false)}
+        onConfirm={handleReprint}
+      />
 
       <Dialog open={showAddMaterial} onClose={() => setShowAddMaterial(false)} title="Add Material">
         <form onSubmit={handleAddMaterial} className="space-y-4">
@@ -583,6 +476,7 @@ export default function JobDetailPage() {
           </div>
           <Input name="wasteGrams" label="Estimated Filament Wasted (grams)" type="number" step="0.1" defaultValue="0" min="0" />
           <p className="text-xs text-gray-500">Waste grams will be deducted proportionally from the assigned spools.</p>
+          <p className="text-xs text-gray-500">If some plates finished, include their filament in the waste grams. Their units are not added to printed stock — adjust stock on the product page.</p>
           <div className="flex gap-3 justify-end">
             <Button type="button" variant="outline" onClick={() => setShowFailDialog(false)}>Cancel</Button>
             <Button type="submit" disabled={submittingFail} className="bg-red-600 hover:bg-red-700 text-white">{submittingFail ? 'Saving...' : 'Mark Failed'}</Button>
