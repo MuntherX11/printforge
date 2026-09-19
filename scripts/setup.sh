@@ -64,8 +64,28 @@ echo "  Database ready."
 echo "[5/5] Running database migrations and seed..."
 # Pin the Prisma CLI to v5 — the runtime image prunes devDependencies, so a bare
 # `npx prisma` pulls the latest major (v7+) and breaks on the v5 schema.
-docker compose exec -T api npx prisma@5 migrate deploy 2>/dev/null || \
-  docker compose exec -T api npx prisma@5 db push --accept-data-loss
+# Same destructive-change guard as deploy.sh around the `db push` fallback. A fresh
+# install diffs against an empty database, so it passes.
+#   SKIP_DB_PUSH=1       leave the database schema untouched
+#   ALLOW_SCHEMA_DROP=1  intentional drop, after reviewing the printed SQL
+if ! docker compose exec -T api npx prisma@5 migrate deploy 2>/dev/null; then
+  if [ "${SKIP_DB_PUSH:-0}" = "1" ]; then
+    echo "  SKIP_DB_PUSH=1 — database schema left untouched."
+  else
+    echo "  Checking the schema change for drops..."
+    # set -e: a failing `migrate diff` aborts setup here too.
+    SCHEMA_DIFF=$(docker compose exec -T api sh -c 'npx prisma@5 migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script')
+    if echo "$SCHEMA_DIFF" | grep -Eiq 'DROP|ALTER COLUMN|RENAME'; then
+      echo "$SCHEMA_DIFF"
+      if [ "${ALLOW_SCHEMA_DROP:-0}" != "1" ]; then
+        echo "  ERROR: this schema change would drop or alter existing columns/tables. Nothing was changed."
+        echo "  Re-run with SKIP_DB_PUSH=1 to leave the schema alone, or review the SQL above and set ALLOW_SCHEMA_DROP=1."
+        exit 1
+      fi
+    fi
+    docker compose exec -T api npx prisma@5 db push --accept-data-loss
+  fi
+fi
 docker compose exec -T api node -e "
   const { PrismaClient } = require('@prisma/client');
   const bcrypt = require('bcryptjs');

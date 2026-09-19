@@ -76,9 +76,29 @@ echo "  Database ready."
 # Push schema NOW — before the API container starts — so it never boots against a stale schema
 # Pin the Prisma CLI to v5: the runtime image prunes devDependencies, so a bare
 # `npx prisma` downloads the latest major (v7+), which fails on the v5 schema.
-echo "  Applying database schema..."
-docker compose run --rm api npx prisma@5 db push --accept-data-loss
-echo "  Schema applied."
+# Guard: never let a deploy (or a rollback to older code) silently drop tables or
+# columns. `db push --accept-data-loss` would drop anything the checked-out schema
+# lacks, so diff the live DB against the schema first and stop on destructive SQL.
+#   SKIP_DB_PUSH=1       code-only rollback: leave the database schema untouched
+#   ALLOW_SCHEMA_DROP=1  intentional drop, after reviewing the printed SQL
+if [ "${SKIP_DB_PUSH:-0}" = "1" ]; then
+  echo "  SKIP_DB_PUSH=1 — database schema left untouched (code-only rollback)."
+else
+  echo "  Checking the schema change for drops..."
+  # set -e: a failing `migrate diff` aborts the deploy here too.
+  SCHEMA_DIFF=$(docker compose run --rm -T api sh -c 'npx prisma@5 migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script')
+  if echo "$SCHEMA_DIFF" | grep -Eiq 'DROP|ALTER COLUMN|RENAME'; then
+    echo "$SCHEMA_DIFF"
+    if [ "${ALLOW_SCHEMA_DROP:-0}" != "1" ]; then
+      echo "  ERROR: this deploy would drop or alter existing columns/tables. Nothing was changed."
+      echo "  Rolling back code? Re-run with SKIP_DB_PUSH=1. Intentional drop? Review the SQL above, then ALLOW_SCHEMA_DROP=1."
+      exit 1
+    fi
+  fi
+  echo "  Applying database schema..."
+  docker compose run --rm api npx prisma@5 db push --accept-data-loss
+  echo "  Schema applied."
+fi
 
 # Bring up all remaining containers (API, app, nginx, workers, etc.)
 echo "  Starting all containers..."
