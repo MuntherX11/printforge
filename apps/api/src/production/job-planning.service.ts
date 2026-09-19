@@ -129,6 +129,8 @@ export class JobPlanningService {
           message: `${progress.placeholderJobs} jobs from quote conversion have no plates or filament — cancel them to plan this line with plates`,
         });
       }
+      // A legacy size with no components of its own prints on the standard BOM (§3.2); say so on its rows.
+      if (bom.fallbackToBase) lineWarnings.push(...bom.problems.filter((w) => w.code === 'SIZE_OPTION_NO_COMPONENTS'));
       const colourWarnings = bom.warnings.filter((w) => w.code.startsWith('COLOUR_'));
 
       for (const c of bom.components) {

@@ -4,6 +4,7 @@ import { costEngine, costForQuantity, priceFromCost, round3, unitCostAtOne } fro
 import { boxConfig, boxRow, SETTINGS } from './__fixtures__/box-product';
 import { fixtureComponent, M, sardineConfig, OPT } from './__fixtures__/sardine-tin';
 import { PlanCache } from './plate-planner';
+import { optionCostOf } from './pricing-core';
 
 const printer = { name: 'K1', hourlyRate: 0.4, wattage: 200, markupMultiplier: 2.5 };
 
@@ -113,6 +114,9 @@ describe('cost engine (§3.8)', () => {
       const after = unitCostAtOne(bom, SETTINGS, printer);
       expect(after.unit).toBe(before.unit);
       expect(priceFromCost(after.unit, SETTINGS, printer)).toBe(0.93);
+      // …and the Pricing card still says the stored 0.930 is up to date.
+      const card = optionCostOf(withX1, bom, after, SETTINGS);
+      expect(card).toMatchObject({ storedPrice: 0.93, computedPrice: 0.93, priceUpToDate: true });
     });
   });
 

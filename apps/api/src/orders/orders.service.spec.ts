@@ -1,8 +1,8 @@
 import PDFDocument from 'pdfkit';
 import { BOX_ID, boxRow } from '../catalog-core/__fixtures__/box-product';
-import { M, OPT, PRODUCT_ID, key, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
+import { M, OPT, PRODUCT_ID, fixtureMaterial, key, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
 import { PdfService } from '../invoices/pdf.service';
-import { addOrder, addSpool, expectStatus } from '../production/__fixtures__/production-harness';
+import { addJobRow, addOrder, addSpool, expectStatus } from '../production/__fixtures__/production-harness';
 import { OpenLinesImpactService } from '../catalog-core/open-lines-impact.service';
 import { PartsService } from '../parts/parts.service';
 import { ProductsService } from '../products/products.service';
@@ -276,6 +276,42 @@ describe('S4 print files and availability, S3 check-stock (§7.1 item 19)', () =
     expect(out.warnings.map((w: any) => w.code)).toContain('LINE_PRODUCT_MISSING');
   });
 
+  it('a line whose variantId belongs to another product is skipped with LINE_OPTION_MISMATCH in S3 and S4; the other lines are planned (§7.1 item 28)', async () => {
+    const h = ordersHarness([sardineRow(), boxRow({ withRed: true })]);
+    // A pre-release line of the Sardine tin pointing at the Box's "Red" option.
+    const { order: bad } = addOrder(h.db, [
+      { productId: P, variantId: 'v-box-red', quantity: 2, description: 'Sardine tin — Red' },
+      { productId: P, sizeOptionId: OPT.large, colourOptionId: OPT.red, quantity: 1, description: 'Sardine tin — Large — Red' },
+    ], 'CONFIRMED');
+
+    const view: any = await h.orders.findOne(bad.id);
+    expect(view.warnings.map((w: any) => w.code)).toContain('LINE_OPTION_MISMATCH');
+    expect(view.printFiles.every((f: any) => f.orderItemId !== view.items[0].id)).toBe(true);
+    expect(view.materialAvailability.map((m: any) => m.materialId)).toContain(M.red);
+
+    const out: any = await h.orders.checkStock({ items: [{ productId: BOX_ID, quantity: 1 }] });
+    expect(out.warnings.map((w: any) => w.code)).toContain('LINE_OPTION_MISMATCH');
+    expect(out.materials.map((m: any) => m.materialId)).toEqual([M.black]);
+  });
+
+  it('S3 reserves the same figure as freeFilament for a line with jobs on old components (JOBS_ON_OLD_COMPONENTS, §7.1 item 31)', async () => {
+    const h = box();
+    const { order: o, items: [it] } = addOrder(h.db, [{ productId: BOX_ID, quantity: 24, description: 'Box' }], 'CONFIRMED');
+    const j = addJobRow(h.db, { orderId: o.id, orderItemId: it.id, productId: BOX_ID, status: 'QUEUED', quantityToProduce: 24 });
+    h.db.insert('jobPlate', {
+      jobId: j.id, componentId: 'old-box', layoutId: null, colourKey: `0:${M.black}`, slots: [], label: 'Old box single',
+      unitsPerPlate: 1, plateCount: 24, unitsRequired: 24, plateMinutes: 34, plateGrams: 9.4, attachmentId: null, gcodeFilename: null, sortOrder: 0,
+    });
+    h.db.insert('jobMaterial', { jobId: j.id, materialId: M.black, gramsUsed: 80, costPerGram: 0.01, colorIndex: 0, spoolId: null, slicedMaterialId: null });
+
+    const free = await h.planner.freeFilament([M.black]);
+    expect(free.materials.get(M.black)!.reserved).toBe(80);
+    const out: any = await h.orders.checkStock({ items: [{ productId: BOX_ID, quantity: 1 }] });
+    const black = out.materials.find((m: any) => m.materialId === M.black);
+    expect(black.reservedStock).toBe(80);
+    expect(out.warnings.map((w: any) => w.code)).toContain('JOBS_ON_OLD_COMPONENTS');
+  });
+
   it('check-stock validates pairs and bounds (§4.7): 101 items, −1, 2.5, 100001, NaN, Infinity, a string → 400; 0 or missing skipped', async () => {
     const h = sardine();
     const many = Array.from({ length: 101 }, () => ({ productId: P, quantity: 1 }));
@@ -508,6 +544,72 @@ describe('O7 vs S2 (§3.1 rule 3, §7.1 item 33, S2 half)', () => {
     });
     await expectStatus(s2(h), 400, 'Line 1: "Teal" is a colour, not a size');
     expect(h.db.t('order')).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------- legacy options (items 28 and 33)
+
+describe('Legacy options across reclassification (§7.1 items 28 and 33)', () => {
+  const V = 'v-red-legacy';
+  function redBox() {
+    const row = boxRow();
+    row.variants.push({
+      id: V, productId: BOX_ID, name: 'Red', sku: null, kind: 'SIZE', isActive: true, sortOrder: 0, basePrice: 0.93,
+      estimatedGrams: null, estimatedMinutes: null, createdAt: new Date(0), colourAssignments: [], sizeExclusions: [],
+    });
+    const h = ordersHarness([row]);
+    if (!h.db.t('material').some((m: any) => m.id === M.red)) h.db.insert('material', fixtureMaterial(M.red));
+    addSpool(h.db, M.black, 5000, { id: 'sp-black' });
+    addSpool(h.db, M.red, 5000, { id: 'sp-red' });
+    const prisma = h.db as any;
+    const impact = new OpenLinesImpactService(prisma, h.resolver, h.planner);
+    const products = new ProductsService(prisma, h.resolver, h.pricing, h.planner, new PartsService(prisma));
+    const variants = new VariantsService(prisma, products, h.pricing, h.resolver, impact);
+    const o7 = () => variants.setKinds(BOX_ID, { changes: [{ variantId: V, kind: 'COLOUR' }], keepStandard: { colour: { label: 'Black', sellInShop: true } } }) as Promise<any>;
+    const assignRed = () => h.db.insert('colourOptionSlot', { variantId: V, colourSlotId: 'slot-body', materialId: M.red });
+    return { h, o7, assignRed };
+  }
+  const pairOf = (row: any) => [row.sizeOptionId, row.colourOptionId];
+  const codes = (plan: any, row: any) => [...plan.warnings, ...row.warnings].map((w: any) => w.code);
+
+  it('a pre-release line { variantId: V } plans as size V on the fallback BOM; after O7 makes V a colour it plans as (Standard, V) in PLA Red (item 28)', async () => {
+    const { h, o7, assignRed } = redBox();
+    const { order: o } = addOrder(h.db, [{ productId: BOX_ID, variantId: V, quantity: 12, description: 'Box — Red' }], 'CONFIRMED');
+    const before: any = await h.planning.previewPlan(o.id);
+    expect(pairOf(before.rows[0])).toEqual([V, null]);
+    expect(before.rows[0].fallbackToBase).toBe(true);
+    expect(codes(before, before.rows[0])).toContain('SIZE_OPTION_NO_COMPONENTS');
+    expect(before.rows[0].filament.map((f: any) => f.materialId)).toEqual([M.black]);
+
+    await o7();
+    assignRed();
+    const after: any = await h.planning.previewPlan(o.id);
+    expect(pairOf(after.rows[0])).toEqual([null, V]);
+    expect(after.rows[0].fallbackToBase).toBe(false);
+    expect(after.rows[0].filament.map((f: any) => [f.materialId, f.slicedMaterialId])).toEqual([[M.red, M.black]]);
+    expect(h.db.t('orderItem')[0]).toMatchObject({ variantId: V, sizeOptionId: null, colourOptionId: null }); // derived, never backfilled
+  });
+
+  it('a post-deploy order does not lock a legacy option: S5 { variantId: Red } and a J5 job on an old Red line, then O7 → rewritten 1/1 and both orders plan (Standard, Red) (item 33)', async () => {
+    const { h, o7, assignRed } = redBox();
+    const shop: any = await h.orders.createForCustomer(CUSTOMER_ID, { items: [{ variantId: V, quantity: 2 }] });
+    expect(items(h, shop.id)[0]).toMatchObject({ productId: BOX_ID, sizeOptionId: V, colourOptionId: null, variantId: V });
+
+    const { order: old } = addOrder(h.db, [{ productId: BOX_ID, variantId: V, quantity: 12, description: 'Box — Red' }], 'CONFIRMED');
+    const plan: any = await h.planning.previewPlan(old.id);
+    const res: any = await h.planning.createFromPlan(old.id, { planVersion: plan.planVersion });
+    expect(res.jobsCreated).toBe(1);
+    const job = h.db.t('productionJob').find((j: any) => j.orderId === old.id);
+    expect([job.sizeOptionId, job.colourOptionId]).toEqual([V, null]);
+
+    const out = await o7();
+    expect(out.rewritten).toEqual({ orderLines: 1, quoteLines: 0, jobs: 1 });
+    expect(h.db.t('productionJob').find((j: any) => j.id === job.id)).toMatchObject({ sizeOptionId: null, colourOptionId: V, variantId: V });
+    assignRed();
+    for (const id of [shop.id, old.id]) {
+      const p: any = await h.planning.previewPlan(id);
+      expect(p.rows.map(pairOf)).toEqual([[null, V]]);
+    }
   });
 });
 
