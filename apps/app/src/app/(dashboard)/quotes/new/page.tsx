@@ -11,22 +11,29 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useToast } from '@/components/ui/toast';
 import { useLineItems } from '@/hooks/use-line-items';
-import { Plus, Trash2 } from 'lucide-react';
+import { LineItemFields, focusLineQty } from '@/components/orders/LineItemFields';
+import type { ApiActiveProduct, ApiCustomer } from '@/lib/types/api';
+import { Plus } from 'lucide-react';
+
+const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message) || fallback;
 
 export default function NewQuotePage() {
   const router = useRouter();
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [products, setProducts] = useState<ApiActiveProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const { items, addItem, removeItem, updateItem, handleProductSelect, subtotal } = useLineItems(products);
+  const lines = useLineItems(products);
+  const { items, addItem, subtotal } = lines;
 
   useEffect(() => {
-    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch((err: any) => toast('error', err?.message || 'Failed to load'));
-    api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+    api.get<ApiCustomer[] | { data: ApiCustomer[] }>('/customers')
+      .then(r => setCustomers(Array.isArray(r) ? r : r?.data ?? []))
+      .catch((err: unknown) => toast('error', errorText(err, 'Failed to load')));
+    api.get<ApiActiveProduct[]>('/products/active').then(setProducts).catch((err: unknown) => toast('error', errorText(err, 'Failed to load')));
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -38,6 +45,10 @@ export default function NewQuotePage() {
       setError('Add at least one item with a description before saving.');
       return;
     }
+    if (validItems.some(i => i.quantity < 1)) {
+      setError('Enter a quantity for every line.');
+      return;
+    }
 
     setLoading(true);
     const form = new FormData(e.currentTarget);
@@ -47,11 +58,11 @@ export default function NewQuotePage() {
         customerId: form.get('customerId'),
         notes: form.get('notes') || undefined,
         validUntil: form.get('validUntil') || undefined,
-        items: validItems.map(i => ({ ...i, productId: i.productId || undefined })),
+        items: validItems.map(lines.payload),
       });
       router.push('/quotes');
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to create quote');
+    } catch (err: unknown) {
+      toast('error', errorText(err, 'Failed to create quote'));
     } finally {
       setLoading(false);
     }
@@ -93,52 +104,16 @@ export default function NewQuotePage() {
             </div>
             <div className="space-y-3">
               {items.map((item, i) => (
-                <div key={i} className="space-y-2 border-b dark:border-gray-700 pb-3">
-                  {products.length > 0 && (
-                    <Select
-                      options={productOptions}
-                      value={item.productId}
-                      onChange={e => handleProductSelect(i, e.target.value)}
-                    />
-                  )}
-                  <div className="flex flex-wrap gap-3 items-end">
-                    <div className="flex-1 min-w-[10rem]">
-                      <Input
-                        placeholder="Description"
-                        aria-label="Description"
-                        value={item.description}
-                        onChange={e => updateItem(i, 'description', e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="w-20">
-                      <Input
-                        type="number"
-                        min="1"
-                        aria-label="Quantity"
-                        value={item.quantity}
-                        onChange={e => updateItem(i, 'quantity', parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                    <div className="w-28">
-                      <Input
-                        type="number"
-                        step="0.001"
-                        aria-label="Unit price (OMR)"
-                        value={item.unitPrice}
-                        onChange={e => updateItem(i, 'unitPrice', parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="w-24 text-right text-sm font-medium py-2 dark:text-gray-200">
-                      {(item.quantity * item.unitPrice).toFixed(3)}
-                    </div>
-                    {items.length > 1 && (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(i)} aria-label={`Remove item ${i + 1}`}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                <LineItemFields
+                  key={item.key}
+                  item={item}
+                  index={i}
+                  lines={lines}
+                  productOptions={productOptions}
+                  showProductSelect={products.length > 0}
+                  canRemove={items.length > 1}
+                  onFocusLine={focusLineQty}
+                />
               ))}
             </div>
             <div className="mt-4 text-right text-lg font-bold dark:text-gray-100">

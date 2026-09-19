@@ -721,16 +721,30 @@ export interface CreateOrderDto {
   items: CreateOrderItemDto[];
 }
 
+/**
+ * S2/S6 line (spec §3.9, §4.5). The server prices product lines itself: a
+ * client `unitPrice` counts only for a custom line or with `priceOverride`.
+ * `variantId` is the one-release legacy shape (§3.1 rule 13).
+ */
 export interface CreateOrderItemDto {
   productId?: string;
+  sizeOptionId?: string | null;
+  colourOptionId?: string | null;
+  /** @deprecated legacy request shape; send sizeOptionId / colourOptionId */
   variantId?: string;
   description: string;
   quantity: number;
-  unitPrice: number;
+  unitPrice?: number;
+  priceOverride?: boolean;
+  overrideReason?: string | null;
 }
 
+/** S5 line: no price, no description. */
 export interface CustomerCreateOrderItemDto {
   productId?: string;
+  sizeOptionId?: string | null;
+  colourOptionId?: string | null;
+  /** @deprecated legacy request shape */
   variantId?: string;
   quantity: number;
 }
@@ -757,9 +771,14 @@ export interface CreateQuoteDto {
 
 export interface CreateQuoteItemDto {
   productId?: string;
+  sizeOptionId?: string | null;
+  colourOptionId?: string | null;
   description: string;
   quantity: number;
-  unitPrice: number;
+  /** Custom lines and overrides only (as CreateOrderItemDto). */
+  unitPrice?: number;
+  priceOverride?: boolean;
+  overrideReason?: string | null;
   estimatedGrams?: number;
   estimatedMinutes?: number;
   estimatedColors?: number;
@@ -1429,3 +1448,179 @@ export interface PlateLayoutCreateResult {
   layout: ComponentPlateLayout;
   warnings: Problem[];
 }
+
+// ============ ORDERS, QUOTES, PRICING PREVIEW (spec §4.5, WP10) ============
+
+/** S1 request line. */
+export interface PricingLineInput {
+  productId?: string | null;
+  sizeOptionId?: string | null;
+  colourOptionId?: string | null;
+  quantity: number;
+  unitPrice?: number;
+  priceOverride?: boolean;
+}
+
+/** S1 response line (`POST /pricing/lines`). Staff only: tiers, costs and margins. */
+export interface PricingLinePreview {
+  listUnitPrice: number | null;
+  tierMinQty: number | null;
+  tierUnitPrice: number | null;
+  tierQuantity: number | null;
+  tierLineCount: number | null;
+  tierSizeLabel: string | null;
+  autoUnitPrice: number | null;
+  effectiveUnitPrice: number | null;
+  priceSource: PriceSource | null;
+  unitCostFloor: number | null;
+  marginPct: number | null;
+  pairLabel: string | null;
+  /** Messages, in the order of warningCodes. */
+  warnings: string[];
+  warningCodes: string[];
+  /** Per-line error (e.g. every validatePair message); the line is then unpriced. */
+  error: string | null;
+}
+
+/** S2/S6 `priceWarnings`. */
+export interface LinePriceWarning {
+  line: number;
+  codes: string[];
+}
+
+/** `{ id, name }` of a line's size or colour (S4/S8, via effectiveOptions). */
+export interface NamedOption {
+  id: string;
+  name: string;
+}
+
+/** Fields S4/S8 add to every order/quote line. */
+export interface LineOptionFields {
+  size: NamedOption | null;
+  colour: NamedOption | null;
+  /** Pair label (§3.1 rule 11), null for custom lines. */
+  optionLabel: string | null;
+}
+
+/** Stored pricing fields of an order/quote line (staff views only). */
+export interface LinePricingFields {
+  sizeOptionId: string | null;
+  colourOptionId: string | null;
+  listUnitPrice: number | null;
+  priceSource: PriceSource | null;
+  tierMinQty: number | null;
+  priceOverrideReason: string | null;
+}
+
+/** S4 `printFiles[]`. */
+export interface OrderPrintFile {
+  orderItemId: string;
+  productName: string;
+  optionLabel: string;
+  component: string;
+  kind: 'COMPONENT' | 'PLATE_LAYOUT';
+  unitsPerPlate: number | null;
+  quantity: number;
+  attachmentId: string;
+  filename: string;
+  sizeBytes: number;
+  colorChanges: number;
+  printIn: Array<{ colorIndex: number; materialLabel: string; slicedFor: string | null }>;
+}
+
+/** S4 `stockAllocations[]`. */
+export interface OrderStockAllocation {
+  orderItemId: string;
+  componentId: string;
+  componentDescription: string;
+  colourLabel: string;
+  units: number;
+}
+
+/** S9 / S11 `stockReleased[]`. */
+export interface StockReleasedRow {
+  componentDescription: string;
+  colourLabel: string;
+  units: number;
+}
+
+/** S11 body: split a product line into same-size colour lines. */
+export interface ChangeLineColourInput {
+  colours: Array<{ colourOptionId: string | null; quantity: number }>;
+  confirm?: boolean;
+}
+
+/** S11 `?dryRun=1` response. */
+export interface ChangeLineColourPreview {
+  dryRun: true;
+  lines: Array<{ colourOptionId: string | null; quantity: number; totalPrice: number; description: string }>;
+  cancelledJobs: Array<{ id: string; name: string }>;
+  stockReleased: StockReleasedRow[];
+  warnings: Problem[];
+}
+
+/** S7 response addition. */
+export interface QuoteConversionPlanning {
+  jobsCreated: number;
+  warnings: Problem[];
+}
+
+// ============ PRODUCTION: J4 / J5 / J3 (spec §4.4, WP10) ============
+
+/** GET /jobs/plan/:orderId (J4). */
+export interface ProductionPlan {
+  order: { id: string; orderNumber: string; status: string };
+  planVersion: string;
+  rows: PlanRow[];
+  warnings: Problem[];
+}
+
+/** One J5 row sent back (rows not sent use the suggestions). */
+export interface PlanSubmitRow {
+  rowKey: string;
+  fromStock?: number;
+  toProduce?: number;
+  plates?: Array<{ layoutId: string | null; plateCount: number }>;
+  surplusPolicy?: SurplusPolicy;
+  printerId?: string | null;
+  spools?: Array<{ materialId: string; spoolId: string }>;
+}
+
+/** POST /jobs/plan/:orderId (J5) body. */
+export interface PlanSubmitInput {
+  planVersion: string;
+  rows?: PlanSubmitRow[];
+}
+
+/** J5 response. */
+export interface PlanSubmitResult {
+  jobsCreated: number;
+  allocations: Array<{ rowKey: string; fromStock: number }>;
+  warnings: Problem[];
+}
+
+/** J3 `plates[]`. */
+export interface JobPlateDetail {
+  id: string;
+  componentId: string | null;
+  componentDescription: string;
+  label: string;
+  unitsPerPlate: number;
+  plateCount: number;
+  unitsRequired: number;
+  plateMinutes: number;
+  plateGrams: number;
+  gcodeFilename: string | null;
+  downloadUrl: string | null;
+}
+
+/** J3 `surplusByComponent[]`. */
+export interface JobSurplusRow {
+  componentId: string | null;
+  description: string;
+  unitsRequired: number;
+  unitsPrinted: number;
+  surplus: number;
+  creditOnComplete: number;
+}
+

@@ -10,42 +10,59 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useLineItems } from '@/hooks/use-line-items';
-import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { LineItemFields, focusLineQty } from '@/components/orders/LineItemFields';
+import type { ApiActiveProduct, ApiCustomer } from '@/lib/types/api';
+import { Plus, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+
+interface Shortage {
+  materialId: string;
+  name: string;
+  type: string;
+  color: string | null;
+  gramsNeeded: number;
+  freeStock: number;
+  reservedStock: number;
+}
+
+const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message) || fallback;
 
 export default function NewOrderPage() {
   const router = useRouter();
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [products, setProducts] = useState<ApiActiveProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [shortages, setShortages] = useState<any[]>([]);
+  const [shortages, setShortages] = useState<Shortage[]>([]);
   const [ackShortages, setAckShortages] = useState(false);
 
-  const { items, addItem, removeItem, updateItem, handleProductSelect, handleVariantSelect, subtotal } = useLineItems(products);
+  const lines = useLineItems(products);
+  const { items, addItem, subtotal } = lines;
 
   useEffect(() => {
-    api.get<any>('/customers').then(r => setCustomers(r?.data || r || [])).catch((err: any) => toast('error', err?.message || 'Failed to load'));
-    api.get<any[]>('/products/active').then(setProducts).catch((err: any) => toast('error', err?.message || 'Failed to load'));
+    api.get<ApiCustomer[] | { data: ApiCustomer[] }>('/customers')
+      .then(r => setCustomers(Array.isArray(r) ? r : r?.data ?? []))
+      .catch((err: unknown) => toast('error', errorText(err, 'Failed to load')));
+    api.get<ApiActiveProduct[]>('/products/active').then(setProducts).catch((err: unknown) => toast('error', errorText(err, 'Failed to load')));
   }, []);
 
   // Check filament stock as the order is built, so a shortage shows up before
   // the order is placed rather than on the shop floor.
   const stockKey = JSON.stringify(
-    items.filter(i => i.productId).map(i => [i.productId, i.quantity]),
+    items.filter(i => i.productId).map(i => [i.productId, i.sizeOptionId, i.colourOptionId, i.quantity]),
   );
   useEffect(() => {
-    const lines = items
+    const stockLines = items
       .filter(i => i.productId && i.quantity > 0)
-      .map(i => ({ productId: i.productId, quantity: i.quantity }));
-    if (lines.length === 0) { setShortages([]); return; }
+      .map(i => ({ productId: i.productId, sizeOptionId: i.sizeOptionId, colourOptionId: i.colourOptionId, quantity: i.quantity }));
+    if (stockLines.length === 0) { setShortages([]); return; }
 
     let cancelled = false;
     const t = setTimeout(() => {
-      api.post<any>('/orders/check-stock', { items: lines })
+      api.post<{ shortages: Shortage[] }>('/orders/check-stock', { items: stockLines })
         .then(r => { if (!cancelled) { setShortages(r?.shortages || []); setAckShortages(false); } })
         .catch(() => { if (!cancelled) setShortages([]); });
     }, 400);
@@ -59,6 +76,10 @@ export default function NewOrderPage() {
     const validItems = items.filter(i => i.description.trim());
     if (validItems.length === 0) {
       setError('Add at least one item with a description before saving.');
+      return;
+    }
+    if (validItems.some(i => i.quantity < 1)) {
+      setError('Enter a quantity for every line.');
       return;
     }
 
@@ -76,15 +97,11 @@ export default function NewOrderPage() {
         customerId: form.get('customerId'),
         notes: form.get('notes') || undefined,
         dueDate: form.get('dueDate') || undefined,
-        items: validItems.map(i => ({
-          ...i,
-          productId: i.productId || undefined,
-          variantId: i.variantId || undefined,
-        })),
+        items: validItems.map(lines.payload),
       });
       router.push('/orders');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(errorText(err, 'Failed to create order'));
     } finally {
       setLoading(false);
     }
@@ -108,7 +125,7 @@ export default function NewOrderPage() {
               Not enough filament for this order
             </p>
             <ul className="mt-2 space-y-1">
-              {shortages.map((s: any) => (
+              {shortages.map(s => (
                 <li key={s.materialId} className="text-sm text-amber-800 dark:text-amber-300">
                   {[s.color, s.type].filter(Boolean).join(' ') || s.name}: needs {s.gramsNeeded}g,
                   {' '}{s.freeStock}g free
@@ -148,71 +165,16 @@ export default function NewOrderPage() {
             </div>
             <div className="space-y-3">
               {items.map((item, i) => (
-                <div key={i} className="space-y-2 border-b dark:border-gray-700 pb-3">
-                  {products.length > 0 && (
-                    <Select
-                      options={productOptions}
-                      value={item.productId}
-                      onChange={e => handleProductSelect(i, e.target.value)}
-                    />
-                  )}
-                  {(() => {
-                    const prod = products.find(p => p.id === item.productId);
-                    const variants = (prod as any)?.variants;
-                    if (!variants?.length) return null;
-                    return (
-                      <Select
-                        options={[
-                          { value: '', label: 'No variant (use product defaults)' },
-                          ...variants.map((v: any) => ({
-                            value: v.id,
-                            label: `${v.name} — ${v.sku}${v.basePrice != null ? ` (${formatCurrency(v.basePrice)})` : ' (inherited price)'}`,
-                          })),
-                        ]}
-                        value={item.variantId ?? ''}
-                        onChange={e => handleVariantSelect(i, e.target.value, prod!.basePrice)}
-                      />
-                    );
-                  })()}
-                  <div className="flex flex-wrap gap-3 items-end">
-                    <div className="flex-1 min-w-[10rem]">
-                      <Input
-                        placeholder="Description"
-                        aria-label="Description"
-                        value={item.description}
-                        onChange={e => updateItem(i, 'description', e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="w-20">
-                      <Input
-                        type="number"
-                        min="1"
-                        aria-label="Quantity"
-                        value={item.quantity}
-                        onChange={e => updateItem(i, 'quantity', parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                    <div className="w-28">
-                      <Input
-                        type="number"
-                        step="0.001"
-                        min="0"
-                        aria-label="Unit price (OMR)"
-                        value={item.unitPrice}
-                        onChange={e => updateItem(i, 'unitPrice', parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="w-24 text-right text-sm font-medium py-2 dark:text-gray-200">
-                      {(item.quantity * item.unitPrice).toFixed(3)}
-                    </div>
-                    {items.length > 1 && (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(i)} aria-label={`Remove item ${i + 1}`}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                <LineItemFields
+                  key={item.key}
+                  item={item}
+                  index={i}
+                  lines={lines}
+                  productOptions={productOptions}
+                  showProductSelect={products.length > 0}
+                  canRemove={items.length > 1}
+                  onFocusLine={focusLineQty}
+                />
               ))}
             </div>
             <div className="mt-4 text-right text-lg font-bold dark:text-gray-100">
