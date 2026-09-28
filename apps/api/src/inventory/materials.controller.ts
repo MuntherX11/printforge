@@ -79,6 +79,16 @@ export class MaterialsController {
     return this.materialsService.getLowStock();
   }
 
+  /**
+   * Every filament with its stock status, for the Filaments list. Staff only.
+   * Declared before ':id' so Nest never routes 'stock' to findOne.
+   */
+  @Get('stock')
+  @UseGuards(StaffGuard)
+  stock() {
+    return this.materialsService.stockOverview();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.materialsService.findOne(id);

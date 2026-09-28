@@ -2,9 +2,12 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { colourKeyHasMaterial } from '../stock-ledger/colour-key';
-import { CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType } from '@printforge/types';
+import {
+  CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType, FilamentStockRow, FilamentStockSpool,
+} from '@printforge/types';
 import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
 import { optionalNumber, requiredNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
+import { stockStatus } from './stock-status';
 
 const MATERIAL_TYPES = ['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'] as const;
 
@@ -111,6 +114,74 @@ export class MaterialsService {
       this.prisma.material.count(),
     ]);
     return paginatedResponse(data, total, pagination);
+  }
+
+  /**
+   * Every filament with its stock, for the Filaments list (GET /materials/stock).
+   * Exactly two queries whatever the number of filaments (no N+1). Totals and
+   * the status count ACTIVE spools only; `spools` lists inactive ones too, so
+   * an old label's PF-ID still finds its filament. No row cap: a farm holds
+   * 60–225 filaments; past ~1000, move the search server-side instead.
+   */
+  async stockOverview(): Promise<FilamentStockRow[]> {
+    const [materials, spools] = await Promise.all([
+      this.prisma.material.findMany({
+        select: {
+          id: true, name: true, type: true, color: true, colorHex: true, brand: true, costPerGram: true,
+          spoolPrice: true, spoolWeightGrams: true, reorderPoint: true, createdAt: true,
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.spool.findMany({
+        select: {
+          id: true, materialId: true, printforgeId: true, currentWeight: true, isActive: true, createdAt: true,
+          location: { select: { name: true } },
+        },
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+      }),
+    ]);
+
+    // Spools arrive already ordered (active first, newest first); grouping keeps that order.
+    const byMaterial = new Map<string, FilamentStockSpool[]>();
+    for (const s of spools) {
+      const own = byMaterial.get(s.materialId) ?? [];
+      own.push({
+        id: s.id,
+        printforgeId: s.printforgeId,
+        currentWeight: s.currentWeight,
+        isActive: s.isActive,
+        locationName: s.location?.name ?? null,
+      });
+      byMaterial.set(s.materialId, own);
+    }
+
+    return materials.map((m) => {
+      const own = byMaterial.get(m.id) ?? [];
+      let totalStock = 0;
+      let activeSpools = 0;
+      for (const s of own) {
+        if (!s.isActive) continue;
+        totalStock += s.currentWeight;
+        activeSpools++;
+      }
+      return {
+        id: m.id,
+        name: m.name,
+        type: m.type as MaterialType,
+        color: m.color,
+        colorHex: m.colorHex,
+        brand: m.brand,
+        costPerGram: m.costPerGram,
+        spoolPrice: m.spoolPrice,
+        spoolWeightGrams: m.spoolWeightGrams,
+        reorderPoint: m.reorderPoint,
+        createdAt: m.createdAt.toISOString(),
+        totalStock,
+        activeSpools,
+        stockStatus: stockStatus(totalStock, m.reorderPoint),
+        spools: own,
+      };
+    });
   }
 
   async findOne(id: string) {
