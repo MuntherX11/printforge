@@ -2,11 +2,13 @@ import { Controller, Get, Post, Patch, Put, Delete, Param, Body, UseGuards } fro
 import { LocationsService } from './locations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { StaffGuard } from '../auth/guards/staff.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateStorageLocationDto, UpdateStorageLocationDto } from '@printforge/types';
 
+/** Staff only: a location lists its spools with their filament. */
 @Controller('locations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffGuard)
 export class LocationsController {
   constructor(private locationsService: LocationsService) {}
 

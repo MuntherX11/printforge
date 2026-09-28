@@ -91,7 +91,9 @@ export class MaterialsController {
     return this.materialsService.stockOverview();
   }
 
+  /** Staff only: the detail lists spools with lot, price and location. */
   @Get(':id')
+  @UseGuards(StaffGuard)
   findOne(@Param('id') id: string) {
     return this.materialsService.findOne(id);
   }
