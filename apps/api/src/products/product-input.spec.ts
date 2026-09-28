@@ -154,6 +154,12 @@ describe('product-input (§4.7 bounds, allowlists)', () => {
       rejects(() => parseOptionCreate({ name: 'Red', kind: 'COLOUR', keepStandard: { label: 'Black' } }), 'keepStandard.sellInShop');
     });
     it('O2 with kind → 400', () => rejects(() => parseOptionPatch({ kind: 'COLOUR' }), 'Sizes & colours card'));
+    it('O2 checks keepStandard as O1 does', () => {
+      expect(parseOptionPatch({ isActive: true, keepStandard: { label: ' Regular ', sellInShop: false } })).toEqual({ isActive: true, keepStandard: { label: 'Regular', sellInShop: false } });
+      rejects(() => parseOptionPatch({ isActive: true, keepStandard: { label: '', sellInShop: true } }), 'keepStandard.label');
+      rejects(() => parseOptionPatch({ isActive: true, keepStandard: { label: 'x'.repeat(41), sellInShop: true } }), 'keepStandard.label');
+      rejects(() => parseOptionPatch({ isActive: true, keepStandard: { label: 'Regular' } }), 'keepStandard.sellInShop');
+    });
     it('P12, P19 bodies and P18/P20 queries with variantId → 400 out of date', () => {
       rejects(() => parseTiers({ variantId: 'x', tiers: [] }), STALE_PAGE);
       rejects(() => rejectStaleQuery({ variantId: 'x' }), STALE_PAGE);

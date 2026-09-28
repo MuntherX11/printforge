@@ -332,15 +332,25 @@ export function parseOptionCreate(raw: unknown): OptionCreateInput {
   return out;
 }
 
+export interface OptionPatchInput {
+  name?: string;
+  sku?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+  /** Only when the patch re-activates an option on an axis with no active option (§3.1 rules 6 and 7). */
+  keepStandard?: KeepStandardInput;
+}
+
 /** O2. A `kind` key → 400 (§3.1 rule 3); `basePrice`/`estimated*` ignored. */
-export function parseOptionPatch(raw: unknown): { name?: string; sku?: string | null; isActive?: boolean; sortOrder?: number } {
+export function parseOptionPatch(raw: unknown): OptionPatchInput {
   const b = asBody(raw);
   if (has(b, 'kind')) throw new BadRequestException('Change an option between size and colour on the Sizes & colours card');
-  const out: { name?: string; sku?: string | null; isActive?: boolean; sortOrder?: number } = {};
+  const out: OptionPatchInput = {};
   if (has(b, 'name')) out.name = name(b.name, 'Name', 80);
   if (has(b, 'sku')) out.sku = nullableText(b.sku, 'sku', 64, false);
   if (has(b, 'isActive')) out.isActive = bool(b.isActive, 'isActive');
   if (has(b, 'sortOrder')) out.sortOrder = requiredNumber(b.sortOrder, 'sortOrder', SORT_ORDER);
+  if (has(b, 'keepStandard')) out.keepStandard = keepStandard(b.keepStandard, 'keepStandard');
   return out;
 }
 
