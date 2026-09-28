@@ -5,7 +5,7 @@
  *   node apps/api/scripts/product-rework-e2e.mjs --api http://localhost:4000/api \
  *        --admin <email>:<pw> --viewer <email>:<pw> [--uploads-dir <path>] [--allow-remote]
  *
- * Runs steps 1–24 in order against a RUNNING API and stops at the first
+ * Runs steps 1–27 in order against a RUNNING API and stops at the first
  * failure. It WRITES: products, options, materials, spools, a printer, a
  * customer, orders, quotes, jobs and an invoice, all named E2E-<timestamp> so
  * it can run repeatedly, and it sets the cost settings to the §3.8 values
@@ -26,6 +26,7 @@ import { stepsProduction } from './e2e/steps-production.mjs';
 import { stepsAccess } from './e2e/steps-access.mjs';
 import { stepsOptions } from './e2e/steps-options.mjs';
 import { stepsPerfAndConversion } from './e2e/steps-perf.mjs';
+import { stepsFilaments } from './e2e/steps-filaments.mjs';
 
 function parseArgs(argv) {
   const out = { api: null, admin: null, viewer: null, uploadsDir: null, allowRemote: false };
@@ -81,7 +82,7 @@ async function main() {
   };
   console.log(`product-rework e2e against ${args.api} as ${ctx.ts}`);
 
-  const steps = [...stepsCore, ...stepsProduction, ...stepsAccess, ...stepsOptions, ...stepsPerfAndConversion];
+  const steps = [...stepsCore, ...stepsProduction, ...stepsAccess, ...stepsOptions, ...stepsPerfAndConversion, ...stepsFilaments];
   let failed = null;
   const t0 = Date.now();
   try {

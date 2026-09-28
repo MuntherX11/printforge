@@ -23,8 +23,10 @@ export async function setup(ctx) {
   const printer = await admin.ok('POST', '/printers', { name: `${ts} printer`, connectionType: 'MANUAL', hourlyRate: 0.4, wattage: 200, markupMultiplier: 2.5 });
   ids.printer = printer.id;
 
+  // Brand is the per-run prefix: the duplicate brand + type + colour guard would
+  // refuse a second run's PLA Black under one shared brand.
   const material = async (colour, costPerGram, hex) =>
-    (await admin.ok('POST', '/materials', { name: `${ts} PLA ${colour}`, type: 'PLA', color: colour, colorHex: hex, brand: 'E2E', costPerGram })).id;
+    (await admin.ok('POST', '/materials', { name: `${ts} PLA ${colour}`, type: 'PLA', color: colour, colorHex: hex, brand: ts, costPerGram })).id;
   ids.black = await material('Black', 0.01, '0B0B0C');
   ids.red = await material('Red', 0.012, 'C4402B');
   ids.blue = await material('Blue', 0.012, '2041C1');
