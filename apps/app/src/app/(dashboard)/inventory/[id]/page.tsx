@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
+import { Swatch, swatchHex } from '@/components/ui/swatch';
 import { api } from '@/lib/api';
 import type { ApiMaterialDetail, ApiLocation, ApiSpool } from '@/lib/types/api';
 import type { ScannedFields } from '@/components/spool-label-scanner';
@@ -47,6 +48,20 @@ export default function MaterialDetailPage() {
   const [deletingSpool, setDeletingSpool] = useState<string | null>(null);
   const [showDeactivateSpool, setShowDeactivateSpool] = useState<string | null>(null);
   const [deactivatingSpool, setDeactivatingSpool] = useState<string | null>(null);
+
+  // ?spool=PF-XXXX (from the Filaments list): highlight that spool's row and
+  // scroll to it once. An unknown PF-ID is ignored.
+  const spoolParam = useSearchParams().get('spool')?.trim().toUpperCase() ?? '';
+  const wantedPfid = !spoolParam ? '' : spoolParam.startsWith('PF-') ? spoolParam : `PF-${spoolParam}`;
+  const highlightedId = wantedPfid ? material?.spools?.find((s) => s.printforgeId?.toUpperCase() === wantedPfid)?.id : undefined;
+  const scrolledTo = useRef('');
+  useEffect(() => {
+    if (!highlightedId || scrolledTo.current === highlightedId) return;
+    const row = document.getElementById(`spool-${wantedPfid}`);
+    if (!row) return; // not rendered yet; runs again once loading ends
+    scrolledTo.current = highlightedId;
+    row.scrollIntoView({ block: 'center' });
+  }, [highlightedId, wantedPfid, loading]);
 
   const load = () => {
     Promise.all([
@@ -266,16 +281,21 @@ export default function MaterialDetailPage() {
   if (loading) return <Loading />;
   if (!material) return <div className="text-center py-12 text-gray-500 dark:text-gray-400">Material not found</div>;
 
-  const totalStock = (material.spools || []).reduce((sum, s) => sum + s.currentWeight, 0);
+  // Active spools only, the same as the Filaments list and the low-stock rule.
+  const activeSpools = (material.spools || []).filter((s) => s.isActive);
+  const totalStock = activeSpools.reduce((sum, s) => sum + s.currentWeight, 0);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{material.name}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{material.brand} | {material.type} | {material.color}</p>
+          <div className="flex items-center gap-2">
+            <Swatch hex={swatchHex(material.colorHex)} title={material.color || material.name} />
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{material.name}</h1>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{[material.brand, material.type, material.color].filter(Boolean).join(' · ')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(user?.role === 'ADMIN' || user?.role === 'OPERATOR') && (
             <Button variant="outline" onClick={() => setShowEditMaterial(true)}>
               <Pencil className="h-4 w-4 mr-2" /> Edit
@@ -317,11 +337,11 @@ export default function MaterialDetailPage() {
       </div>
 
       <dl className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
-        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Price</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{(material as any).spoolPrice != null ? formatCurrency((material as any).spoolPrice) : '—'}</dd></div>
-        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Weight</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{(material as any).spoolWeightGrams != null ? `${(material as any).spoolWeightGrams}g` : '—'}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Price</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material.spoolPrice != null ? formatCurrency(material.spoolPrice) : '—'}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Spool Weight</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material.spoolWeightGrams != null ? `${material.spoolWeightGrams}g` : '—'}</dd></div>
         <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cost/gram</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{formatCurrency(material.costPerGram)}</dd></div>
         <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Stock</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{Math.round(totalStock)}g</dd></div>
-        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Active Spools</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{material._count?.spools || 0}</dd></div>
+        <div className="px-4 py-3 flex flex-col gap-0.5"><dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Active Spools</dt><dd className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{activeSpools.length}</dd></div>
       </dl>
 
       <Card>
@@ -352,7 +372,11 @@ export default function MaterialDetailPage() {
             </TableHeader>
             <TableBody>
               {(material.spools || []).map((s) => (
-                <TableRow key={s.id}>
+                <TableRow
+                  key={s.id}
+                  id={s.id === highlightedId ? `spool-${wantedPfid}` : undefined}
+                  className={s.id === highlightedId ? 'bg-brand-50 dark:bg-brand-950/30' : undefined}
+                >
                   <TableCell>
                     <input
                       type="checkbox"
@@ -463,7 +487,7 @@ export default function MaterialDetailPage() {
             label="Net Filament Weight (g)"
             type="number"
             step="0.1"
-            defaultValue={scannedFields?.weight || (material as any).spoolWeightGrams || 1000}
+            defaultValue={scannedFields?.weight || material.spoolWeightGrams || 1000}
             required
           />
           <Input name="currentWeight" label="Current Weight (g) — leave blank if new spool" type="number" step="0.1" />
@@ -476,9 +500,9 @@ export default function MaterialDetailPage() {
             type="number"
             step="0.001"
             defaultValue={
-              (material as any).spoolPrice ??
+              material.spoolPrice ??
               (material.costPerGram
-                ? Number((material.costPerGram * ((material as any).spoolWeightGrams ?? 1000)).toFixed(3))
+                ? Number((material.costPerGram * (material.spoolWeightGrams ?? 1000)).toFixed(3))
                 : '')
             }
           />
@@ -520,7 +544,7 @@ export default function MaterialDetailPage() {
               type="number"
               step="0.001"
               min="0"
-              defaultValue={(material as any).spoolPrice ?? (material.costPerGram * ((material as any).spoolWeightGrams ?? 1000)).toFixed(3)}
+              defaultValue={material.spoolPrice ?? (material.costPerGram * (material.spoolWeightGrams ?? 1000)).toFixed(3)}
               required
             />
             <Input
@@ -529,7 +553,7 @@ export default function MaterialDetailPage() {
               type="number"
               step="1"
               min="1"
-              defaultValue={(material as any).spoolWeightGrams ?? 1000}
+              defaultValue={material.spoolWeightGrams ?? 1000}
               required
             />
           </div>
