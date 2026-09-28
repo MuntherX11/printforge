@@ -94,7 +94,9 @@ const MODELS = [
   'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
 ];
 
-const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material' };
+const LOCK_TABLES: Record<string, string> = {
+  Product: 'product', ProductVariant: 'productVariant', Material: 'material', OrderItem: 'orderItem', QuoteItem: 'quoteItem', Quote: 'quote',
+};
 
 /** Column defaults (`@default` in schema.prisma) that services read back. */
 const DEFAULTS: Record<string, Row> = { order: { status: 'PENDING' } };

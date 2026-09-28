@@ -16,10 +16,10 @@ import { PricingService, type ResolvedLine } from '../catalog-core/pricing.servi
 import { ProductionPlannerService } from '../catalog-core/production-planner.service';
 import { ProductStockService } from '../stock-ledger/product-stock.service';
 import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE, lockOrderPlan } from '../production/job-transitions';
-import { lockOptions, lockProduct, TX_OPTS } from '../products/product-locks';
+import { TX_OPTS } from '../products/product-locks';
 import {
-  documentTotals, lineOptionsOf, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit, parseCustomerLine,
-  parseItemsArray, parseStaffLine, priceWarningsOf, splitLineByColour, taxRateOf,
+  documentTotals, lineOptionsOf, lockLineForSplit, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit,
+  parseCustomerLine, parseItemsArray, parseStaffLine, priceWarningsOf, splitLineByColour, taxRateOf,
 } from './order-lines';
 import {
   labelStock, materialAvailability, netAllocations, printFilesFor, resolveOrderLines, type PlannedLine,
@@ -438,29 +438,30 @@ export class OrdersService {
    *
    * It first takes the order's plan lock, the one J5 and S9 take: a J5 in
    * flight commits before the line is read (its jobs and allocations are then
-   * cancelled and released here), a later J5 recomputes on the split lines, and
-   * a cancel committed while this waited is seen by the status check below.
+   * cancelled and released here), a later J5 recomputes on the split lines, a
+   * cancel committed while this waited is seen by the status check below, and a
+   * second S11 of the order reads the line this one wrote (so its colours no
+   * longer add up → 400, never extra units on the invoice).
+   *
+   * Then lockLineForSplit: the option and product rows FOR SHARE, and the line
+   * itself FOR UPDATE, re-read — a writer outside the plan lock (O7 rewriting the
+   * line's pair) that changed it since the first read → 409. Everything below
+   * works on that locked row and on kinds read after the option locks.
    */
   async changeLineColour(orderId: string, itemId: string, body: unknown, dryRun = false, userId?: string | null) {
     const out = await this.prisma.$transaction(async (tx: any) => {
       await lockOrderPlan(tx, orderId);
-      const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
-      if (!item || item.orderId !== orderId) throw new NotFoundException('Order line not found');
-      if (item.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');
-      if (!item.productId) throw new BadRequestException('Only product lines have colours');
-      const input = parseColourSplit(body, item.quantity);
+      const seen = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
+      if (!seen || seen.orderId !== orderId) throw new NotFoundException('Order line not found');
+      if (seen.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');
+      if (!seen.productId) throw new BadRequestException('Only product lines have colours');
+      const input = parseColourSplit(body, seen.quantity);
+      const { item } = await lockLineForSplit(tx, 'OrderItem', seen, input.colours, () => tx.orderItem.findUnique({ where: { id: itemId } }));
 
       const ctx = new CatalogRequestContext();
       await this.resolver.preloadVariants([item.variantId, item.sizeOptionId, item.colourOptionId].filter((x: string | null): x is string => !!x), ctx, tx);
       const eff = this.resolver.effectiveOptions(item, ctx);
       if (eff.skip) throw new BadRequestException("This line's size or colour no longer exists");
-
-      if (!(await lockProduct(tx, item.productId, 'SHARE'))) throw new BadRequestException("This line's product no longer exists");
-      const optionIds = [...new Set([eff.sizeOptionId, eff.colourOptionId, ...input.colours.map((c) => c.colourOptionId)].filter((x): x is string => !!x))].sort();
-      const locked = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
-      for (const c of input.colours) {
-        if (c.colourOptionId && !locked.has(c.colourOptionId)) throw new BadRequestException('That colour no longer exists');
-      }
 
       const config = await this.resolver.requireConfig(item.productId, ctx, tx);
       const pc = this.resolver.pairContext(config);

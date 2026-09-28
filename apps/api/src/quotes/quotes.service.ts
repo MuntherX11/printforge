@@ -13,10 +13,10 @@ import { round3 } from '../catalog-core/cost-engine';
 import { validatePair } from '../catalog-core/option-pair';
 import { PricingService } from '../catalog-core/pricing.service';
 import { JobPlanningService } from '../production/job-planning.service';
-import { lockOptions, lockProduct, TX_OPTS } from '../products/product-locks';
+import { TX_OPTS } from '../products/product-locks';
 import {
-  documentTotals, lineOptionsOf, lockLineRows, MAX_LINES, optionalId, parseColourSplit, parseItemsArray, parseStaffLine,
-  priceWarningsOf, quoteItemColumns, splitLineByColour, taxRateOf,
+  documentTotals, lineOptionsOf, lockLineForSplit, lockLineRows, lockQuote, MAX_LINES, optionalId, parseColourSplit, parseItemsArray,
+  parseStaffLine, priceWarningsOf, quoteItemColumns, splitLineByColour, taxRateOf,
 } from '../orders/order-lines';
 import { EventsGateway } from '../websocket/events.gateway';
 import { EmailNotificationService } from '../communications/email-notification.service';
@@ -48,6 +48,17 @@ export const CUSTOMER_QUOTE_SELECT = {
 } as const;
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** S7's preconditions: the quote exists, has no order yet, is SENT or ACCEPTED and hasn't expired. */
+function assertConvertible(quote: { status: string; validUntil: Date | string | null; order?: unknown } | null): asserts quote {
+  if (!quote) throw new NotFoundException('Quote not found');
+  if (quote.order) throw new ConflictException('Quote already converted to order');
+  // Allow conversion from ACCEPTED or SENT status (auto-accept if SENT)
+  if (!['ACCEPTED', 'SENT'].includes(quote.status)) throw new BadRequestException('Quote must be SENT or ACCEPTED to convert');
+  if (quote.validUntil && new Date(quote.validUntil) < new Date()) {
+    throw new BadRequestException('Quote has expired and can no longer be converted to an order');
+  }
+}
 
 @Injectable()
 export class QuotesService {
@@ -423,37 +434,32 @@ export class QuotesService {
    * placeholder job per unit (they have no BOM); product lines are planned by
    * WP6's planWithSuggestions — exactly J4 then J5 without edits. A planning
    * failure never undoes the conversion; it only adds JOBS_NOT_PLANNED.
+   *
+   * The transaction locks the quote row first (FOR UPDATE, as quote S11 does)
+   * and re-reads the quote and its lines under it, so the order copies the lines
+   * as they are at the commit: an S11 split either commits first and is copied,
+   * or waits and then finds the quote ACCEPTED.
    */
   async convertToOrder(id: string, options?: { autoCreateJobs?: boolean }, userId?: string | null) {
     const autoCreateJobs = options?.autoCreateJobs !== false;
-    const quote = await this.prisma.quote.findUnique({
-      where: { id },
-      include: { items: { orderBy: { createdAt: 'asc' } }, order: true },
-    });
-    if (!quote) throw new NotFoundException('Quote not found');
-    if (quote.order) throw new ConflictException('Quote already converted to order');
-
-    // Allow conversion from ACCEPTED or SENT status (auto-accept if SENT)
-    if (!['ACCEPTED', 'SENT'].includes(quote.status)) {
-      throw new BadRequestException('Quote must be SENT or ACCEPTED to convert');
-    }
-
-    // Reject expired quotes
-    if (quote.validUntil && new Date(quote.validUntil) < new Date()) {
-      throw new BadRequestException('Quote has expired and can no longer be converted to an order');
-    }
+    // Checked here to fail fast, and again on the locked row inside the transaction.
+    const quote = await this.prisma.quote.findUnique({ where: { id }, include: { order: true } });
+    assertConvertible(quote);
 
     const orderNumber = await this.nextNumber('ORD', 'order');
     let orderId: string;
     try {
       orderId = await this.prisma.$transaction(async (tx: any) => {
-        // Atomically flip SENT → ACCEPTED; a concurrent conversion either finds
-        // the status changed or hits the unique Order.quoteId (P2002 → 409).
-        if (quote.status === 'SENT') {
+        if (!(await lockQuote(tx, id))) throw new NotFoundException('Quote not found');
+        const locked = await tx.quote.findUnique({ where: { id }, include: { items: { orderBy: { createdAt: 'asc' } }, order: true } });
+        assertConvertible(locked);
+        // Flip SENT → ACCEPTED (guarded; a concurrent conversion also hits the
+        // unique Order.quoteId, P2002 → 409).
+        if (locked.status === 'SENT') {
           const flipped = await tx.quote.updateMany({ where: { id, status: 'SENT' }, data: { status: 'ACCEPTED' } });
           if (flipped.count === 0) throw new ConflictException('Quote status changed by a concurrent request — please retry');
         }
-        const items = quote.items as any[];
+        const items = locked.items as any[];
         await lockLineRows(tx, items.map((i) => ({ productId: i.productId, sizeOptionId: i.sizeOptionId, colourOptionId: i.colourOptionId })));
         const ctx = new CatalogRequestContext();
         for (let n = 0; n < items.length; n++) {
@@ -466,11 +472,11 @@ export class QuotesService {
         const order = await tx.order.create({
           data: {
             orderNumber,
-            customerId: quote.customerId,
-            quoteId: quote.id,
-            subtotal: round3(quote.subtotal),
-            tax: round3(quote.tax),
-            total: round3(quote.total),
+            customerId: locked.customerId,
+            quoteId: locked.id,
+            subtotal: round3(locked.subtotal),
+            tax: round3(locked.tax),
+            total: round3(locked.total),
           },
         });
         for (const i of items) {
@@ -546,21 +552,27 @@ export class QuotesService {
    * S11 for quotes (§3.9 "Changing a sold line's colour"): DRAFT and SENT quotes
    * only. Splits a product line into same-size colour lines with the same unit
    * price, pricing fields and tier; the quote's totals don't change.
+   *
+   * The quote row is locked first (FOR UPDATE), then read: a second S11 of the
+   * quote reads the lines this one wrote (its colours no longer add up → 400),
+   * and a conversion either commits first (the quote is then ACCEPTED → 409) or
+   * waits and copies the split lines. A quote that already has an order → 409,
+   * whatever its status says. Then lockLineForSplit (options, product, the line).
    */
   async changeLineColour(quoteId: string, itemId: string, body: unknown, dryRun = false) {
     const out = await this.prisma.$transaction(async (tx: any) => {
-      const item = await tx.quoteItem.findUnique({ where: { id: itemId }, include: { quote: { select: { id: true, status: true } } } });
-      if (!item || item.quoteId !== quoteId) throw new NotFoundException('Quote line not found');
-      if (!['DRAFT', 'SENT'].includes(item.quote?.status)) throw new ConflictException('Only draft or sent quotes can change colours');
-      if (!item.productId) throw new BadRequestException('Only product lines have colours');
-      const input = parseColourSplit(body, item.quantity);
+      if (!(await lockQuote(tx, quoteId))) throw new NotFoundException('Quote line not found');
+      const seen = await tx.quoteItem.findUnique({
+        where: { id: itemId },
+        include: { quote: { select: { id: true, status: true, order: { select: { id: true } } } } },
+      });
+      if (!seen || seen.quoteId !== quoteId) throw new NotFoundException('Quote line not found');
+      if (!['DRAFT', 'SENT'].includes(seen.quote?.status)) throw new ConflictException('Only draft or sent quotes can change colours');
+      if (seen.quote?.order) throw new ConflictException('This quote is already an order — change the colour on the order');
+      if (!seen.productId) throw new BadRequestException('Only product lines have colours');
+      const input = parseColourSplit(body, seen.quantity);
+      const { item } = await lockLineForSplit(tx, 'QuoteItem', seen, input.colours, () => tx.quoteItem.findUnique({ where: { id: itemId } }));
 
-      if (!(await lockProduct(tx, item.productId, 'SHARE'))) throw new BadRequestException("This line's product no longer exists");
-      const optionIds = [...new Set([item.sizeOptionId, item.colourOptionId, ...input.colours.map((c) => c.colourOptionId)].filter((x): x is string => !!x))].sort();
-      const locked = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
-      for (const c of input.colours) {
-        if (c.colourOptionId && !locked.has(c.colourOptionId)) throw new BadRequestException('That colour no longer exists');
-      }
       const ctx = new CatalogRequestContext();
       const config = await this.resolver.requireConfig(item.productId, ctx, tx);
       const size = item.sizeOptionId ? config.options.find((o) => o.id === item.sizeOptionId) ?? null : null;

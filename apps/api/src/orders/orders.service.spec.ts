@@ -128,13 +128,27 @@ describe('S2 server pricing (§3.9, §7.1 item 19)', () => {
     expect(h.db.t('order')).toHaveLength(0);
   });
 
-  it('takes FOR SHARE on the product and every option row before resolving', async () => {
+  it('takes FOR SHARE on every option row, then the product, before resolving (the order O7 locks in)', async () => {
     const h = sardine();
     await order(h, [{ productId: P, sizeOptionId: OPT.large, colourOptionId: OPT.red, quantity: 1 }]);
     expect(h.db.locks).toEqual([
-      { table: 'Product', mode: 'SHARE', ids: [P] },
       { table: 'ProductVariant', mode: 'SHARE', ids: [OPT.large, OPT.red] },
+      { table: 'Product', mode: 'SHARE', ids: [P] },
     ]);
+  });
+
+  it('a legacy shop line naming only its option locks the owning product read from the locked option row', async () => {
+    const h = sardine();
+    const spy = jest.spyOn(h.db.productVariant, 'findMany');
+    await h.orders.createForCustomer(CUSTOMER_ID, { items: [{ variantId: OPT.large, quantity: 2 }] });
+    expect(h.db.locks.slice(0, 2)).toEqual([
+      { table: 'ProductVariant', mode: 'SHARE', ids: [OPT.large] },
+      { table: 'Product', mode: 'SHARE', ids: [P] },
+    ]);
+    const firstRead = spy.mock.invocationCallOrder[0] ?? Infinity;
+    expect(h.db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(firstRead); // no option read before the lock
+    h.db.t('productVariant').splice(h.db.t('productVariant').findIndex((v: any) => v.id === OPT.large), 1);
+    await expectStatus(h.orders.createForCustomer(CUSTOMER_ID, { items: [{ variantId: OPT.large, quantity: 2 }] }), 400, 'Line 1: that size or colour no longer exists');
   });
 });
 
@@ -516,6 +530,7 @@ describe('S11 order line colour change (§3.6.1, §3.9, §7.1 item 36)', () => {
   it('takes the order\'s plan lock (the one J5 and S9 take) first, and the line lock before the release', async () => {
     const { h, o, it } = await planned();
     h.db.$queryRaw.mockClear();
+    h.db.locks.length = 0; // J5's locks from planned()
     const read = jest.spyOn(h.db.orderItem, 'findUnique');
     await h.orders.changeLineColour(o.id, it.id, { ...body, confirm: true });
     const calls = h.db.$queryRaw.mock.calls.map(([q]: any) => q);
@@ -524,6 +539,48 @@ describe('S11 order line colour change (§3.6.1, §3.9, §7.1 item 36)', () => {
     expect(at(/plan:advisory/)).toBeLessThan(read.mock.invocationCallOrder[0]);
     expect(at(/plan:advisory/)).toBeLessThan(at(/lock:Product:SHARE/));
     expect(calls.find((q: any) => /stock:lockLine/.test(q.sql)).values).toEqual([it.id]);
+    // Then the global row-lock order: options, product, the line (FOR UPDATE, re-read), as S2 and O7.
+    expect(h.db.locks.map((l: any) => `${l.table}:${l.mode}`)).toEqual(['ProductVariant:SHARE', 'Product:SHARE', 'OrderItem:UPDATE']);
+    expect(h.db.locks[2].ids).toEqual([it.id]);
+    expect(at(/lock:OrderItem:UPDATE/)).toBeLessThan(read.mock.invocationCallOrder[1]);
+    expect(at(/lock:OrderItem:UPDATE/)).toBeLessThan(at(/stock:lockLine/));
+  });
+
+  it('two splits of one line (two tabs, or a retry): the second runs after the first commits, reads ×15 → 400, lines stay Red 15 + Blue 10', async () => {
+    const h = sardine();
+    const { order: o, items: [it] } = addOrder(h.db, [{
+      productId: P, sizeOptionId: OPT.large, variantId: OPT.large, quantity: 25, unitPrice: 2.5, totalPrice: 62.5,
+      listUnitPrice: 2.8, priceSource: 'TIER', tierMinQty: 25, description: 'Sardine tin — Large',
+    }], 'CONFIRMED');
+    Object.assign(h.db.t('order').find((x: any) => x.id === o.id), { subtotal: 62.5, tax: 0, total: 62.5 });
+    const first = { colours: [{ colourOptionId: OPT.red, quantity: 15 }, { colourOptionId: OPT.blue, quantity: 10 }] };
+    const second = { colours: [{ colourOptionId: null, quantity: 20 }, { colourOptionId: OPT.red, quantity: 5 }] };
+    // Both requests at once: the plan lock (taken before the line is read, see the lock-order spec above)
+    // runs them one after the other, so the second reads the line the first wrote.
+    const firstRun = h.orders.changeLineColour(o.id, it.id, first);
+    await expectStatus(h.orders.changeLineColour(o.id, it.id, second), 400, 'The colours must add up to 15');
+    await expect(firstRun).resolves.toMatchObject({ total: 62.5 });
+    const lines = items(h, o.id);
+    expect(lines.map((i: any) => [i.colourOptionId, i.quantity, i.totalPrice])).toEqual([[OPT.red, 15, 37.5], [OPT.blue, 10, 25]]);
+    expect(lines.reduce((s: number, i: any) => s + i.quantity, 0)).toBe(25);
+    expect(h.db.t('order').find((x: any) => x.id === o.id).total).toBe(62.5);
+
+    // The identical body retried → 400 as well, never a second Blue 10.
+    await expectStatus(h.orders.changeLineColour(o.id, it.id, first), 400, 'The colours must add up to 15');
+    expect(items(h, o.id)).toHaveLength(2);
+  });
+
+  it('a writer outside the plan lock that changes the line while S11 waits for the line lock → 409, nothing cancelled, released or split', async () => {
+    const { h, o, it } = await planned();
+    const inner = h.db.$queryRaw.getMockImplementation()!;
+    h.db.$queryRaw.mockImplementation(async (q: any) => {
+      if (/lock:OrderItem:UPDATE/.test(q?.sql ?? '')) h.db.t('orderItem').find((i: any) => i.id === it.id).colourOptionId = OPT.blue; // committed while S11 waited
+      return inner(q);
+    });
+    await expectStatus(h.orders.changeLineColour(o.id, it.id, { ...body, confirm: true }), 409, 'This line was changed by someone else — reload and try again');
+    expect(items(h, o.id).map((i: any) => i.quantity)).toEqual([30]);
+    expect(h.db.t('productionJob').filter((j: any) => j.orderItemId === it.id).every((j: any) => j.status === 'QUEUED')).toBe(true);
+    expect(h.db.t('componentStockMovement').filter((m: any) => m.reason === 'PLAN_RELEASE')).toHaveLength(0);
   });
 
   it('a cancel that commits while S11 waits for the plan lock → 409 "This order is cancelled", nothing released or split', async () => {
@@ -581,6 +638,19 @@ describe('O7 vs S2 (§3.1 rule 3, §7.1 item 33, S2 half)', () => {
     expect((placed as any).items[0]).toMatchObject({ sizeOptionId: 'v-teal', priceSource: 'SIZE', unitPrice: 0.93, totalPrice: 2.79 });
     expect((reclassified as any).rewritten.orderLines).toBe(1);
     expect(h.db.t('orderItem')[0]).toMatchObject({ sizeOptionId: null, colourOptionId: 'v-teal', variantId: 'v-teal' });
+  });
+
+  it('S2, S11 and O7 take their row locks in one order — options, then the product — so they wait for each other, never deadlock', async () => {
+    // A lock cycle can't be reproduced in memory; what makes one impossible is
+    // that every path takes ProductVariant before Product (and the line last).
+    const { h, o7 } = tealBox();
+    const tables = () => h.db.locks.splice(0).map((l: any) => `${l.table}:${l.mode}`);
+    const placed: any = await s2(h);
+    expect(tables()).toEqual(['ProductVariant:SHARE', 'Product:SHARE']);
+    await h.orders.changeLineColour(placed.id, placed.items[0].id, { colours: [{ colourOptionId: null, quantity: 3 }] });
+    expect(tables()).toEqual(['ProductVariant:SHARE', 'Product:SHARE', 'OrderItem:UPDATE']);
+    await o7();
+    expect(tables().slice(0, 2)).toEqual(['ProductVariant:UPDATE', 'Product:UPDATE']);
   });
 
   it('O7 first: S2 re-reads V\'s kind under its lock → 400 "V" is a colour, not a size', async () => {
