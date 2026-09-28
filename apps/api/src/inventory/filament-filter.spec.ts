@@ -3,12 +3,15 @@ import {
   FILAMENTS_PER_PAGE,
   MaterialType,
   NO_BRAND,
+  catalogueBrandSpelling,
   filterFilaments,
+  findScanMatches,
   normText,
   parseFilamentListState,
   serializeFilamentListState,
   type FilamentListState,
   type FilamentStockRow,
+  type MaterialTypeValue,
   type FilamentStockSpool,
 } from '@printforge/types';
 
@@ -411,5 +414,66 @@ describe('filterFilaments pfidHit', () => {
 
   it('ignores the Type, Brand and stock filters', () => {
     expect(filterFilaments(catalog, state({ q: 'PF-A7X2', type: 'PETG' })).pfidHit?.row.id).toBe('poly-black');
+  });
+});
+
+// ---------------------------------------------------------------- scan label
+
+describe('findScanMatches', () => {
+  const matchIds = (brand: string | null, type: MaterialTypeValue, color: string | null, rows = catalog) =>
+    findScanMatches(rows, { brand, type, color }).map((r) => r.id);
+
+  it('compares brand, type and colour trimmed, case-insensitively and with spaces collapsed', () => {
+    expect(matchIds('eSUN', 'PLA', ' fire  engine red')).toEqual(['esun-fire']);
+    expect(matchIds(' ESUN ', 'PLA', 'RED')).toEqual(['esun-red']);
+  });
+
+  it('keeps exact colour names apart: "Red" never matches Fire Engine Red', () => {
+    expect(matchIds('eSun', 'PLA', 'Red')).toEqual(['esun-red']);
+    expect(matchIds('eSun', 'PLA', 'Engine Red')).toEqual([]);
+  });
+
+  it('an empty brand matches only brandless filaments, never a branded one', () => {
+    expect(matchIds('', 'PLA', 'Red')).toEqual([]);
+    expect(matchIds('  ', 'PLA', 'grey')).toEqual(['nobrand-grey']);
+    expect(matchIds(null, 'PLA', 'Grey')).toEqual(['nobrand-grey']);
+  });
+
+  it('a different type never matches', () => {
+    expect(matchIds('eSUN', 'PETG', 'Fire Engine Red')).toEqual([]);
+    expect(matchIds('eSUN', 'PETG', 'Red')).toEqual(['esun-petg-red']);
+  });
+
+  it('searches every row, not one page: a match at row 60 is found', () => {
+    const many = Array.from({ length: 59 }, (_, i) => row(`f-${i}`, { brand: 'eSUN', color: `Colour ${i}` }));
+    const black = row('esun-black', { brand: 'eSUN', color: 'Black' });
+    expect(matchIds('esun', 'PLA', 'black', [...many, black])).toEqual(['esun-black']);
+  });
+
+  it('two identical filaments return 2 matches, oldest first', () => {
+    const newer = row('b-newer', { brand: 'eSUN', color: 'Black', createdAt: '2026-05-01T00:00:00.000Z' });
+    const older = row('a-older', { brand: 'eSun', color: 'black', createdAt: '2026-02-01T00:00:00.000Z' });
+    expect(matchIds('eSUN', 'PLA', 'Black', [newer, older])).toEqual(['a-older', 'b-newer']);
+  });
+});
+
+describe('catalogueBrandSpelling', () => {
+  const brands = ['Bambu Lab', 'eSUN', 'Polymaker', 'Poly Lite', 'Poly Terra'];
+
+  it('uses the listed spelling for a brand equal to it ignoring case and spacing', () => {
+    expect(catalogueBrandSpelling('esun', brands)).toBe('eSUN');
+    expect(catalogueBrandSpelling('  POLYMAKER ', brands)).toBe('Polymaker');
+  });
+
+  it("uses the only listed brand that starts with the scan as a whole word: 'Bambu' becomes 'Bambu Lab'", () => {
+    expect(catalogueBrandSpelling('Bambu', brands)).toBe('Bambu Lab');
+  });
+
+  it('leaves the scan unchanged when no brand, or more than one, fits', () => {
+    expect(catalogueBrandSpelling('Poly', brands)).toBe('Poly');
+    expect(catalogueBrandSpelling('Bamb', brands)).toBe('Bamb');
+    expect(catalogueBrandSpelling('Hatchbox', brands)).toBe('Hatchbox');
+    expect(catalogueBrandSpelling('Bambu', [])).toBe('Bambu');
+    expect(catalogueBrandSpelling('', brands)).toBe('');
   });
 });

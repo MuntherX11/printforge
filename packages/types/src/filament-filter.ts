@@ -1,6 +1,7 @@
 /**
  * Filaments list logic: search, Type/Brand filters, sort, stock-chip counts,
- * paging and URL state, over the rows of GET /materials/stock.
+ * paging and URL state, over the rows of GET /materials/stock. Also the Scan
+ * Label review's matching (findScanMatches) and brand spelling.
  *
  * Pure and DOM-free: the app runs it in the browser on every keystroke and the
  * api jest suite tests it (through the '@printforge/types' moduleNameMapper).
@@ -340,4 +341,42 @@ export function filterFilaments(rows: readonly FilamentStockRow[], state: Filame
     hasNoBrand,
     brand,
   };
+}
+
+// ---------------------------------------------------------------- scan label
+
+/** The brand, type and colour read off a spool label, as the review dialog holds them. */
+export interface ScanIdentity {
+  brand: string | null | undefined;
+  type: MaterialTypeValue;
+  color: string | null | undefined;
+}
+
+/**
+ * The filaments a scanned label belongs to, searched over EVERY row: same type,
+ * and the same brand and colour after normText, so case and spacing never
+ * matter but exact names do ('Red' is not 'Fire Engine Red'). A blank brand
+ * matches only brandless filaments; it is never a wildcard. Oldest first
+ * (createdAt, then id), the same row the server names for a duplicate.
+ */
+export function findScanMatches(rows: readonly FilamentStockRow[], scan: ScanIdentity): FilamentStockRow[] {
+  const brand = normText(scan.brand);
+  const color = normText(scan.color);
+  return rows
+    .filter((r) => r.type === scan.type && normText(r.brand) === brand && normText(r.color) === color)
+    .sort((a, b) => createdMs(a) - createdMs(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * A scanned brand in the catalogue's spelling: the listed brand equal to it
+ * after normText, otherwise the only listed brand that starts with it as a
+ * whole word ('Bambu' becomes 'Bambu Lab'). Anything else comes back unchanged.
+ */
+export function catalogueBrandSpelling(scanned: string, brands: readonly string[]): string {
+  const key = normText(scanned);
+  if (!key) return scanned;
+  const exact = brands.find((b) => normText(b) === key);
+  if (exact !== undefined) return exact.trim();
+  const longer = brands.filter((b) => normText(b).startsWith(`${key} `));
+  return longer.length === 1 ? longer[0].trim() : scanned;
 }
