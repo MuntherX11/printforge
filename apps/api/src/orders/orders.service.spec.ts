@@ -338,6 +338,13 @@ describe('S4 print files and availability, S3 check-stock (§7.1 item 19)', () =
     await expect(h.orders.checkStock({ items: [{ productId: P, quantity: 100000 }] })).resolves.toBeDefined();
     await expectStatus(h.orders.checkStock({ items: [{ productId: P, sizeOptionId: OPT.red, quantity: 1 }] }), 400, 'items[0]: "Red" is a colour, not a size');
   });
+
+  it('a size or colour without its product → 400 (as S2), never skipped as a custom line; a real custom line is still skipped', async () => {
+    const h = sardine();
+    await expectStatus(h.orders.checkStock({ items: [{ colourOptionId: OPT.red, quantity: 2 }] }), 400, 'items[0]: choose the product for this size or colour');
+    await expectStatus(h.orders.checkStock({ items: [{ productId: P, quantity: 1 }, { sizeOptionId: OPT.large, quantity: 1 }] }), 400, 'items[1]: choose the product for this size or colour');
+    expect(await h.orders.checkStock({ items: [{ description: 'Custom stand', quantity: 2, unitPrice: 5 }] })).toEqual({ materials: [], shortages: [], ok: true, warnings: [] });
+  });
 });
 
 // ---------------------------------------------------------------- bounds

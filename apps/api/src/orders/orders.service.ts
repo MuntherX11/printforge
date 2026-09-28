@@ -224,8 +224,8 @@ export class OrdersService {
       const n = typeof q === 'number' ? q : typeof q === 'string' ? Number(q) : NaN;
       if (!Number.isInteger(n) || n < 1 || n > 100_000) throw new BadRequestException(`${prefix}quantity must be a whole number from 1 to 100000`);
       const line = parseStaffLine(it, i);
-      if (!line.productId && !line.variantId) continue; // custom line: nothing to print
       if (!line.productId && (line.sizeOptionId || line.colourOptionId)) throw new BadRequestException(`${prefix}choose the product for this size or colour`);
+      if (!line.productId && !line.variantId) continue; // custom line: nothing to print
       const mapped = mapLegacyVariantId(line, (id) => ctx.variants.get(id) ?? null, prefix);
       const config = mapped.productId ? await this.resolver.loadConfig(mapped.productId, ctx) : null;
       if (!config) throw new BadRequestException(`${prefix}product not found`);
