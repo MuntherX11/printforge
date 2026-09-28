@@ -114,6 +114,23 @@ describe('ColourSlotsService (§7.1 items 26, 35)', () => {
       expect(out.components.map((c: any) => c.id).sort()).toEqual(['c1', 'c4', 'c5']);
     });
 
+    it('batch: renames that swap or chain names are saved (only the final names must be unique)', async () => {
+      const h = productsHarness([sardineRow()]);
+      const names = () => Object.fromEntries(h.db.t('productColourSlot').filter((s: any) => s.productId === P).map((s: any) => [s.id, s.name]));
+      await h.slots.saveLinks(P, { slots: [{ id: SLOT.tin, name: 'Trim' }, { id: SLOT.trim, name: 'Tin' }] }, false);
+      expect(names()).toEqual({ [SLOT.tin]: 'Trim', [SLOT.trim]: 'Tin', [SLOT.band]: 'Band' });
+      const out: any = await h.slots.saveLinks(P, {
+        slots: [{ id: SLOT.tin, name: 'Band' }, { id: SLOT.band, name: 'Strip' }, { id: SLOT.trim, name: 'Tin' }, { ref: 'n1', name: 'Trim' }],
+      }, false);
+      const created = h.db.t('productColourSlot').find((s: any) => s.productId === P && ![SLOT.tin, SLOT.trim, SLOT.band].includes(s.id));
+      expect(names()).toEqual({ [SLOT.tin]: 'Band', [SLOT.trim]: 'Tin', [SLOT.band]: 'Strip', [created.id]: 'Trim' });
+      expect(out.slots.map((s: any) => s.name).sort()).toEqual(['Band', 'Strip', 'Tin', 'Trim']);
+      // A final clash is still refused before anything is written.
+      const before = JSON.stringify(h.db.tables());
+      await expect(h.slots.saveLinks(P, { slots: [{ id: SLOT.tin, name: 'Strip' }] }, false)).rejects.toThrow('A colour slot named "Strip" already exists');
+      expect(JSON.stringify(h.db.tables())).toBe(before);
+    });
+
     it('batch: a 13th slot → 400 with nothing written', async () => {
       const h = productsHarness([sardineRow()]);
       const before = JSON.stringify(h.db.tables());

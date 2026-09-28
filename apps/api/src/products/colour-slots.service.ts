@@ -138,7 +138,12 @@ export class ColourSlotsService {
       checkNames(existing, renames, created.map((s) => s.name));
       const refIds = new Map<string, string>();
       let next = existing.length ? Math.max(...existing.map((s: any) => s.sortOrder)) + 1 : 0;
-      for (const r of renames) await tx.productColourSlot.update({ where: { id: r.id }, data: { name: r.name } });
+      // checkNames only vouches for the final names, and (productId, name) is unique at every
+      // statement: a swap or a chain (Trim → Band, Band → Strip) would clash half-way. Park each
+      // renamed slot on a name no input can have (over 40 characters), then set the final names.
+      const moving = renames.filter((r) => existing.find((s: any) => s.id === r.id)?.name !== r.name);
+      for (const r of moving) await tx.productColourSlot.update({ where: { id: r.id }, data: { name: `renaming:${r.id}`.padEnd(41, '_') } });
+      for (const r of moving) await tx.productColourSlot.update({ where: { id: r.id }, data: { name: r.name } });
       for (const s of created) {
         const row = await tx.productColourSlot.create({ data: { productId, name: s.name, sortOrder: next++ }, select: { id: true } });
         refIds.set(s.ref!, row.id);
