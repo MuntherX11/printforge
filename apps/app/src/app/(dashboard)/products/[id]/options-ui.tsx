@@ -5,22 +5,8 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import type { ApiOpenLineImpact } from '@/lib/types/api';
 
-/** A filament colour dot; hollow when there is no colour ("as sliced"). */
-export function Swatch({ hex, title, hollow }: { hex?: string | null; title: string; hollow?: boolean }) {
-  const empty = hollow || !hex;
-  return (
-    <span
-      title={title}
-      aria-label={title}
-      role="img"
-      className={cn(
-        'inline-block h-3.5 w-3.5 flex-shrink-0 rounded-full border',
-        empty ? 'border-gray-400 bg-transparent dark:border-gray-500' : 'border-black/10 dark:border-white/20',
-      )}
-      style={empty ? undefined : { backgroundColor: hex ?? undefined }}
-    />
-  );
-}
+/** A filament colour dot; moved to components/ui/swatch so the Filaments pages share it. */
+export { Swatch } from '@/components/ui/swatch';
 
 /** Accessible on/off switch in the style of Settings → Addons. */
 export function Toggle({ checked, label, disabled, onChange }: {
