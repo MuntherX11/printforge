@@ -115,6 +115,9 @@ export type {
   PlanSubmitResult,
   JobPlateDetail,
   JobSurplusRow,
+  FilamentStockRow,
+  FilamentStockSpool,
+  StockStatus,
 } from '@printforge/types';
 
 // ============ SHARED PRIMITIVES ============
@@ -203,10 +206,14 @@ export interface ApiMaterial {
   name: string;
   type: MaterialType;
   color: string | null;
-  /** Swatch colour (e.g. "#d32f2f"); returned by /materials, absent on some older shapes. */
+  /** Swatch colour: six hex digits stored bare, without '#' (e.g. "D32F2F"); absent on some older shapes. */
   colorHex?: string | null;
   brand: string | null;
   costPerGram: number;
+  /** OMR per full spool, or null when only costPerGram is set. */
+  spoolPrice: number | null;
+  /** Net filament grams per full spool, or null (treated as 1000 g). */
+  spoolWeightGrams: number | null;
   density: number;
   reorderPoint: number;
   createdAt: string;

@@ -1,11 +1,10 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -16,12 +15,20 @@ const SpoolLabelScanner = dynamic(
   { ssr: false },
 );
 import { api } from '@/lib/api';
-import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
-import { Plus, Package, AlertTriangle, Upload, MapPin, Download, ScanLine } from 'lucide-react';
+import { Plus, Package, Upload, MapPin, Download, ScanLine, Search, X } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
-import type { ApiPaginatedResponse, ApiMaterial } from '@/lib/types/api';
+import type { ApiMaterial, FilamentStockRow } from '@/lib/types/api';
+import {
+  DEFAULT_FILAMENT_LIST_STATE,
+  filterFilaments,
+  parseFilamentListState,
+  serializeFilamentListState,
+  type FilamentListState,
+} from '@printforge/types';
+import { FilamentsFilterBar, type FilamentFilterPatch } from './FilamentsFilterBar';
+import { FilamentsTable, PfidShortcut, filamentHref } from './FilamentsTable';
 
 /** Shape returned by bulk-upload endpoint */
 interface BulkUploadResult {
@@ -30,27 +37,144 @@ interface BulkUploadResult {
   errors: string[];
 }
 
+/** The search box writes the URL this long after the last keystroke. */
+const URL_DEBOUNCE_MS = 250;
 
-export default function InventoryPage() {
-  const formatCurrency = useFormatCurrency();
+const listUrl = (qs: string) => `/inventory${qs ? `?${qs}` : ''}`;
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function FilamentsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
-  const [materialsData, setMaterialsData] = useState<ApiPaginatedResponse<ApiMaterial> | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  // ---- list state, mirrored in the URL (q, type, brand, stock, sort, page)
+  const [state, setState] = useState<FilamentListState>(() => parseFilamentListState(searchParams));
+  /** The query string the URL should hold now. */
+  const lastWritten = useRef(serializeFilamentListState(state));
+  /** Query strings sent to router.replace whose echo has not come back yet. */
+  const pendingWrites = useRef(new Set<string>());
+  const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---- data: every filament from GET /materials/stock; null until the first load
+  const [rows, setRows] = useState<FilamentStockRow[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const requestId = useRef(0);
+  const hasRows = useRef(false);
+
   const [uploadResult, setUploadResult] = useState<BulkUploadResult | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scannedFields, setScannedFields] = useState<ScannedSpoolFields | null>(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [page, setPage] = useState(1);
 
-  // TODO: migrate to useApi once pagination is stable (page param + imperative reload after mutations)
-  const loadMaterials = (p = page) => {
-    setLoading(true);
-    api.get<ApiPaginatedResponse<ApiMaterial>>(`/materials?page=${p}&limit=25`).then(setMaterialsData).catch((err: any) => toast('error', err?.message || 'Failed to load')).finally(() => setLoading(false));
-  };
+  /** Loads every filament; a newer request makes older responses stale. */
+  const load = useCallback(() => {
+    const id = ++requestId.current;
+    api.get<FilamentStockRow[]>('/materials/stock')
+      .then((data) => {
+        if (id !== requestId.current) return;
+        hasRows.current = true;
+        setRows(data);
+        setLoadFailed(false);
+      })
+      .catch((err: unknown) => {
+        if (id !== requestId.current) return;
+        if (hasRows.current) toast('error', errorText(err, "Couldn't load filaments"));
+        else setLoadFailed(true);
+      });
+  }, [toast]);
 
-  useEffect(() => { loadMaterials(page); }, [page]);
+  useEffect(() => {
+    load();
+    return () => {
+      requestId.current += 1; // ignore a response that lands after unmount
+      if (urlTimer.current) clearTimeout(urlTimer.current);
+    };
+  }, [load]);
+
+  // Adopt the URL when it changes from outside (Back, the dashboard tile, the
+  // sidebar link), but not when it is the echo of our own router.replace.
+  const spString = searchParams.toString();
+  useEffect(() => {
+    // searchParams is tracked through spString, which changes exactly when it does.
+    const parsed = parseFilamentListState(searchParams);
+    const qs = serializeFilamentListState(parsed);
+    if (pendingWrites.current.has(qs)) {
+      // Our own write coming back; once the newest one has, older echoes are done.
+      if (qs === lastWritten.current) pendingWrites.current.clear();
+      return;
+    }
+    if (qs === lastWritten.current) return;
+    pendingWrites.current.clear();
+    lastWritten.current = qs;
+    if (urlTimer.current) clearTimeout(urlTimer.current);
+    setState(parsed);
+  }, [spString]);
+
+  const result = useMemo(() => filterFilaments(rows ?? [], state), [rows, state]);
+
+  /** The state as shown: once data is loaded a brand no filament has is dropped. */
+  const view: FilamentListState = rows ? { ...state, brand: result.brand } : state;
+
+  function writeUrl(next: FilamentListState) {
+    if (urlTimer.current) clearTimeout(urlTimer.current);
+    urlTimer.current = null;
+    const qs = serializeFilamentListState(next);
+    if (qs === lastWritten.current) return;
+    pendingWrites.current.add(qs);
+    lastWritten.current = qs;
+    router.replace(listUrl(qs), { scroll: false });
+  }
+
+  /** Before leaving for a filament: make the current history entry hold this view, so Back restores it. */
+  function flushUrl() {
+    if (urlTimer.current) clearTimeout(urlTimer.current);
+    urlTimer.current = null;
+    const qs = serializeFilamentListState(view);
+    lastWritten.current = qs;
+    const url = listUrl(qs);
+    if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(null, '', url);
+  }
+
+  function onQuery(q: string) {
+    const next = { ...view, q, page: 1 };
+    setState(next);
+    if (urlTimer.current) clearTimeout(urlTimer.current);
+    urlTimer.current = setTimeout(() => writeUrl(next), URL_DEBOUNCE_MS);
+  }
+
+  function update(patch: FilamentFilterPatch | { page: number }) {
+    const next = { ...view, page: 1, ...patch };
+    setState(next);
+    writeUrl(next);
+  }
+
+  /** Resets search, Type, Brand, stock and page; keeps the sort. */
+  function clearFilters() {
+    const next = { ...DEFAULT_FILAMENT_LIST_STATE, sort: state.sort };
+    setState(next);
+    writeUrl(next);
+  }
+
+  /** Enter in the search box: open the PF-ID shortcut, or the only matching filament. */
+  function openSingleMatch() {
+    let href: string | null = null;
+    if (result.pfidHit) href = filamentHref(result.pfidHit.row, [result.pfidHit.spool]);
+    else if (result.matchedCount === 1) href = filamentHref(result.pageRows[0], result.spoolHits[result.pageRows[0].id]);
+    if (!href) return;
+    flushUrl();
+    router.push(href);
+  }
+
+  function retry() {
+    setLoadFailed(false);
+    load();
+  }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -58,11 +182,11 @@ export default function InventoryPage() {
     setUploading(true);
     setUploadResult(null);
     try {
-      const result = await api.upload('/materials/bulk-upload', file, {});
-      setUploadResult(result);
-      loadMaterials();
-    } catch (err: any) {
-      setUploadResult({ created: 0, skipped: 0, errors: [err.message] });
+      const uploaded = await api.upload('/materials/bulk-upload', file, {});
+      setUploadResult(uploaded);
+      load();
+    } catch (err: unknown) {
+      setUploadResult({ created: 0, skipped: 0, errors: [errorText(err, 'Upload failed')] });
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -88,9 +212,8 @@ export default function InventoryPage() {
       const matType = scannedFields.materialType || 'PLA';
       const matColor = scannedFields.color || '';
 
-      // Check if a matching material already exists
-      const materialsList: ApiMaterial[] = materialsData?.data || [];
-      let material = materialsList.find(
+      // Check if a matching material already exists (among every filament)
+      let material: { id: string } | undefined = (rows ?? []).find(
         (m) =>
           m.type?.toUpperCase() === matType.toUpperCase() &&
           m.color?.toLowerCase() === matColor.toLowerCase() &&
@@ -117,36 +240,34 @@ export default function InventoryPage() {
       });
 
       setScannedFields(null);
-      loadMaterials();
-    } catch (err: any) {
-      toast('error', 'Failed to create spool: ' + (err.message || 'Unknown error'));
+      load();
+    } catch (err: unknown) {
+      toast('error', 'Failed to create spool: ' + errorText(err, 'Unknown error'));
     } finally {
       setCreating(false);
     }
   }
 
-  if (loading) return <Loading />;
-
-  const materials: ApiMaterial[] = materialsData?.data || [];
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Filaments</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link href="/inventory/locations">
             <Button variant="outline"><MapPin className="h-4 w-4 mr-2" /> Locations</Button>
           </Link>
-          <Button
-            variant="outline"
-            onClick={() => {
-              window.open('/api/materials/template', '_blank');
-            }}
-          >
-            <Download className="h-4 w-4 mr-2" /> Template
-          </Button>
-          <label className="cursor-pointer inline-flex">
-            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+          <span className="hidden sm:inline-flex">
+            <Button
+              variant="outline"
+              onClick={() => {
+                window.open('/api/materials/template', '_blank');
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" /> Template
+            </Button>
+          </span>
+          <label className="cursor-pointer hidden sm:inline-flex">
+            <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} disabled={uploading} />
             <span className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 gap-2">
               <Upload className="h-4 w-4" /> {uploading ? 'Uploading...' : 'Excel Import'}
             </span>
@@ -161,82 +282,72 @@ export default function InventoryPage() {
       </div>
 
       {uploadResult && (
-        <div className={`rounded-md p-4 text-sm ${uploadResult.created > 0 ? 'bg-green-50 text-green-800' : 'bg-yellow-50 text-yellow-800'}`}>
-          {uploadResult.created > 0 && <p>Created {uploadResult.created} materials.</p>}
-          {uploadResult.skipped > 0 && <p>Skipped {uploadResult.skipped} rows.</p>}
-          {uploadResult.errors?.length > 0 && (
-            <ul className="mt-1 list-disc pl-4">
-              {uploadResult.errors.slice(0, 5).map((e: string, i: number) => <li key={i}>{e}</li>)}
-              {uploadResult.errors.length > 5 && <li>...and {uploadResult.errors.length - 5} more</li>}
-            </ul>
-          )}
+        <div className={`flex items-start justify-between gap-3 rounded-md p-4 text-sm ${uploadResult.created > 0 ? 'bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-300' : 'bg-yellow-50 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'}`}>
+          <div>
+            {uploadResult.created > 0 && <p>Created {uploadResult.created} materials.</p>}
+            {uploadResult.skipped > 0 && <p>Skipped {uploadResult.skipped} rows.</p>}
+            {uploadResult.errors?.length > 0 && (
+              <ul className="mt-1 list-disc pl-4">
+                {uploadResult.errors.slice(0, 5).map((e: string, i: number) => <li key={i}>{e}</li>)}
+                {uploadResult.errors.length > 5 && <li>...and {uploadResult.errors.length - 5} more</li>}
+              </ul>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setUploadResult(null)}
+            className="-m-1 rounded p-1 opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
+      )}
+
+      <FilamentsFilterBar
+        state={view}
+        result={result}
+        loaded={rows !== null}
+        onQuery={onQuery}
+        onChange={update}
+        onClearFilters={clearFilters}
+        onSubmit={openSingleMatch}
+      />
+
+      {result.pfidHit && (
+        <PfidShortcut row={result.pfidHit.row} spool={result.pfidHit.spool} onBeforeNavigate={flushUrl} />
       )}
 
       <Card>
         <CardContent className="p-0">
-          {materials.length === 0 ? (
+          {rows === null ? (
+            loadFailed ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <p role="alert" className="text-sm text-gray-700 dark:text-gray-300">Couldn&apos;t load filaments</p>
+                <Button variant="outline" onClick={retry}>Retry</Button>
+              </div>
+            ) : (
+              <Loading />
+            )
+          ) : rows.length === 0 ? (
             <EmptyState
               icon={<Package className="h-12 w-12" />}
               title="No materials added yet"
               description="Add your first material spool to start tracking inventory"
+              action={<Link href="/inventory/new"><Button><Plus className="h-4 w-4 mr-2" /> Add Material</Button></Link>}
+            />
+          ) : result.matchedCount === 0 ? (
+            <EmptyState
+              icon={<Search className="h-12 w-12" />}
+              title="No filaments match these filters"
+              action={<Button variant="outline" onClick={clearFilters}>Clear filters</Button>}
             />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Color</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Brand</TableHead>
-                  <TableHead>Spool Price</TableHead>
-                  <TableHead>Active Spools</TableHead>
-                  <TableHead>Total Stock (g)</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {materials.map((m) => {
-                  const totalStock = (m.spools || []).reduce((sum, s) => sum + s.currentWeight, 0);
-                  const isLow = totalStock < m.reorderPoint;
-                  return (
-                    <TableRow key={m.id}>
-                      {/* Colour leads: on the shelf a spool is identified by its
-                          colour first, then material type, then brand. */}
-                      <TableCell>
-                        <Link href={`/inventory/${m.id}`} className="font-medium text-brand-600 hover:underline">
-                          {m.color || m.name}
-                        </Link>
-                        {m.color && m.name !== m.color && (
-                          <p className="text-xs text-gray-500">{m.name}</p>
-                        )}
-                      </TableCell>
-                      <TableCell><Badge className="bg-gray-100 text-gray-700">{m.type}</Badge></TableCell>
-                      <TableCell>{m.brand || '-'}</TableCell>
-                      <TableCell>
-                        {(m as any).spoolPrice != null
-                          ? <>{formatCurrency((m as any).spoolPrice)}<span className="text-xs text-gray-400 ml-1">/ {(m as any).spoolWeightGrams ?? 1000}g</span></>
-                          : <span className="text-xs text-gray-400">{formatCurrency(m.costPerGram)}/g</span>}
-                      </TableCell>
-                      <TableCell>{m._count?.spools || 0}</TableCell>
-                      <TableCell className="font-mono">{Math.round(totalStock)}g</TableCell>
-                      <TableCell>
-                        {isLow ? (
-                          <Badge className="bg-red-100 text-red-700">
-                            <AlertTriangle className="h-3 w-3 mr-1" /> Low Stock
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-green-100 text-green-700">OK</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <FilamentsTable rows={result.pageRows} spoolHits={result.spoolHits} onBeforeNavigate={flushUrl} />
           )}
         </CardContent>
       </Card>
-      <Pagination page={page} totalPages={materialsData?.totalPages ?? 1} onPageChange={setPage} />
+      <Pagination page={result.page} totalPages={result.totalPages} onPageChange={(page) => update({ page })} />
 
       <SpoolLabelScanner
         open={showScanner}
@@ -320,5 +431,14 @@ export default function InventoryPage() {
         )}
       </Dialog>
     </div>
+  );
+}
+
+/** useSearchParams needs a Suspense boundary for the production build. */
+export default function InventoryPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <FilamentsPage />
+    </Suspense>
   );
 }
