@@ -1,10 +1,188 @@
 #!/bin/bash
 # PrintForge — Single-command deploy script
-# Usage: sudo bash deploy.sh
+# Usage: sudo bash deploy.sh                    build the images on this host, then deploy
+#        sudo bash deploy.sh --prebuilt <tag>   deploy images built on Vault and shipped here
+#                                               by scripts/build-and-ship.sh (no build here)
+# PREBUILT_TAG=<tag> in the environment is the same as --prebuilt <tag>. See --help.
 set -e
+
+usage() {
+  cat <<'USAGEEOF'
+Usage: sudo bash deploy.sh [--prebuilt <tag>]
+
+  (no flag)         Build the images on this host (docker compose build --no-cache),
+                    push the schema, start everything and seed defaults. Fine for a
+                    single-box install. NOT for docker-vm: building there starves it.
+  --prebuilt <tag>  Deploy the images that scripts/build-and-ship.sh built on Vault
+                    and loaded here: printforge/{api,app,nginx,db-backup}:<tag>.
+                    Nothing is built on this host. The compose services are retagged
+                    to those images (api, worker and moonraker-bridge all run the api
+                    image), the schema guard and prisma push run exactly as in the
+                    default mode, and every service running a shipped image is
+                    recreated. If the deploy stops before containers are switched,
+                    the previous compose image tags are put back.
+
+Environment:
+  PREBUILT_TAG=<tag>     same as --prebuilt <tag>
+  PREBUILT_REPO=<name>   image name prefix (default: printforge)
+  PREBUILT_SERVICE_MAP   compose service=image pairs (default: api=api worker=api
+                         moonraker-bridge=api app=app nginx=nginx db-backup=db-backup)
+  SKIP_DB_PUSH=1         leave the database schema untouched (code-only rollback)
+  ALLOW_SCHEMA_DROP=1    allow a schema push that drops or alters columns/tables,
+                         after reviewing the printed SQL
+
+Roll back to an earlier shipped tag (code only):
+  sudo SKIP_DB_PUSH=1 bash deploy.sh --prebuilt <previous-tag>
+USAGEEOF
+}
+
+PREBUILT_TAG="${PREBUILT_TAG:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prebuilt)
+      if [ -z "$2" ]; then echo "ERROR: --prebuilt needs an image tag (see --help)" >&2; exit 2; fi
+      PREBUILT_TAG="$2"; shift 2 ;;
+    --prebuilt=*) PREBUILT_TAG="${1#--prebuilt=}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1 (see --help)" >&2; exit 2 ;;
+  esac
+done
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
+
+# ---- Prebuilt-image mode (--prebuilt / PREBUILT_TAG) ----
+# Images are built on Vault by scripts/build-and-ship.sh and loaded here with
+# `docker save | ssh docker-vm docker load`. This host only runs containers and
+# pushes the schema: building on docker-vm starved it (80% iowait) and took
+# production down twice.
+PREBUILT_REPO="${PREBUILT_REPO:-printforge}"
+# Compose service -> shipped image it runs. Every service compose would otherwise
+# build must be listed, or the prebuilt deploy refuses to start.
+PREBUILT_SERVICE_MAP="${PREBUILT_SERVICE_MAP:-api=api worker=api moonraker-bridge=api app=app nginx=nginx db-backup=db-backup}"
+PREBUILT_SERVICES=()   # compose services switched to the shipped images
+PREBUILT_RESTORE=()    # "compose-image|previous-image-id", put back if we stop early
+PREBUILT_SWITCHED=0    # 1 once containers start moving to the new images
+
+prebuilt_fail() {
+  echo "  ERROR: $*" >&2
+  exit 1
+}
+
+# Check the shipped images, then point compose at them by retagging them to the
+# names compose uses for each service (<project>-<service>). Retagging rather than
+# a compose override keeps later manual `docker compose up -d` runs on the same
+# images instead of silently reverting to an older local build.
+use_prebuilt_images() {
+  local component img info platform label rev="" host_platform checkout
+  local project services compose_images entry svc target targets="" prev pairs=()
+
+  if ! [[ "$PREBUILT_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+    prebuilt_fail "invalid image tag '$PREBUILT_TAG'"
+  fi
+
+  # 1. All four images are here, built for this machine, from one commit.
+  host_platform=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}') \
+    || prebuilt_fail "cannot talk to the Docker daemon"
+  for component in api app nginx db-backup; do
+    img="$PREBUILT_REPO/$component:$PREBUILT_TAG"
+    info=$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null) \
+      || prebuilt_fail "image $img is not on this host. Build and ship it from Vault: scripts/build-and-ship.sh --tag $PREBUILT_TAG <git-ref>"
+    platform="${info%% *}"
+    label="${info#* }"
+    [ "$label" != "<no value>" ] || label=""
+    if [ "$platform" != "$host_platform" ]; then
+      prebuilt_fail "$img is built for $platform but this host is $host_platform"
+    fi
+    if [ "$component" = "api" ]; then
+      rev="$label"
+    elif [ "$label" != "$rev" ]; then
+      prebuilt_fail "images tagged $PREBUILT_TAG come from different commits (${rev:-unknown} vs ${label:-unknown}); ship them again"
+    fi
+  done
+  echo "  Images: $PREBUILT_REPO/{api,app,nginx,db-backup}:$PREBUILT_TAG (commit ${rev:-unknown})"
+
+  # docker-compose.yml, this script and docker/go2rtc come from this checkout.
+  checkout=$(git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)
+  if [ -n "$checkout" ] && [ -n "$rev" ] && [ "$checkout" != "$rev" ]; then
+    echo "  WARNING: this checkout is at ${checkout:0:12} but the images were built from ${rev:0:12}."
+    echo "           docker-compose.yml, deploy.sh and docker/go2rtc come from the checkout;"
+    echo "           bring it to ${rev:0:12} unless the difference is intended."
+  fi
+
+  # 2. Work out which image name compose uses for each service.
+  project="${COMPOSE_PROJECT_NAME:-}"
+  if [ -z "$project" ]; then
+    project=$(docker compose config 2>/dev/null | sed -n 's/^name: *//p' | head -n 1 | tr -d "\"'")
+  fi
+  [ -n "$project" ] || prebuilt_fail "could not read the compose project name from 'docker compose config'; set COMPOSE_PROJECT_NAME"
+  services=$(docker compose config --services) || prebuilt_fail "'docker compose config --services' failed"
+  compose_images=$(docker compose config --images 2>/dev/null) \
+    || prebuilt_fail "this docker compose cannot list service images ('config --images'); upgrade the compose plugin to use --prebuilt"
+  compose_images=$(printf '%s\n' "$compose_images" | sed -e 's#^docker\.io/library/##' -e 's#:latest$##')
+
+  for entry in $PREBUILT_SERVICE_MAP; do
+    svc="${entry%%=*}"
+    component="${entry#*=}"
+    case " api app nginx db-backup " in
+      *" $component "*) ;;
+      *) prebuilt_fail "PREBUILT_SERVICE_MAP: '$entry' names no shipped image (api, app, nginx, db-backup)" ;;
+    esac
+    printf '%s\n' "$services" | grep -Fqx -- "$svc" || continue   # not in this compose file
+    target="$project-$svc"
+    if ! printf '%s\n' "$compose_images" | grep -Fqx -- "$target"; then
+      prebuilt_fail "compose does not call service $svc's image '$target'; it lists: $(printf '%s\n' "$compose_images" | tr '\n' ' ')"
+    fi
+    PREBUILT_SERVICES+=("$svc")
+    pairs+=("$target=$PREBUILT_REPO/$component:$PREBUILT_TAG")
+    targets="$targets$target
+"
+  done
+  [ ${#PREBUILT_SERVICES[@]} -gt 0 ] || prebuilt_fail "no compose service matches PREBUILT_SERVICE_MAP"
+
+  # 3. Anything else compose would build here must be covered, or we refuse:
+  #    it would either be built on this host or run from a stale local image.
+  for img in $compose_images; do
+    case "$img" in
+      "$project-"*)
+        if ! printf '%s' "$targets" | grep -Fqx -- "$img"; then
+          prebuilt_fail "compose image $img has no prebuilt image. Add its service to PREBUILT_SERVICE_MAP (and to scripts/build-and-ship.sh if it needs a new image)."
+        fi ;;
+    esac
+  done
+
+  # 4. Retag, remembering what each name pointed at so a failed deploy can undo it.
+  for entry in "${pairs[@]}"; do
+    target="${entry%%=*}"
+    img="${entry#*=}"
+    prev=$(docker image inspect --format '{{.Id}}' "$target" 2>/dev/null || true)
+    PREBUILT_RESTORE+=("$target|$prev")
+    docker tag "$img" "$target"
+  done
+  echo "  Compose services now resolve to the shipped images: ${PREBUILT_SERVICES[*]}"
+}
+
+restore_prebuilt_tags() {
+  local entry target prev
+  for entry in "${PREBUILT_RESTORE[@]}"; do
+    target="${entry%%|*}"
+    prev="${entry#*|}"
+    if [ -n "$prev" ]; then
+      docker tag "$prev" "$target" || true
+    else
+      docker rmi "$target" > /dev/null 2>&1 || true
+    fi
+  done
+}
+
+on_exit() {
+  local status=$?
+  if [ "$status" -ne 0 ] && [ "$PREBUILT_SWITCHED" = 0 ] && [ ${#PREBUILT_RESTORE[@]} -gt 0 ]; then
+    echo "  Deploy stopped before any container was switched; restoring the previous compose image tags."
+    restore_prebuilt_tags
+  fi
+}
+trap on_exit EXIT
 
 echo "========================================="
 echo "  PrintForge — Deploy"
@@ -51,9 +229,15 @@ echo "[2/6] Fixing file permissions..."
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x docker/db-backup/backup.sh 2>/dev/null || true
 
-# ---- Step 3: Build Docker images ----
-echo "[3/6] Building Docker images (this takes a few minutes)..."
-docker compose build --no-cache
+# ---- Step 3: Build Docker images (or use the prebuilt ones) ----
+if [ -n "$PREBUILT_TAG" ]; then
+  echo "[3/6] Using prebuilt images tagged $PREBUILT_TAG (nothing is built on this host)..."
+  use_prebuilt_images
+else
+  echo "[3/6] Building Docker images (this takes a few minutes)..."
+  echo "  (Production/docker-vm: build on Vault instead -- see deploy.sh --help and docs/DEPLOYMENT.md)"
+  docker compose build --no-cache
+fi
 
 # ---- Step 4: Start DB + Redis first ----
 echo "[4/6] Starting database and Redis..."
@@ -102,7 +286,16 @@ fi
 
 # Bring up all remaining containers (API, app, nginx, workers, etc.)
 echo "  Starting all containers..."
-docker compose up -d
+if [ -n "$PREBUILT_TAG" ]; then
+  # Recreate every service that runs a shipped image (api, worker and the
+  # moonraker printer bridge share the api image), then start anything else.
+  # --no-build: this mode never builds here, even if an image went missing.
+  PREBUILT_SWITCHED=1
+  docker compose up -d --no-build --force-recreate "${PREBUILT_SERVICES[@]}"
+  docker compose up -d --no-build
+else
+  docker compose up -d
+fi
 
 echo "  Waiting for API to become ready..."
 RETRIES=30
@@ -220,6 +413,9 @@ echo ""
 echo "  URL:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')"
 echo "  Login:    admin@printforge.local"
 echo "  Password: ${ADMIN_PASSWORD}"
+if [ -n "$PREBUILT_TAG" ]; then
+  echo "  Images:   ${PREBUILT_REPO}/{api,app,nginx,db-backup}:${PREBUILT_TAG}"
+fi
 echo ""
 echo "  IMPORTANT: Save this password! Change it after first login."
 echo ""
