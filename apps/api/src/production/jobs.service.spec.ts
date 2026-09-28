@@ -386,6 +386,23 @@ describe('Sardine tin J1 (§3.6.1, §7.1 item 27)', () => {
       `${M.blue}/${M.black}`, `${M.gold}/${M.black}`, `${M.orange}/-`, `${M.white}/-`, `${M.white}/${M.silver}`,
     ].sort());
   });
+
+  it('(Regular, Blue) with one White spool: both White lines stay PLA White on that spool (no Silver substitute); completion files nothing under Silver', async () => {
+    const h = sardine();
+    const job: any = await h.jobs.create({ productId: PRODUCT_ID, colourOptionId: OPT.blue, quantityToProduce: 10, stockMode: 'BUILD_STOCK' });
+    const white = lines(h, job.id).filter((l: any) => l.plannedMaterialId === M.white);
+    expect(white.map((l: any) => [l.plannedSlicedMaterialId ?? null, l.materialId, l.spoolId]).sort()).toEqual([
+      [M.silver, M.white, `sp-${M.white}`],
+      [null, M.white, `sp-${M.white}`],
+    ].sort());
+    expect(lines(h, job.id).every((l: any) => l.materialId === l.plannedMaterialId)).toBe(true);
+    expect(job.reservation).toMatchObject({ withSpool: 5, short: [] });
+    const done: any = await h.jobs.completeJob(job.id);
+    expect(done.stockCredits.length).toBeGreaterThan(0);
+    // Silver is only ever a sliced-for colour here, never an actual one.
+    expect(done.stockCredits.filter((c: any) => c.colourKey.includes(M.silver))).toEqual([]);
+    expect(spool(h, `sp-${M.silver}`).currentWeight).toBe(5000);
+  });
 });
 
 // -------------------------------------------------- pre-release order jobs
