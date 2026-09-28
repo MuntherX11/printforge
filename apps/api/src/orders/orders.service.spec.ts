@@ -382,6 +382,34 @@ describe('S9 cancel releases printed stock in the same transaction (§3.6, §7.1
     await expect(h.orders.update(o.id, { status: 'CANCELLED' })).rejects.toThrow('db down');
     expect(h.db.t('order').find((x: any) => x.id === o.id).status).toBe('CONFIRMED');
   });
+
+  it('a cancel while the Plan dialog is open: J5 then → 409, no job and no PLAN_ALLOCATE, the 2 Box units stay on hand', async () => {
+    const h = box();
+    h.db.t('productComponent').find((c: any) => c.id === 'box').stockOnHand = 2;
+    const { order: o } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5, description: 'Box' }], 'CONFIRMED');
+    const plan: any = await h.planning.previewPlan(o.id);
+    expect(plan.rows[0]).toMatchObject({ fromStock: 2, toProduce: 3 });
+    const out: any = await h.orders.update(o.id, { status: 'CANCELLED' });
+    expect(out.stockReleased).toEqual([]);
+    await expectStatus(h.planning.createFromPlan(o.id, { planVersion: plan.planVersion }), 409, 'This order is cancelled');
+    expect(h.db.t('productionJob')).toHaveLength(0);
+    expect(h.db.t('componentStockMovement')).toHaveLength(0);
+    expect(h.db.t('productComponent').find((c: any) => c.id === 'box').stockOnHand).toBe(2);
+  });
+
+  it('takes the order\'s plan lock (the one J5 takes) before the status change, and the line lock before each release', async () => {
+    const h = box();
+    const { order: o, items: [it] } = addOrder(h.db, [{ productId: BOX_ID, quantity: 3, description: 'Box' }], 'CONFIRMED');
+    const flip = jest.spyOn(h.db.order, 'updateMany');
+    const movements = jest.spyOn(h.db.componentStockMovement, 'findMany');
+    await h.orders.update(o.id, { status: 'CANCELLED' });
+    const calls = h.db.$queryRaw.mock.calls.map(([q]: any) => q);
+    const at = (re: RegExp) => h.db.$queryRaw.mock.invocationCallOrder[calls.findIndex((q: any) => re.test(q.sql))];
+    expect(calls.find((q: any) => /plan:advisory/.test(q.sql)).values).toEqual([`plan:${o.id}`]);
+    expect(calls.find((q: any) => /stock:lockLine/.test(q.sql)).values).toEqual([it.id]);
+    expect(at(/plan:advisory/)).toBeLessThan(flip.mock.invocationCallOrder[0]);
+    expect(at(/stock:lockLine/)).toBeLessThan(movements.mock.invocationCallOrder[0]);
+  });
 });
 
 // ------------------------------------------------------------------ S11 order
@@ -483,6 +511,32 @@ describe('S11 order line colour change (§3.6.1, §3.9, §7.1 item 36)', () => {
     }
     h.db.t('order').find((x: any) => x.id === o.id).status = 'CANCELLED';
     await expectStatus(h.orders.changeLineColour(o.id, it.id, { colours: [{ colourOptionId: null, quantity: 30 }] }), 409, 'cancelled');
+  });
+
+  it('takes the order\'s plan lock (the one J5 and S9 take) first, and the line lock before the release', async () => {
+    const { h, o, it } = await planned();
+    h.db.$queryRaw.mockClear();
+    const read = jest.spyOn(h.db.orderItem, 'findUnique');
+    await h.orders.changeLineColour(o.id, it.id, { ...body, confirm: true });
+    const calls = h.db.$queryRaw.mock.calls.map(([q]: any) => q);
+    const at = (re: RegExp) => h.db.$queryRaw.mock.invocationCallOrder[calls.findIndex((q: any) => re.test(q.sql))];
+    expect(calls[0].values).toEqual([`plan:${o.id}`]);
+    expect(at(/plan:advisory/)).toBeLessThan(read.mock.invocationCallOrder[0]);
+    expect(at(/plan:advisory/)).toBeLessThan(at(/lock:Product:SHARE/));
+    expect(calls.find((q: any) => /stock:lockLine/.test(q.sql)).values).toEqual([it.id]);
+  });
+
+  it('a cancel that commits while S11 waits for the plan lock → 409 "This order is cancelled", nothing released or split', async () => {
+    const { h, o, it } = await planned();
+    const inner = h.db.$queryRaw.getMockImplementation()!;
+    h.db.$queryRaw.mockImplementation(async (q: any) => {
+      if (/plan:advisory/.test(q?.sql ?? '')) h.db.t('order').find((x: any) => x.id === o.id).status = 'CANCELLED'; // S9 held the lock and committed
+      return inner(q);
+    });
+    await expectStatus(h.orders.changeLineColour(o.id, it.id, { ...body, confirm: true }), 409, 'This order is cancelled');
+    expect(h.db.t('componentStockMovement').filter((m: any) => m.reason === 'PLAN_RELEASE')).toHaveLength(0);
+    expect(items(h, o.id)).toHaveLength(1);
+    expect(h.db.t('productionJob').filter((j: any) => j.orderItemId === it.id).every((j: any) => j.status === 'QUEUED')).toBe(true);
   });
 
   it('a line with nothing planned needs no confirm; a legacy variantId line is written with its pair columns', async () => {

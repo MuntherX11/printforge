@@ -1,5 +1,4 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import type { PlanRow, Problem, SurplusPolicy } from '@printforge/types';
 import { createHash } from 'crypto';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from '../catalog-core/bom-resolver.service';
@@ -15,6 +14,7 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { ProductStockService, suggestFromStock } from '../stock-ledger/product-stock.service';
 import { creditUnits, materialLines, plateRows, singlePlateFilename } from './job-builder';
 import { parsePlanSubmit, parsePreview, type PlanRowInput } from './job-input';
+import { lockOrderPlan } from './job-transitions';
 
 /**
  * Order production planning (spec §4.4 J4/J5, §4.4.1 PlanRow) and the job
@@ -49,6 +49,19 @@ export interface PlanResult {
 }
 
 const NO_SLICED_DATA = (desc: string) => `"${desc}" has no sliced data — add its grams and minutes or a plate layout`;
+
+/**
+ * Orders production can be planned for (J4/J5). A cancelled order holds no
+ * allocation (§3.6 "Release on order cancellation"), and a finished one has
+ * nothing left to plan.
+ */
+const PLANNABLE_STATUSES = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION'];
+
+function assertPlannable(status: string) {
+  if (!PLANNABLE_STATUSES.includes(status)) {
+    throw new ConflictException(`This order is ${String(status).toLowerCase().replace(/_/g, ' ')} — production can't be planned for it`);
+  }
+}
 
 function planComponent(component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy, plates?: Array<{ layoutId: string | null; plateCount: number }>): OptionPlan {
   const bom = { ...cacheBom, components: [component] };
@@ -88,6 +101,7 @@ export class JobPlanningService {
       include: { items: true, customer: { select: { id: true, name: true } } },
     });
     if (!order) throw new NotFoundException('Order not found');
+    assertPlannable(order.status);
 
     const ctx = new CatalogRequestContext();
     const warnings: Problem[] = [];
@@ -280,7 +294,13 @@ export class JobPlanningService {
   async createFromPlan(orderId: string, body: unknown, userId?: string | null): Promise<PlanResult> {
     const input = parsePlanSubmit(body); // bounds before any lock (rule 7)
     return this.prisma.$transaction(async (tx: any) => {
-      await tx.$queryRaw(Prisma.sql`/* plan:advisory */ SELECT 1 AS "ok" FROM (SELECT pg_advisory_xact_lock(hashtext(${`plan:${orderId}`}))) AS "l"`);
+      await lockOrderPlan(tx, orderId);
+      // The status read after the lock: S9 cancels under the same lock, so a
+      // cancel is either committed and seen here (409), or waits for this plan
+      // and then returns what it allocates.
+      const current = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
+      if (!current) throw new NotFoundException('Order not found');
+      assertPlannable(current.status);
       // The option rows the lines resolve through, FOR SHARE (§3.1 rule 3): a
       // concurrent reclassification (O7) waits for this plan or finishes first.
       const lineOptions = await tx.orderItem.findMany({ where: { orderId }, select: { variantId: true, sizeOptionId: true, colourOptionId: true } });

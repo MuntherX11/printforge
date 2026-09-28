@@ -96,6 +96,9 @@ const MODELS = [
 
 const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material' };
 
+/** Column defaults (`@default` in schema.prisma) that services read back. */
+const DEFAULTS: Record<string, Row> = { order: { status: 'PENDING' } };
+
 function prismaError(code: string, message: string) {
   const e: any = new Error(message);
   e.code = code;
@@ -288,7 +291,7 @@ export function fakeCatalogDb() {
       count: async (a: Row = {}) => all(a.where).length,
       create: async (a: Row) => {
         const now = new Date();
-        const row: Row = { id: `${model}-${++seq}`, createdAt: now, updatedAt: now, ...structuredClone(a.data) };
+        const row: Row = { id: `${model}-${++seq}`, createdAt: now, updatedAt: now, ...DEFAULTS[model], ...structuredClone(a.data) };
         uniqueGuard(model, row);
         tables[model].push(row);
         return project(model, row, a);

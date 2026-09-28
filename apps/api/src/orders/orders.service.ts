@@ -15,7 +15,7 @@ import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
 import { PricingService, type ResolvedLine } from '../catalog-core/pricing.service';
 import { ProductionPlannerService } from '../catalog-core/production-planner.service';
 import { ProductStockService } from '../stock-ledger/product-stock.service';
-import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE } from '../production/job-transitions';
+import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE, lockOrderPlan } from '../production/job-transitions';
 import { lockOptions, lockProduct, TX_OPTS } from '../products/product-locks';
 import {
   documentTotals, lineOptionsOf, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit, parseCustomerLine,
@@ -367,7 +367,9 @@ export class OrdersService {
   /**
    * S9. Moving an order to CANCELLED (from any other status) and returning its
    * printed-stock allocations happen in one transaction; the guarded status
-   * change comes first, so a second cancel releases nothing.
+   * change comes first, so a second cancel releases nothing. It runs under the
+   * order's plan lock, so a J5 of this order either commits first (and its
+   * allocations are returned here) or runs after and finds the order cancelled.
    */
   async update(id: string, body: unknown) {
     const b = isObject(body) ? body : {};
@@ -381,6 +383,7 @@ export class OrdersService {
     let released: Array<{ componentId: string; colourKey: string; units: number }> = [];
     if (status === 'CANCELLED' && existing.status !== 'CANCELLED') {
       released = await this.prisma.$transaction(async (tx: any) => {
+        await lockOrderPlan(tx, id);
         const flipped = await tx.order.updateMany({ where: { id, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED', notes, dueDate } });
         if (flipped.count === 0) return [];
         const credits = await this.stock.releaseForOrder(tx, id);
@@ -432,9 +435,15 @@ export class OrdersService {
    * (409 if a job of the line has started), releaseForItem, then the line writes.
    * `dryRun` lists the jobs and stock without writing; the write needs `confirm`
    * when either list is non-empty.
+   *
+   * It first takes the order's plan lock, the one J5 and S9 take: a J5 in
+   * flight commits before the line is read (its jobs and allocations are then
+   * cancelled and released here), a later J5 recomputes on the split lines, and
+   * a cancel committed while this waited is seen by the status check below.
    */
   async changeLineColour(orderId: string, itemId: string, body: unknown, dryRun = false, userId?: string | null) {
     const out = await this.prisma.$transaction(async (tx: any) => {
+      await lockOrderPlan(tx, orderId);
       const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
       if (!item || item.orderId !== orderId) throw new NotFoundException('Order line not found');
       if (item.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');

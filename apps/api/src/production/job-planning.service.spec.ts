@@ -253,6 +253,59 @@ describe('J4/J5 rows (§4.4.1, §7.1 item 18)', () => {
   });
 });
 
+// -------------------------------------------- order status
+
+describe('J4/J5 and the order status (§3.6 "Release on order cancellation")', () => {
+  const nothingWritten = (h: H) => {
+    expect(h.db.t('productionJob')).toHaveLength(0);
+    expect(h.db.t('componentStockMovement')).toHaveLength(0);
+    expect(h.db.t('productComponent')[0].stockOnHand).toBe(2);
+  };
+
+  it('PENDING and IN_PRODUCTION orders are planned; a cancelled, ready, shipped or delivered order → 409 on J4 and J5, nothing written', async () => {
+    for (const status of ['PENDING', 'IN_PRODUCTION']) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const plan: any = await h.planning.previewPlan(order.id);
+      const res = await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion });
+      expect(res).toMatchObject({ jobsCreated: 1, allocations: [expect.objectContaining({ fromStock: 2 })] });
+    }
+    for (const status of ['CANCELLED', 'READY', 'SHIPPED', 'DELIVERED']) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const message = `This order is ${status.toLowerCase()} — production can't be planned for it`;
+      await expectStatus(h.planning.previewPlan(order.id), 409, message);
+      await expectStatus(h.planning.createFromPlan(order.id, { planVersion: 'x' }), 409, message);
+      await expectStatus(h.planning.planWithSuggestions(order.id), 409, message);
+      nothingWritten(h);
+    }
+  });
+
+  it('a cancel between J4 and J5 (the Plan dialog still open): J5 → 409, no job, no PLAN_ALLOCATE, the stock stays on hand', async () => {
+    const h = box({ stock: 2 });
+    const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const plan: any = await h.planning.previewPlan(order.id);
+    expect(plan.rows[0]).toMatchObject({ fromStock: 2, toProduce: 3 });
+    h.db.t('order')[0].status = 'CANCELLED'; // S9 changes no plan row, so the planVersion still matches
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion }), 409, 'This order is cancelled');
+    nothingWritten(h);
+  });
+
+  it('J5 reads the status after taking the plan lock: a cancel that commits while J5 waits for it → 409', async () => {
+    const h = box({ stock: 2 });
+    const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const plan: any = await h.planning.previewPlan(order.id);
+    const inner = h.db.$queryRaw.getMockImplementation()!;
+    h.db.$queryRaw.mockImplementation(async (q: any) => {
+      if (/plan:advisory/.test(q?.sql ?? '')) h.db.t('order')[0].status = 'CANCELLED'; // S9 held the lock and committed
+      return inner(q);
+    });
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion }), 409, 'This order is cancelled');
+    nothingWritten(h);
+    expect(h.db.$queryRaw.mock.calls.filter(([q]: any) => /plan:advisory/.test(q.sql)).map(([q]: any) => q.values)).toEqual([[`plan:${order.id}`]]);
+  });
+});
+
 // -------------------------------------------- plan version (item 34)
 
 describe('planVersion and colour changes (§7.1 item 34)', () => {
