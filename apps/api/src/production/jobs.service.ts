@@ -110,9 +110,13 @@ export class JobsService {
     for (const [i, line] of dto.materials.entries()) {
       const spool = await this.prisma.spool.findUnique({
         where: { id: line.spoolId },
-        select: { id: true, materialId: true, currentWeight: true, material: { select: { costPerGram: true } } },
+        select: { id: true, materialId: true, currentWeight: true, isActive: true, printforgeId: true, material: { select: { costPerGram: true } } },
       });
       if (!spool) throw new BadRequestException(`Filament line ${i + 1}: spool not found`);
+      // A retired spool is kept for its job history, never used up (the rule of job-materials.service.ts).
+      if (!spool.isActive) {
+        throw new BadRequestException(`Filament line ${i + 1}: ${spool.printforgeId ?? 'that spool'} is inactive and can't be used`);
+      }
       if (spool.currentWeight < line.gramsUsed) {
         throw new BadRequestException(
           `Filament line ${i + 1}: only ${spool.currentWeight.toFixed(0)} g left on that spool, ${line.gramsUsed} g requested`,

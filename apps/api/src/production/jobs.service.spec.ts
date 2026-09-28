@@ -340,6 +340,23 @@ describe('swapColour regression (job-materials.service.ts untouched)', () => {
   });
 });
 
+describe('test prints refuse a retired spool (safety spec §2)', () => {
+  it('an inactive spool on an explicit TEST line → 400 and no job; the same line on an active spool creates the job', async () => {
+    const h = box();
+    const s = spool(h, `sp-${M.black}`);
+    Object.assign(s, { isActive: false, printforgeId: 'PF-A7X2' });
+    const body = { purpose: 'TEST', materials: [{ spoolId: s.id, gramsUsed: 5 }] };
+    await expectStatus(h.jobs.create(body), 400, "Filament line 1: PF-A7X2 is inactive and can't be used");
+    s.printforgeId = null;
+    await expectStatus(h.jobs.create(body), 400, "Filament line 1: that spool is inactive and can't be used");
+    expect(h.db.t('productionJob')).toHaveLength(0);
+    s.isActive = true;
+    const job = (await h.jobs.create(body)) as { id: string };
+    expect(h.db.t('productionJob')).toHaveLength(1);
+    expect(lines(h, job.id)).toEqual([expect.objectContaining({ spoolId: s.id, gramsUsed: 5 })]);
+  });
+});
+
 // ---------------------------------------------------------- Sardine tin
 
 describe('Sardine tin J1 (§3.6.1, §7.1 item 27)', () => {

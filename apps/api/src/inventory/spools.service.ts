@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSpoolDto, UpdateSpoolDto, AdjustSpoolWeightDto } from '@printforge/types';
 import { optionalNumber, requiredNumber } from '../common/utils/validate-number';
@@ -9,6 +10,25 @@ import * as QRCode from 'qrcode';
 import JSZip from 'jszip';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PDFDocument = require('pdfkit');
+
+/** Job statuses that still hold a spool (the planner's reservations). */
+const ACTIVE_JOB_STATUSES: readonly string[] = ['QUEUED', 'IN_PROGRESS', 'PAUSED'];
+const REMOVE_TX = { timeout: 30_000, maxWait: 10_000 };
+const jobsText = (n: number) => (n === 1 ? '1 job' : `${n} jobs`);
+
+/** 409 text for a spool with lines on `n` active jobs (safety spec §2 step 3). */
+export function spoolOnActiveJobMessage(label: string, n: number): string {
+  return n === 1
+    ? `${label} is on 1 active job and can't be deleted. When that job is finished or cancelled, deactivate the spool instead.`
+    : `${label} is on ${n} active jobs and can't be deleted. When those jobs are finished or cancelled, deactivate the spool instead.`;
+}
+
+/** 409 text for a spool used by `n` finished jobs (safety spec §2 step 4). */
+export function spoolHasHistoryMessage(label: string, n: number, isActive: boolean): string {
+  return isActive
+    ? `${label} was used by ${jobsText(n)} and can't be deleted. Deactivate it instead — its job history is kept.`
+    : `${label} was used by ${jobsText(n)} and can't be deleted. It is already inactive, and its job history is kept.`;
+}
 
 @Injectable()
 export class SpoolsService {
@@ -120,23 +140,41 @@ export class SpoolsService {
     });
   }
 
+  /**
+   * Delete a spool only when no job ever used it (safety spec §2). Its job
+   * lines are each job's filament history (costing, the job page, the
+   * planner's reservations), so they are never deleted: a spool on an active
+   * job → 409 SPOOL_ON_ACTIVE_JOB (checked first), a spool with any other job
+   * line → 409 SPOOL_HAS_HISTORY, and the way out is PATCH isActive:false.
+   * One transaction under FOR UPDATE on the spool row, which conflicts with
+   * the FOR KEY SHARE a concurrent JobMaterial insert takes, so a line added at
+   * the same moment is either seen here or fails its foreign key after.
+   */
   async remove(id: string) {
-    await this.findOne(id);
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string; printforgeId: string | null; isActive: boolean }>>(
+        Prisma.sql`/* lock:Spool:UPDATE */ SELECT "id", "printforgeId", "isActive" FROM "Spool" WHERE "id" = ANY(${[id]}::text[]) FOR UPDATE`,
+      );
+      const spool = rows[0];
+      if (!spool) throw new NotFoundException('Spool not found');
+      const label = spool.printforgeId ?? 'This spool';
 
-    const activeJobMaterials = await this.prisma.jobMaterial.findFirst({
-      where: {
-        spoolId: id,
-        job: { status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] } },
-      },
-    });
-    if (activeJobMaterials) {
-      throw new BadRequestException('Cannot delete spool assigned to an active production job');
-    }
+      const lines = await tx.jobMaterial.findMany({
+        where: { spoolId: id },
+        select: { jobId: true, job: { select: { status: true } } },
+      });
+      const activeJobs = new Set(lines.filter((l) => ACTIVE_JOB_STATUSES.includes(l.job.status)).map((l) => l.jobId));
+      if (activeJobs.size > 0) {
+        throw new ConflictException({ message: spoolOnActiveJobMessage(label, activeJobs.size), code: 'SPOOL_ON_ACTIVE_JOB' });
+      }
+      const jobs = new Set(lines.map((l) => l.jobId));
+      if (jobs.size > 0) {
+        throw new ConflictException({ message: spoolHasHistoryMessage(label, jobs.size, spool.isActive), code: 'SPOOL_HAS_HISTORY' });
+      }
 
-    // Clear foreign key references first
-    await this.prisma.jobMaterial.deleteMany({ where: { spoolId: id } });
-    await this.prisma.spool.delete({ where: { id } });
-    return { deleted: true };
+      await tx.spool.delete({ where: { id } });
+      return { deleted: true };
+    }, REMOVE_TX);
   }
 
   async deductWeight(id: string, grams: number) {

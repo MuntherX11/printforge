@@ -94,7 +94,7 @@ const MODELS = [
   'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
 ];
 
-const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material' };
+const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material', Spool: 'spool' };
 
 function prismaError(code: string, message: string) {
   const e: any = new Error(message);
