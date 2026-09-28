@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { Problem, SlicerImportResult } from '@printforge/types';
+import { filamentIdentityKey, type Problem, type SlicerImportResult } from '@printforge/types';
 import { decideImportLinks, type ImportedSlot, type LinkComponent } from '../catalog-core/colour-link-proposal';
 import { round1 } from '../catalog-core/cost-engine';
 import { PricingService } from '../catalog-core/pricing.service';
@@ -7,6 +7,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { sniffImage } from '../common/utils/image-sniff';
 import { requiredNumber } from '../common/utils/validate-number';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
+import { findDuplicateMaterial, waitForMaterialIdentity } from '../inventory/material-identity';
 import { ThreeMfParserService } from '../file-parser/threemf-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
 import { componentSlotIndexes, duplicateLayout, plateLabelWarnings, slotsDifferWarning, slotsFor, toolsForComponent } from './plate-layouts.service';
@@ -244,11 +245,29 @@ export class ProductOnboardingService {
     }
 
     const materials: any[] = await tx.material.findMany({ select: { id: true, name: true, type: true, color: true, colorHex: true } });
+    let identityLocked = false;
     const materialFor = async (t: Tool): Promise<string> => {
       const type = normaliseMaterialType(t.type);
       const hit = matchMaterial(materials, type, t.hex);
       if (hit) return hit.id;
       const data = newMaterialData(t.type, type, t.hex);
+      // Safety spec §3: a coloured filament created since the snapshot above (or
+      // a spacing variant of one) is reused, never duplicated. Waits for the
+      // identity lock once per import; colourless filaments are created as before.
+      const identity = { type: data.type, brand: null, color: data.color };
+      if (filamentIdentityKey(identity) !== null) {
+        if (!identityLocked) {
+          await waitForMaterialIdentity(tx);
+          identityLocked = true;
+        }
+        const dup = await findDuplicateMaterial(tx, identity);
+        if (dup) {
+          if (!materials.some((x) => x.id === dup.id)) {
+            materials.push({ id: dup.id, name: dup.name, type: dup.type, color: dup.color, colorHex: dup.colorHex });
+          }
+          return dup.id;
+        }
+      }
       const m = await tx.material.create({ data, select: { id: true, name: true, type: true, color: true, colorHex: true } });
       materials.push(m);
       createdMaterials.push({ id: m.id, name: m.name, colorHex: m.colorHex ?? null });

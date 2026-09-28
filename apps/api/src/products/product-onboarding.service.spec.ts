@@ -92,6 +92,26 @@ describe('material matching (§3.12)', () => {
     expect(standard.complete).toBe(false);
     expect(h.db.t('product')[0].basePrice).toBe(1.5);
   });
+
+  it('safety §3: a filament created after the import snapshot is reused, not duplicated; one identity lock per import', async () => {
+    const { h, onboarding } = setup();
+    h.db.insert('material', { id: 'm-green', name: 'Nylon Green', type: 'NYLON', brand: null, color: 'Green', colorHex: null, costPerGram: 0.02 });
+    const findMany = h.db.material.findMany;
+    const SNAPSHOT = JSON.stringify({ id: true, name: true, type: true, color: true, colorHex: true });
+    let stale = true;
+    h.db.material.findMany = jest.fn(async (a: { where?: unknown; select?: unknown }) => {
+      if (!stale || a?.where || JSON.stringify(a?.select) !== SNAPSHOT) return findMany(a);
+      stale = false;
+      return [];
+    });
+    const count = h.db.t('material').length;
+    const out = await onboarding.onboardFromGcode(P, [file('Glow.gcode', gcode({ minutes: 30, toolGrams: [12], types: ['PA12-CF'], colours: ['#00FF00'] }))], opts());
+    expect([out.createdMaterials, h.db.t('material').length, newComps(h)[0].materialId]).toEqual([[], count, 'm-green']);
+    const advisory = () => h.db.$queryRaw.mock.calls.filter((c: Array<{ sql: string }>) => /material:advisory/.test(c[0].sql)).length;
+    expect(advisory()).toBe(1);
+    const two = await onboarding.onboardFromGcode(P, [file('Duo.gcode', gcode({ minutes: 30, toolGrams: [12, 5], types: ['PA12-CF', 'PA'], colours: ['#0000FF', '#FF0000'] }))], opts());
+    expect([two.createdMaterials.length, advisory()]).toEqual([2, 2]);
+  });
 });
 
 // ------------------------------------------------------------------- G-code
