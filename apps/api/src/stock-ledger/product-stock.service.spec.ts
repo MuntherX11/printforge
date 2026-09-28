@@ -201,6 +201,27 @@ describe('ProductStockService release', () => {
     expect(r.map((x) => x.quantity)).toEqual([2]);
     expect(db.row('box', `0:${RED}`)).toBe(2);
   });
+
+  it('two concurrent releases of one line (S9 and S11, or a double submit) return its allocation once: the second waits on the line lock, then nets 0', async () => {
+    const { db, svc } = setup();
+    db.rows.set(`box|0:${RED}`, 5);
+    await svc.allocate(db.tx, { componentId: 'box', colourKey: `0:${RED}`, quantity: 5, orderItemId: 'oi-1' });
+    // FOR UPDATE is held to commit: a second locker gets the row once the first release has finished.
+    let holder: Promise<unknown> = Promise.resolve();
+    const exec = db.tx.$queryRaw.getMockImplementation()!;
+    db.tx.$queryRaw.mockImplementation(async (q: any) => {
+      if (/stock:lockLine/.test(q.sql)) await holder;
+      return exec(q);
+    });
+    const first = svc.releaseForItem(db.tx, 'oi-1');
+    holder = first.catch(() => undefined);
+    const second = svc.releaseForItem(db.tx, 'oi-1');
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.map((x) => x.quantity)).toEqual([5]);
+    expect(b).toEqual([]);
+    expect(db.row('box', `0:${RED}`)).toBe(5);
+    expect(db.movements.map((m) => [m.reason, m.delta])).toEqual([['PLAN_ALLOCATE', -5], ['PLAN_RELEASE', 5]]);
+  });
 });
 
 describe('manual set and unconfirmed stock', () => {

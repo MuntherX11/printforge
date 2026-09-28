@@ -365,6 +365,7 @@ export function fakeCatalogDb() {
       case 'setColumnIf': { const c = comp(v[1]); if (!c || c.stockOnHand !== v[2]) return []; c.stockOnHand = v[0]; c.stockConfirmedAt = new Date(); return ret(c.stockOnHand); }
       case 'ensureRow': { if (!rk(v[1], v[2])) tables.componentColourStock.push({ id: `ccs-${++seq}`, componentId: v[1], colourKey: v[2], stockOnHand: 0, updatedAt: new Date() }); return []; }
       case 'setRowIf': { const r = rk(v[1], v[2]); if (!r || r.stockOnHand !== v[3]) return []; r.stockOnHand = v[0]; return ret(v[0]); }
+      case 'lockLine': return tables.orderItem.filter((r) => r.id === v[0]).map((r) => ({ id: r.id }));
     }
     throw new Error(`fake db: unsupported raw query ${text.slice(0, 60)}`);
   }

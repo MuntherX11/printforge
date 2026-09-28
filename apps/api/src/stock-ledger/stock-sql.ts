@@ -62,6 +62,17 @@ export function lockRow(tx: StockTx, componentId: string, colourKey: string) {
     WHERE "componentId" = ${componentId} AND "colourKey" = ${colourKey} FOR UPDATE`);
 }
 
+/**
+ * Lock an order line (FOR UPDATE) before its allocations are netted. A second
+ * release of the same line waits for the first to commit, and its movement read
+ * (a new statement) then sees the first PLAN_RELEASE and nets 0.
+ */
+export async function lockLine(tx: StockTx, orderItemId: string): Promise<boolean> {
+  const rows = (await tx.$queryRaw(Prisma.sql`/* stock:lockLine */ SELECT "id" FROM "OrderItem"
+    WHERE "id" = ${orderItemId} FOR UPDATE`)) as unknown[];
+  return rows.length > 0;
+}
+
 /** Manual set of the column, only if it still holds `expected`; also confirms it. */
 export function setColumnIf(tx: StockTx, componentId: string, expected: number, value: number) {
   return one(tx, Prisma.sql`/* stock:setColumnIf */ UPDATE "ProductComponent"
