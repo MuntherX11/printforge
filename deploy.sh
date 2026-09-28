@@ -107,7 +107,8 @@ use_prebuilt_images() {
   if [ -n "$checkout" ] && [ -n "$rev" ] && [ "$checkout" != "$rev" ]; then
     echo "  WARNING: this checkout is at ${checkout:0:12} but the images were built from ${rev:0:12}."
     echo "           docker-compose.yml, deploy.sh and docker/go2rtc come from the checkout;"
-    echo "           bring it to ${rev:0:12} unless the difference is intended."
+    echo "           bring it to ${rev:0:12} unless the difference is intended -- but never to a"
+    echo "           commit whose deploy.sh lacks --prebuilt (it would build on this host)."
   fi
 
   # 2. Work out which image name compose uses for each service.

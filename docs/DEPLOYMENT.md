@@ -148,6 +148,11 @@ come from it (the Prisma schema and all application code come from the images). 
 warns when the checkout and the images are on different commits.
 `sudo PREBUILT_TAG=<tag> bash deploy.sh` is the same as `--prebuilt <tag>`.
 
+> **Never check out, on docker-vm, a commit whose `deploy.sh` predates `--prebuilt`.** The old
+> script ignores its arguments (even `--help`) and runs a full on-host build. Check first with
+> `grep -q PREBUILT_TAG deploy.sh`. `build-and-ship.sh` warns when the commit it built is one of
+> these; its images can still be shipped and deployed from a newer checkout.
+
 With `--prebuilt`, `deploy.sh`:
 
 1. checks that all four `printforge/*:<tag>` images are on the host, built for its architecture,
@@ -174,7 +179,8 @@ does not, the deploy refuses (it cannot otherwise prove that nothing will be bui
 
 ### Rolling back
 
-Every shipped tag stays on docker-vm until it is removed, so rolling back needs no build:
+Every shipped tag stays on docker-vm until it is removed, so rolling back needs no build and no
+checkout change (leave the checkout where it is):
 
 ```bash
 docker image ls printforge/api                     # the tags available on docker-vm

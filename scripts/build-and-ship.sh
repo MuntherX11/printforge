@@ -187,6 +187,14 @@ fi
 [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || die "invalid image tag '$TAG'"
 echo "Commit: $(git log -1 --format='%h %s' "$SHA")"
 echo "Tag:    $TAG"
+# A commit from before the prebuilt mode carries a deploy.sh that ignores
+# --prebuilt and would build on the target, so it must never be checked out there.
+PREBUILT_AWARE=1
+if ! grep -q 'PREBUILT_TAG' <<< "$(git show "$SHA:deploy.sh" 2>/dev/null || true)"; then
+  PREBUILT_AWARE=0
+  echo "WARNING: deploy.sh at ${SHA:0:12} predates --prebuilt. Shipping these images is fine, but do not"
+  echo "         check this commit out on $HOST: its deploy.sh ignores --prebuilt and would build there."
+fi
 
 # Each shipped image: name|Dockerfile|build context (paths relative to the repo root).
 COMPONENTS=(
@@ -274,10 +282,16 @@ echo ""
 echo "========================================="
 echo "  Shipped $TAG (commit ${SHA:0:12}) to $HOST"
 echo "========================================="
-echo "  On $HOST, in the PrintForge checkout:"
-echo "    1. bring the checkout to ${SHA:0:12} (docker-compose.yml, deploy.sh and"
-echo "       docker/go2rtc come from it), e.g.: git fetch origin && git checkout --detach $SHA"
-echo "    2. sudo bash deploy.sh --prebuilt $TAG"
+if [ "$PREBUILT_AWARE" = 1 ]; then
+  echo "  On $HOST, in the PrintForge checkout:"
+  echo "    1. bring the checkout to ${SHA:0:12} (docker-compose.yml, deploy.sh and"
+  echo "       docker/go2rtc come from it), e.g.: git fetch origin && git checkout --detach $SHA"
+  echo "    2. sudo bash deploy.sh --prebuilt $TAG"
+else
+  echo "  This commit's deploy.sh predates --prebuilt. On $HOST, leave the checkout on a"
+  echo "  commit whose deploy.sh has it (check: grep -q PREBUILT_TAG deploy.sh) and run:"
+  echo "    sudo bash deploy.sh --prebuilt $TAG"
+fi
 echo ""
 echo "  Roll back to an earlier tag (code only, schema untouched):"
 echo "    sudo SKIP_DB_PUSH=1 bash deploy.sh --prebuilt <previous-tag>"
