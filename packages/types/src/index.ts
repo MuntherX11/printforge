@@ -363,6 +363,9 @@ export interface FilamentStockRow {
 // Filaments list search, filters, sort, paging and URL state (pure).
 export * from './filament-filter';
 
+// Filament identity (brand + type + colour) for the duplicate guard (pure).
+export * from './filament-identity';
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
