@@ -2,6 +2,7 @@ import { RequestMethod } from '@nestjs/common';
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { MaterialsController } from './materials.controller';
 import { MaterialsService } from './materials.service';
@@ -63,7 +64,7 @@ const spool = (materialId: string, currentWeight: number, extra: Partial<SpoolRo
   };
 };
 
-/** jest.fn Prisma double: only the delegates stockOverview touches. */
+/** jest.fn Prisma double: only the delegates stockOverview and findAll touch. */
 function prismaMock(materials: MaterialRow[], spools: SpoolRow[] = [], total = materials.length) {
   const prisma = {
     material: {
@@ -246,8 +247,52 @@ describe('MaterialsService.stockOverview', () => {
   });
 });
 
+describe('MaterialsService.findAll', () => {
+  const include = {
+    spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
+    _count: { select: { spools: true } },
+  };
+  const page = (p: Partial<PaginationDto>): PaginationDto => p;
+
+  it('flat mode with no ?limit= takes 500, not the DTO default of 20, and returns a plain array', async () => {
+    const { prisma, svc } = prismaMock([material('A'), material('B')]);
+    const out = await svc.findAll(page({ page: 1, limit: 20 }), false, false);
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toHaveLength(2);
+    expect(prisma.material.findMany).toHaveBeenCalledWith({ include, orderBy: { name: 'asc' }, take: 500 });
+    expect(prisma.material.count).not.toHaveBeenCalled();
+  });
+
+  it('flat mode with an explicit ?limit= keeps it (50, 500), capped at 1000', async () => {
+    const { prisma, svc } = prismaMock([]);
+    await svc.findAll(page({ limit: 50 }), false, true);
+    await svc.findAll(page({ page: 1, limit: 500 }), false, true);
+    await svc.findAll(page({ limit: 5000 }), false, true);
+    expect(prisma.material.findMany.mock.calls.map(([args]) => args)).toEqual([
+      { include, orderBy: { name: 'asc' }, take: 50 },
+      { include, orderBy: { name: 'asc' }, take: 500 },
+      { include, orderBy: { name: 'asc' }, take: 1000 },
+    ]);
+  });
+
+  it('paginated mode is unchanged: take 25, skip 25, {data,total,page,limit,totalPages}', async () => {
+    const rows = [material('A')];
+    const { prisma, svc } = prismaMock(rows, [], 60);
+    const out = await svc.findAll(page({ page: 2, limit: 25 }), true, true);
+    expect(prisma.material.findMany).toHaveBeenCalledWith({ include, orderBy: { name: 'asc' }, take: 25, skip: 25 });
+    expect(out).toEqual({ data: rows, total: 60, page: 2, limit: 25, totalPages: 3 });
+  });
+
+  it('keeps the old two-argument call working: limitSent defaults to true', async () => {
+    const { prisma, svc } = prismaMock([]);
+    await svc.findAll(page({ limit: 30 }), false);
+    expect(prisma.material.findMany).toHaveBeenCalledWith({ include, orderBy: { name: 'asc' }, take: 30 });
+  });
+});
+
 describe('MaterialsController', () => {
   const serviceMock = () => ({
+    findAll: jest.fn(async (_p: PaginationDto, _paginate?: boolean, _limitSent?: boolean) => []),
     stockOverview: jest.fn(async () => []),
   });
   const controllerWith = (svc: ReturnType<typeof serviceMock>) =>
@@ -273,5 +318,23 @@ describe('MaterialsController', () => {
     await controllerWith(svc).stock();
     expect(svc.stockOverview).toHaveBeenCalledTimes(1);
   });
+
+  it('findAll passes whether ?page= and ?limit= were sent', async () => {
+    const svc = serviceMock();
+    const ctrl = controllerWith(svc);
+    const p = page20();
+    await ctrl.findAll(p, undefined, undefined);
+    await ctrl.findAll(p, undefined, '500');
+    await ctrl.findAll(p, '2', '25');
+    expect(svc.findAll.mock.calls).toEqual([
+      [p, false, false],
+      [p, false, true],
+      [p, true, true],
+    ]);
+  });
 });
 
+/** What the global ValidationPipe hands the controller when only defaults apply. */
+function page20(): PaginationDto {
+  return Object.assign(new PaginationDto(), { page: 1, limit: 20 });
+}

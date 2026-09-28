@@ -23,10 +23,12 @@ export class MaterialsController {
   }
 
   @Get()
-  findAll(@Query() pagination: PaginationDto, @Query('page') rawPage?: string) {
+  findAll(@Query() pagination: PaginationDto, @Query('page') rawPage?: string, @Query('limit') rawLimit?: string) {
     // Pass whether the caller explicitly requested a page — if not, return a flat array
     // for backward compatibility with frontend code that pre-dates pagination.
-    return this.materialsService.findAll(pagination, rawPage !== undefined);
+    // Also pass whether ?limit= was sent: the DTO's default of 20 is filled in
+    // either way, and the flat array must default to 500, not 20.
+    return this.materialsService.findAll(pagination, rawPage !== undefined, rawLimit !== undefined);
   }
 
   @Post('bulk-upload')

@@ -85,7 +85,14 @@ export class MaterialsService {
     });
   }
 
-  async findAll(pagination: PaginationDto, paginate = true) {
+  /**
+   * @param paginate  false when the caller sent no ?page= — returns a flat array.
+   * @param limitSent false when the caller sent no ?limit=. PaginationDto's
+   *   class default (20) is filled in by the transform either way, so without
+   *   this flag the flat-mode 500 default was never reached and Quick Quote and
+   *   Watch Folder saw only the first 20 filaments.
+   */
+  async findAll(pagination: PaginationDto, paginate = true, limitSent = true) {
     const materialInclude = {
       spools: { where: { isActive: true }, select: { id: true, currentWeight: true } },
       _count: { select: { spools: true } },
@@ -94,7 +101,7 @@ export class MaterialsService {
     // When no ?page= param was sent (e.g. dropdown loaders requesting all materials),
     // return a plain array so callers can use .map() without unwrapping.
     if (!paginate) {
-      const limit = Math.min(pagination.limit ?? 500, 1000);
+      const limit = Math.min(limitSent ? (pagination.limit ?? 500) : 500, 1000);
       return this.prisma.material.findMany({
         include: materialInclude,
         orderBy: { name: 'asc' },
