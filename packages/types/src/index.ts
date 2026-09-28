@@ -360,6 +360,9 @@ export interface FilamentStockRow {
   spools: FilamentStockSpool[];
 }
 
+// Filaments list search, filters, sort, paging and URL state (pure).
+export * from './filament-filter';
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
