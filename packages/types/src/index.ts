@@ -314,6 +314,52 @@ export interface CreateMaterialDto {
 
 export interface UpdateMaterialDto extends Partial<CreateMaterialDto> {}
 
+/**
+ * Stock status of a filament. `status !== 'ok'` exactly when its active-spool
+ * grams are below its reorder point — the dashboard Low Stock KPI rule.
+ */
+export type StockStatus = 'ok' | 'low' | 'out';
+
+/** One spool on a GET /materials/stock row. Active and inactive spools both appear. */
+export interface FilamentStockSpool {
+  id: string;
+  /** e.g. 'PF-A7X2'. Null only on a legacy spool that never got a PF-ID. */
+  printforgeId: string | null;
+  /** Grams left on the spool. */
+  currentWeight: number;
+  isActive: boolean;
+  /** Storage location name, or null when the spool has no location. */
+  locationName: string | null;
+}
+
+/** One filament on GET /materials/stock (flat array, one row per material, name A–Z). */
+export interface FilamentStockRow {
+  id: string;
+  name: string;
+  type: MaterialType;
+  color: string | null;
+  /** Six uppercase hex digits, stored bare (no '#'). */
+  colorHex: string | null;
+  brand: string | null;
+  /** OMR per gram. */
+  costPerGram: number;
+  /** OMR per full spool. */
+  spoolPrice: number | null;
+  /** Net filament grams per full spool. */
+  spoolWeightGrams: number | null;
+  /** Grams; below this the filament is low stock. */
+  reorderPoint: number;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** Grams on ACTIVE spools, unrounded. */
+  totalStock: number;
+  /** Number of ACTIVE spools. */
+  activeSpools: number;
+  stockStatus: StockStatus;
+  /** Every spool, active first, then newest first. */
+  spools: FilamentStockSpool[];
+}
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
