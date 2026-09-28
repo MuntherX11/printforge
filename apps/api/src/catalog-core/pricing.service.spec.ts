@@ -297,6 +297,16 @@ describe('cell costs and option costs (§4.1.2)', () => {
     const lr = cells.find((c) => c.sizeOptionId === OPT.large && c.colourOptionId === OPT.red)!;
     expect(lr).toMatchObject({ excluded: false, offeredToCustomers: true });
   });
+
+  it('an inactive colour\'s cells are costed and flagged inactive, and never offered to customers', async () => {
+    const row = sardineRow();
+    row.variants.find((v: any) => v.id === OPT.red).isActive = false;
+    const { cells } = await setup({ rows: [row] }).svc.cellCosts(PRODUCT_ID);
+    const red = cells.filter((c) => c.colourOptionId === OPT.red);
+    expect(red).toHaveLength(2);
+    expect(red.every((c) => !c.active && !c.offeredToCustomers && c.costPerUnit !== null)).toBe(true);
+    expect(cells.find((c) => c.sizeOptionId === OPT.large && c.colourOptionId === OPT.blue)).toMatchObject({ active: true, offeredToCustomers: true });
+  });
 });
 
 describe('bulkFloor (§3.9)', () => {
