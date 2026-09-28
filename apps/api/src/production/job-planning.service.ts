@@ -63,6 +63,9 @@ function assertPlannable(status: string) {
   }
 }
 
+/** One printed-stock balance: rows of different lines that resolve to it share it. */
+const bucketOf = (componentId: string, colourKey: string) => `${componentId}|${colourKey}`;
+
 function planComponent(component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy, plates?: Array<{ layoutId: string | null; plateCount: number }>): OptionPlan {
   const bom = { ...cacheBom, components: [component] };
   return planFromBom(
@@ -110,6 +113,11 @@ export class JobPlanningService {
     const platesByItem = await this.platesOfItems(items.map((i: any) => i.id));
     const reservedBySpool = await this.planner.reservedBySpool();
     const extraMaterials = new Map<string, { name: string }>();
+    // Stock not yet suggested to an earlier row, per bucket. Two lines can read
+    // one bucket (colours that give a part the same filament, a fixed part shared
+    // by every colour), so each row's suggestion is netted against the rows
+    // before it; the suggestions together then never take more than is on hand.
+    const unsuggested = new Map<string, number>();
 
     const out: RowPlan[] = [];
     for (const item of items as any[]) {
@@ -153,9 +161,12 @@ export class JobPlanningService {
         const suggestion = suggestFromStock({
           onHand: c.stockOnHand, remaining: p.remaining, isBaseColumn: isBase, stockConfirmedAt: c.stockConfirmedAt, description: c.description,
         });
+        const bucket = bucketOf(c.componentId, c.colourKey);
+        const left = unsuggested.get(bucket) ?? c.stockOnHand;
         const oldComponents = progress.jobsOnOldComponents.jobCount > 0;
-        const fromStock = oldComponents ? 0 : suggestion.fromStock;
+        const fromStock = oldComponents ? 0 : Math.max(0, Math.min(suggestion.fromStock, left));
         const toProduce = oldComponents ? 0 : p.remaining - fromStock;
+        unsuggested.set(bucket, left - fromStock);
 
         const rowWarnings: Problem[] = [...lineWarnings];
         if (suggestion.warning) rowWarnings.push(suggestion.warning);
@@ -368,6 +379,25 @@ export class JobPlanningService {
         spools.set(s.materialId, spool);
       }
       work.push({ rp, fromStock, toProduce, plates, policy, printerId: printerId ?? null, spools });
+    }
+
+    // Rule 2 across rows: rows of different lines can read one bucket, and
+    // what they take together must fit it (else the second allocation would
+    // fail its guarded decrement as a misleading "stock changed" 409).
+    const taken = new Map<string, { row: PlanRow; units: number; lines: number }>();
+    for (const w of work) {
+      if (w.fromStock <= 0) continue;
+      const k = bucketOf(w.rp.component.componentId, w.rp.row.colourKey);
+      const t = taken.get(k) ?? { row: w.rp.row, units: 0, lines: 0 };
+      t.units += w.fromStock;
+      t.lines += 1;
+      taken.set(k, t);
+    }
+    for (const { row, units, lines } of taken.values()) {
+      if (units > row.onHand) {
+        const colour = row.colourLabel ? ` in ${row.colourLabel}` : '';
+        throw new BadRequestException(`"${row.componentDescription}"${colour}: ${lines} lines take ${units} from printed stock — only ${row.onHand} in printed stock`);
+      }
     }
 
     // Writes.

@@ -134,6 +134,57 @@ describe('J4/J5 rows (§4.4.1, §7.1 item 18)', () => {
     expect(bands.map((r: any) => [r.colourKey, r.onHand])).toEqual([[key([0, M.gold], [1, M.white]), 3], [key([0, M.gold], [1, M.white]), 3]]);
   });
 
+  /** Red ×2 and Blue ×2: the Band bucket (Gold + White, 3) and the fixed Fish column (5) are each read by both lines. */
+  function sharedBuckets() {
+    const h = sardine((row) => {
+      row.components.find((c: any) => c.id === 'c5').colourStock = [{ colourKey: key([0, M.gold], [1, M.white]), stockOnHand: 3 }];
+      row.components.find((c: any) => c.id === 'c3').stockOnHand = 5;
+    });
+    const { order, items } = addOrder(h.db, [{ productId: PRODUCT_ID, colourOptionId: OPT.red, quantity: 2 }, { productId: PRODUCT_ID, colourOptionId: OPT.blue, quantity: 2 }]);
+    return { h, order, items };
+  }
+  const sharedAllocations = (items: any[]) => [
+    { rowKey: `${items[0].id}:c3`, fromStock: 4 },
+    { rowKey: `${items[0].id}:c5`, fromStock: 2 },
+    { rowKey: `${items[1].id}:c3`, fromStock: 1 },
+    { rowKey: `${items[1].id}:c5`, fromStock: 1 },
+  ];
+
+  it('rows of two lines that read one bucket share it: J4 nets the suggestions, and J5 accepts them unchanged', async () => {
+    const { h, order, items } = sharedBuckets();
+    const plan: any = await h.planning.previewPlan(order.id);
+    const figures = (c: string) => plan.rows.filter((r: any) => r.componentId === c).map((r: any) => [r.onHand, r.remaining, r.fromStock, r.toProduce]);
+    expect(figures('c5')).toEqual([[3, 2, 2, 0], [3, 2, 1, 1]]);
+    expect(figures('c3')).toEqual([[5, 4, 4, 0], [5, 4, 1, 3]]);
+
+    const res = await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion });
+    expect(res.allocations).toEqual(sharedAllocations(items));
+    expect(h.db.t('componentColourStock').find((r: any) => r.componentId === 'c5').stockOnHand).toBe(0);
+    expect(h.db.t('productComponent').find((c: any) => c.id === 'c3').stockOnHand).toBe(0);
+    const made = jobsOf(h, order.id).filter((j: any) => ['c3', 'c5'].includes(j.componentId)).map((j: any) => [j.orderItemId, j.componentId, j.quantityToProduce]);
+    expect(made).toEqual([[items[1].id, 'c3', 3], [items[1].id, 'c5', 1]]);
+  });
+
+  it('planWithSuggestions plans both lines of shared buckets (no 409, no JOBS_NOT_PLANNED)', async () => {
+    const { h, order, items } = sharedBuckets();
+    const res = await h.planning.planWithSuggestions(order.id);
+    expect(res.allocations).toEqual(sharedAllocations(items));
+    expect(res.jobsCreated).toBe(8);
+    expect(res.warnings.map((w) => w.code)).not.toContain('JOBS_NOT_PLANNED');
+  });
+
+  it('J5: rows of one bucket that together take more than it holds → 400 naming the part (not a 409), nothing written', async () => {
+    const { h, order, items } = sharedBuckets();
+    const plan: any = await h.planning.previewPlan(order.id);
+    const rows = [{ rowKey: `${items[0].id}:c5`, fromStock: 2 }, { rowKey: `${items[1].id}:c5`, fromStock: 2 }];
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion, rows }), 400, '"Band" in PLA Gold + PLA White: 2 lines take 4 from printed stock — only 3 in printed stock');
+    expect(h.db.t('componentStockMovement')).toHaveLength(0);
+    expect(jobsOf(h, order.id)).toHaveLength(0);
+    // Each row alone still fits, and the netted split is accepted.
+    await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion, rows: [{ rowKey: `${items[0].id}:c5`, fromStock: 1 }, { rowKey: `${items[1].id}:c5`, fromStock: 2 }] });
+    expect(h.db.t('componentColourStock').find((r: any) => r.componentId === 'c5').stockOnHand).toBe(0);
+  });
+
   it('fromStock allocation writes a movement and decrements; stock-only submit creates no job and leaves the order status', async () => {
     const h = box({ stock: 2 });
     const { order, items } = addOrder(h.db, [{ productId: BOX_ID, quantity: 2 }]);
