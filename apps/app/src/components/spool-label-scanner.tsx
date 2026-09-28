@@ -40,6 +40,21 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
     };
   }, [preview]);
 
+  /** Back to Take Photo / Upload Image. The effect above revokes the old preview URL. */
+  function reset() {
+    setPreview(null);
+    setError('');
+    setRawOcrText('');
+    setShowRaw(false);
+    setProgress('');
+  }
+
+  // The component stays mounted between scans, so each open starts fresh
+  // instead of showing the last photo with only Close.
+  useEffect(() => {
+    if (open) reset();
+  }, [open]);
+
   /**
    * Load image into a canvas, upscaled for processing. Returns both the
    * full-color ImageData (for QR decoding) and an OCR-ready binarized Blob.
@@ -570,7 +585,12 @@ export function SpoolLabelScanner({ open, onClose, onResult }: SpoolLabelScanner
           </div>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          {preview && !scanning && (
+            <Button variant="outline" onClick={reset}>
+              <Camera className="h-4 w-4 mr-2" /> Try another photo
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
