@@ -4,12 +4,22 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { colourKeyHasMaterial } from '../stock-ledger/colour-key';
 import {
   CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType, FilamentStockRow, FilamentStockSpool,
+  FilamentIdentity, filamentIdentityKey, filamentIdentityLabel,
 } from '@printforge/types';
 import { PaginationDto, paginatedResponse } from '../common/dto/pagination.dto';
 import { optionalNumber, requiredNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
 import { stockStatus } from './stock-status';
+import {
+  MATERIAL_TX, duplicateMaterialConflict, findDuplicateMaterial, isMaterialBusy, lockMaterialIdentity,
+} from './material-identity';
 
 const MATERIAL_TYPES = ['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'] as const;
+
+/** The columns that make a filament's identity (filamentIdentityKey). */
+const IDENTITY_FIELDS = ['type', 'brand', 'color'] as const;
+
+/** A spreadsheet cell as identity text: String(…) for the key only, blank → null. */
+const cellText = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 
 /** Bounds for filament pricing/stock figures. */
 const LIMITS = {
@@ -73,16 +83,27 @@ export class MaterialsService {
     return { fields: out, spoolPrice, spoolWeightGrams, costPerGram };
   }
 
+  /**
+   * A filament with a colour is created under the identity lock and refused
+   * with 409 MATERIAL_DUPLICATE when the same brand + type + colour exists
+   * (safety spec §3). A colourless one has no identity and is created as before.
+   */
   async create(dto: CreateMaterialDto) {
     const { fields, spoolPrice, spoolWeightGrams, costPerGram } = this.validateFields(dto);
-    return this.prisma.material.create({
-      data: {
-        ...fields,
-        spoolPrice: spoolPrice ?? null,
-        spoolWeightGrams: spoolWeightGrams ?? null,
-        costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, costPerGram),
-      },
-    });
+    const data = {
+      ...fields,
+      spoolPrice: spoolPrice ?? null,
+      spoolWeightGrams: spoolWeightGrams ?? null,
+      costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, costPerGram),
+    };
+    const identity: FilamentIdentity = { type: fields.type, brand: fields.brand ?? null, color: fields.color ?? null };
+    if (filamentIdentityKey(identity) === null) return this.prisma.material.create({ data });
+    return this.prisma.$transaction(async (tx) => {
+      await lockMaterialIdentity(tx);
+      const dup = await findDuplicateMaterial(tx, identity);
+      if (dup) throw duplicateMaterialConflict(dup, identity, 'create');
+      return tx.material.create({ data });
+    }, MATERIAL_TX);
   }
 
   /**
@@ -203,8 +224,14 @@ export class MaterialsService {
     return material;
   }
 
+  /**
+   * The identity lock is taken only when the stored brand + type + colour key
+   * actually changes (safety spec §3). Identity fields equal to the stored
+   * value are dropped, so a price-only save that resends them writes no
+   * identity column, and a legacy duplicate row stays editable.
+   */
   async update(id: string, dto: UpdateMaterialDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
     const v = this.validateFields(dto, { partial: true });
     const spoolPrice = v.spoolPrice;
     const spoolWeightGrams = v.spoolWeightGrams;
@@ -225,7 +252,24 @@ export class MaterialsService {
       updateData.costPerGram = rawCpg;
     }
 
-    return this.prisma.material.update({ where: { id }, data: updateData });
+    for (const k of IDENTITY_FIELDS) {
+      if (k in updateData && updateData[k] === current[k]) delete updateData[k];
+    }
+    const next: FilamentIdentity = {
+      type: 'type' in updateData ? updateData.type : current.type,
+      brand: 'brand' in updateData ? updateData.brand : current.brand,
+      color: 'color' in updateData ? updateData.color : current.color,
+    };
+    const nextKey = filamentIdentityKey(next);
+    if (nextKey === null || nextKey === filamentIdentityKey(current)) {
+      return this.prisma.material.update({ where: { id }, data: updateData });
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await lockMaterialIdentity(tx);
+      const dup = await findDuplicateMaterial(tx, next, id);
+      if (dup) throw duplicateMaterialConflict(dup, next, 'update');
+      return tx.material.update({ where: { id }, data: updateData });
+    }, MATERIAL_TX);
   }
 
   async bulkImport(rows: BulkMaterialUploadRow[]) {
@@ -233,6 +277,7 @@ export class MaterialsService {
     const validTypes = ['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'];
 
     const validRows: Array<{
+      rowNum: number;
       name: string;
       type: MaterialType;
       color: string | null;
@@ -280,6 +325,7 @@ export class MaterialsService {
       }
 
       validRows.push({
+        rowNum,
         name: String(row.name).trim().slice(0, 120),
         type: type as MaterialType,
         color: row.color || null,
@@ -294,31 +340,67 @@ export class MaterialsService {
 
     if (validRows.length > 0) {
       try {
-        // Material.name carries no unique constraint, so `skipDuplicates` had
-        // nothing to key on — re-uploading the same sheet silently created a
-        // second copy of every material (verified live). Dedupe explicitly,
-        // both within the sheet and against what is already stored.
-        const existing = await this.prisma.material.findMany({ select: { name: true, type: true } });
-        const seen = new Set(existing.map((m) => `${m.name.trim().toLowerCase()}|${m.type}`));
-
-        const toInsert: typeof validRows = [];
-        for (const row of validRows) {
-          const key = `${row.name.trim().toLowerCase()}|${row.type}`;
-          if (seen.has(key)) {
-            results.errors.push(`"${row.name}" (${row.type}) already exists — skipped`);
-            results.skipped++;
-            continue;
+        // Row messages are collected inside the transaction and merged only
+        // after it commits, so a rolled-back pass leaves no stray lines.
+        const pass = await this.prisma.$transaction(async (tx) => {
+          await lockMaterialIdentity(tx);
+          const out = { created: 0, skipped: 0, errors: [] as string[] };
+          // Material.name carries no unique constraint, so `skipDuplicates` had
+          // nothing to key on — re-uploading the same sheet silently created a
+          // second copy of every material (verified live). Dedupe explicitly,
+          // both within the sheet and against what is already stored.
+          const existing = await tx.material.findMany({
+            select: { id: true, name: true, type: true, brand: true, color: true, createdAt: true },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          });
+          const seen = new Set(existing.map((m) => `${m.name.trim().toLowerCase()}|${m.type}`));
+          // Safety spec §3: brand + type + colour → the oldest stored row with it.
+          const stored = new Map<string, { name: string }>();
+          for (const m of existing) {
+            const key = filamentIdentityKey(m);
+            if (key !== null && !stored.has(key)) stored.set(key, m);
           }
-          seen.add(key);
-          toInsert.push(row);
-        }
+          /** identity key → the sheet row that is being created with it */
+          const sheet = new Map<string, number>();
 
-        if (toInsert.length > 0) {
-          const inserted = await this.prisma.material.createMany({ data: toInsert });
-          results.created = inserted.count;
-          results.skipped += toInsert.length - inserted.count;
-        }
+          const toInsert: Array<Omit<(typeof validRows)[number], 'rowNum'>> = [];
+          for (const { rowNum, ...row } of validRows) {
+            const key = `${row.name.trim().toLowerCase()}|${row.type}`;
+            if (seen.has(key)) {
+              out.errors.push(`"${row.name}" (${row.type}) already exists — skipped`);
+              out.skipped++;
+              continue;
+            }
+            const identity: FilamentIdentity = { type: row.type, brand: cellText(row.brand), color: cellText(row.color) };
+            const identityKey = filamentIdentityKey(identity);
+            if (identityKey !== null) {
+              const hit = stored.get(identityKey);
+              const earlier = sheet.get(identityKey);
+              if (hit || earlier !== undefined) {
+                const why = hit ? `already exists as "${hit.name}"` : `repeats row ${earlier}`;
+                out.errors.push(`Row ${rowNum}: ${filamentIdentityLabel(identity)} ${why} — skipped`);
+                out.skipped++;
+                continue;
+              }
+              sheet.set(identityKey, rowNum);
+            }
+            seen.add(key);
+            toInsert.push(row);
+          }
+
+          if (toInsert.length > 0) {
+            const inserted = await tx.material.createMany({ data: toInsert });
+            out.created = inserted.count;
+            out.skipped += toInsert.length - inserted.count;
+          }
+          return out;
+        }, MATERIAL_TX);
+        results.created = pass.created;
+        results.skipped += pass.skipped;
+        results.errors.push(...pass.errors);
       } catch (err: unknown) {
+        // A busy identity lock is a 409 'try again in a few seconds', not a failed insert.
+        if (isMaterialBusy(err)) throw err;
         results.errors.push(`Bulk insert failed: ${(err as Error).message}`);
         results.skipped += validRows.length;
       }

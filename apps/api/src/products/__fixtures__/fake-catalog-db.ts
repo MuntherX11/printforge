@@ -63,7 +63,7 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
     assignedTo: one('user', 'assignedToId'), attachments: many('attachment', 'jobId'),
   },
   jobMaterial: { job: one('productionJob', 'jobId'), material: one('material', 'materialId'), spool: one('spool', 'spoolId'), slicedMaterial: one('material', 'slicedMaterialId') },
-  material: { spools: many('spool', 'materialId') },
+  material: { spools: many('spool', 'materialId'), jobMaterials: many('jobMaterial', 'materialId') },
   spool: { material: one('material', 'materialId'), location: one('location', 'locationId') },
   order: {
     items: many('orderItem', 'orderId'), customer: one('customer', 'customerId'),
@@ -342,6 +342,9 @@ export function fakeCatalogDb() {
   async function queryRaw(sql: { sql: string; values: any[] }) {
     const text = sql.sql ?? String(sql);
     const v = sql.values ?? [];
+    // The filament identity advisory lock (material-identity.ts) is always free
+    // here, and not recorded in `locks`: specs assert that list exactly.
+    if (/material:advisory/.test(text)) return [{ ok: true }];
     const lock = /lock:(\w+):(\w+)/.exec(text);
     if (lock) {
       const model = LOCK_TABLES[lock[1]];
