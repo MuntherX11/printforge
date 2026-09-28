@@ -188,6 +188,42 @@ describe('ProductionPlannerService.readiness', () => {
     expect(r.productionReady).toBe(true);
   });
 
+  describe('(Regular, Blue) ×10: PLA White is split over two lines (27.0 g + 38.4 g = 65.4 g)', () => {
+    const blueReadiness = async (whiteGrams: number) => {
+      const spools = [M.black, M.blue, M.gold, M.orange, M.silver].map((m: string) => ({
+        id: `sp-${m}`, materialId: m, currentWeight: 5000, material: fixtureMaterial(m), printforgeId: `PF-${m}`,
+      }));
+      spools.push({ id: 'sp-white', materialId: M.white, currentWeight: whiteGrams, material: fixtureMaterial(M.white), printforgeId: 'PF-WHITE' });
+      const { svc } = setup({ rows: [sardineRow()], spools });
+      const r = await svc.readiness(PRODUCT_ID, { sizeOptionId: null, colourOptionId: OPT.blue }, 10);
+      return { r, white: r.filament.filter((f) => f.materialId === M.white) };
+    };
+
+    it('"after open orders" judges both White lines together: 50 g free → both short by 15.4 g, not ready', async () => {
+      const { r, white } = await blueReadiness(50);
+      expect(white.map((f) => [f.slicedMaterialId, f.gramsNeeded, f.materialGramsNeeded, f.free, f.hasEnough])).toEqual([
+        [M.silver, 27.0, 65.4, 50, false],
+        [null, 38.4, 65.4, 50, false],
+      ]);
+      expect(r.filament.filter((f) => f.materialId !== M.white).every((f) => f.hasEnough)).toBe(true);
+      expect(r.ready).toBe(false);
+    });
+
+    it('70 g free covers both lines → ready', async () => {
+      const { r, white } = await blueReadiness(70);
+      expect(white.map((f) => f.hasEnough)).toEqual([true, true]);
+      expect(r.ready).toBe(true);
+    });
+
+    it('"spool to use": both White lines suggest the White spool (never Silver), netted line by line', async () => {
+      const { white } = await blueReadiness(50);
+      expect(white.map((f) => [f.suggestedSpool?.id, f.suggestedSpool?.effectiveRemaining, f.spoolHasEnough])).toEqual([
+        ['sp-white', 50, true],
+        ['sp-white', 23, false],
+      ]);
+    });
+  });
+
   it('KEEP vs CANCEL needs', async () => {
     const { svc } = setup({ rows: [boxRow()] });
     const keep = await svc.planOption({ productId: BOX_ID, sizeOptionId: null, colourOptionId: null, quantity: 10 });

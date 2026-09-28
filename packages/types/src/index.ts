@@ -1300,12 +1300,16 @@ export interface Readiness {
     label: string;
     colorHex: string | null;
     slicedMaterialId: string | null;
+    /** this planned-identity line's grams */
     gramsNeeded: number;
+    /** Σ gramsNeeded of every line of this material (one filament can be split over several lines) */
+    materialGramsNeeded: number;
     totalStock: number;
     reserved: number;
     free: number;
-    /** "after open orders" */
+    /** "after open orders": free >= materialGramsNeeded */
     hasEnough: boolean;
+    /** effectiveRemaining nets the grams of earlier lines that share the spool */
     suggestedSpool: { id: string; pfid: string | null; location: string | null; effectiveRemaining: number } | null;
     /** "spool to use" */
     spoolHasEnough: boolean;
