@@ -50,6 +50,27 @@ export const CUSTOMER_ORDER_SELECT = {
   items: { select: { description: true, quantity: true, unitPrice: true, totalPrice: true } },
 } as const;
 
+/**
+ * The customer on a staff order or quote response: every column except the
+ * portal login secrets (passwordHash, refreshToken), which CustomersService
+ * strips as well. Every staff role, VIEWER and ACCOUNTING included, can read
+ * orders and quotes.
+ */
+export const STAFF_CUSTOMER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  address: true,
+  notes: true,
+  portalAccess: true,
+  isApproved: true,
+  isActive: true,
+  lastLoginAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 function optionalText(raw: unknown, max: number): string | undefined {
@@ -121,7 +142,7 @@ export class OrdersService {
     }, TX_OPTS);
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
 
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true, items: true } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     // Advisory only. The order stands; staff just need to know they have to
     // buy filament before this one can be printed.
     const stock = await this.availabilityOf(this.productLines(lines), null, new CatalogRequestContext()).catch(() => null);
@@ -164,7 +185,7 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
-        customer: true,
+        customer: { select: STAFF_CUSTOMER_SELECT },
         items: { include: { productionJobs: { select: { id: true, name: true, status: true, totalCost: true } } } },
         productionJobs: {
           include: { printer: { select: { id: true, name: true } } },
@@ -392,7 +413,7 @@ export class OrdersService {
     } else {
       await this.prisma.order.update({ where: { id }, data: { status: status ?? undefined, notes, dueDate } });
     }
-    const updated = await this.prisma.order.findUnique({ where: { id }, include: { customer: true, items: true } });
+    const updated = await this.prisma.order.findUnique({ where: { id }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     if (!updated) throw new NotFoundException('Order not found');
 
     // Fire customer notifications on status transitions

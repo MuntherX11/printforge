@@ -18,6 +18,7 @@ import {
   documentTotals, lineOptionsOf, lockLineForSplit, lockLineRows, lockQuote, MAX_LINES, optionalId, parseColourSplit, parseItemsArray,
   parseStaffLine, priceWarningsOf, quoteItemColumns, splitLineByColour, taxRateOf,
 } from '../orders/order-lines';
+import { STAFF_CUSTOMER_SELECT } from '../orders/orders.service';
 import { EventsGateway } from '../websocket/events.gateway';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
@@ -132,7 +133,7 @@ export class QuotesService {
           }],
         },
       },
-      include: { customer: true, items: true },
+      include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true },
     });
   }
 
@@ -344,7 +345,7 @@ export class QuotesService {
       return { quoteId: quote.id as string, lines };
     }, TX_OPTS);
 
-    const quote = await this.prisma.quote.findUnique({ where: { id: quoteId }, include: { customer: true, items: true } });
+    const quote = await this.prisma.quote.findUnique({ where: { id: quoteId }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     return { ...quote, priceWarnings: priceWarningsOf(lines) };
   }
 
@@ -370,7 +371,7 @@ export class QuotesService {
   async findOne(id: string) {
     const quote = await this.prisma.quote.findUnique({
       where: { id },
-      include: { customer: true, items: true, order: true, attachments: true },
+      include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true, order: true, attachments: true },
     });
     if (!quote) throw new NotFoundException('Quote not found');
     const options = await lineOptionsOf(this.resolver, quote.items as any[], new CatalogRequestContext());
@@ -388,7 +389,7 @@ export class QuotesService {
         notes: dto.notes,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
       },
-      include: { customer: true, items: true },
+      include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true },
     });
 
     // Fire customer notification when quote is marked SENT
@@ -544,7 +545,7 @@ export class QuotesService {
       }
     }
 
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true, items: true } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     return { ...order, planning };
   }
 

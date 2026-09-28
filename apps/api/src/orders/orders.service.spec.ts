@@ -152,6 +152,22 @@ describe('S2 server pricing (§3.9, §7.1 item 19)', () => {
   });
 });
 
+describe('Staff order responses never carry the customer login secrets', () => {
+  const secrets = (v: unknown) => ['passwordHash', 'refreshToken'].filter((k) => allKeys(v).has(k));
+
+  it('S2, S4 (and so S11), S9 return the customer without passwordHash or refreshToken', async () => {
+    const h = box();
+    const o: any = await order(h, [{ productId: BOX_ID, quantity: 2 }]);
+    expect(o.customer).toMatchObject({ id: CUSTOMER_ID, name: 'Ali', email: 'ali@example.com', phone: null });
+    expect(secrets(o)).toEqual([]);
+    const view: any = await h.orders.findOne(o.id);
+    expect(view.customer.name).toBe('Ali');
+    expect(secrets(view)).toEqual([]);
+    expect(secrets(await h.orders.update(o.id, { notes: 'call first' }))).toEqual([]);
+    expect(secrets(await h.orders.update(o.id, { status: 'CANCELLED' }))).toEqual([]);
+  });
+});
+
 // --------------------------------------------------------- descriptions (item 40)
 
 describe('Line descriptions (§3.9 step 10, §7.1 item 40)', () => {

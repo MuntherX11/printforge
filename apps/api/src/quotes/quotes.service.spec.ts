@@ -98,6 +98,25 @@ describe('S6 quote create (§3.9, §7.1 item 20)', () => {
   });
 });
 
+describe('Staff quote responses never carry the customer login secrets', () => {
+  const secrets = (v: unknown) => ['passwordHash', 'refreshToken'].filter((k) => allKeys(v).has(k));
+
+  it('S6, S8, quote update, S7, S11 and the quick-quote save return the customer without passwordHash or refreshToken', async () => {
+    const h = sardine();
+    const q = await quote(h, [{ productId: P, sizeOptionId: OPT.large, quantity: 25 }]);
+    expect(q.customer).toMatchObject({ id: CUSTOMER_ID, name: 'Ali', email: 'ali@example.com' });
+    expect(secrets(q)).toEqual([]);
+    const view: any = await h.quotes.findOne(q.id);
+    expect(view.customer.name).toBe('Ali');
+    expect(secrets(view)).toEqual([]);
+    expect(secrets(await h.quotes.update(q.id, { status: 'SENT' } as any))).toEqual([]);
+    expect(secrets(await h.quotes.changeLineColour(q.id, q.items[0].id, { colours: [{ colourOptionId: OPT.red, quantity: 25 }] }))).toEqual([]);
+    expect(secrets(await h.quotes.convertToOrder(q.id, { autoCreateJobs: false }))).toEqual([]);
+    const saved = await h.quotes.createFromAnalysis({ customerId: CUSTOMER_ID, description: 'Bracket', analysis: {}, costEstimate: { suggestedPrice: 3, totalCost: 1 } } as any);
+    expect(secrets(saved)).toEqual([]);
+  });
+});
+
 // ------------------------------------------------------------------- S10
 
 describe('S10 customer quote responses (§0.2, §7.1 item 20)', () => {
