@@ -1,4 +1,4 @@
-import { ArgumentsHost, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { HttpExceptionFilter } from './http-exception.filter';
 
@@ -106,5 +106,32 @@ describe('HttpExceptionFilter', () => {
     const { host, json } = makeHost();
     filter.catch(new Error('password=hunter2'), host);
     expect(json.mock.calls[0][0].error).toBe('Internal server error');
+  });
+
+  // Safety spec §2/§3: 409 bodies carry a machine-readable code and the row they collided with.
+  it('copies a string code and an existing {id, name} onto the envelope', () => {
+    const { host, status, json } = makeHost();
+    filter.catch(new ConflictException({ message: 'm', code: 'MATERIAL_DUPLICATE', existing: { id: 'x', name: 'n' } }), host);
+    expect(status).toHaveBeenCalledWith(409);
+    expect(json).toHaveBeenCalledWith({ success: false, error: 'm', statusCode: 409, code: 'MATERIAL_DUPLICATE', existing: { id: 'x', name: 'n' } });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('copies nothing else: other keys, a non-string code and a malformed existing are dropped', () => {
+    const cases: Array<[Record<string, unknown>, Record<string, unknown>]> = [
+      [{ message: 'm', secret: 's' }, {}],
+      [{ message: 'm', code: 409 }, {}],
+      [{ message: 'm', code: 'SPOOL_HAS_HISTORY', existing: { id: 1, name: 'n' } }, { code: 'SPOOL_HAS_HISTORY' }],
+      [{ message: 'm', existing: { id: 'x', name: null } }, {}],
+      [{ message: 'm', existing: 'x' }, {}],
+      [{ message: 'm', existing: { id: 'x', name: 'n', price: 3 } }, { existing: { id: 'x', name: 'n' } }],
+    ];
+    for (const [body, extra] of cases) {
+      const { host, json } = makeHost();
+      filter.catch(new ConflictException(body), host);
+      const sent = json.mock.calls[0][0];
+      expect(sent).toEqual({ success: false, error: 'm', statusCode: 409, ...extra });
+      expect(Object.keys(sent)).toEqual(['success', 'error', 'statusCode', ...Object.keys(extra)]);
+    }
   });
 });

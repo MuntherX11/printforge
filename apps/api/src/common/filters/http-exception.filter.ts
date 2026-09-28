@@ -5,7 +5,9 @@ import { Request, Response } from 'express';
 /**
  * Global error envelope: `{ success: false, error, statusCode }`.
  *
- * - Nest HttpExceptions keep their status and message.
+ * - Nest HttpExceptions keep their status and message. When their body is an
+ *   object, a string `code` and an `existing: { id, name }` (both strings) are
+ *   copied onto the envelope too — nothing else (see `envelopeExtras`).
  * - Known Prisma errors that come from user input map to client errors instead
  *   of an opaque 500: P2002 (unique) -> 409 naming the fields, P2003 (foreign
  *   key) -> 400, P2025 (record not found) -> 404.
@@ -23,6 +25,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
+    let extras: EnvelopeExtras = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -30,6 +33,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message = typeof exceptionResponse === 'string'
         ? exceptionResponse
         : (exceptionResponse as any).message || exception.message;
+      extras = envelopeExtras(exceptionResponse);
     } else {
       const mapped = mapPrismaError(exception);
       if (mapped) {
@@ -51,8 +55,35 @@ export class HttpExceptionFilter implements ExceptionFilter {
       success: false,
       error: Array.isArray(message) ? message.join(', ') : message,
       statusCode: status,
+      ...extras,
     });
   }
+}
+
+/** The only fields an HttpException body may add to the envelope. */
+export interface EnvelopeExtras {
+  /** Machine-readable reason, e.g. 'MATERIAL_DUPLICATE' or 'SPOOL_HAS_HISTORY'. */
+  code?: string;
+  /** The row a 409 collided with, e.g. the oldest matching filament. */
+  existing?: { id: string; name: string };
+}
+
+/**
+ * Picks `code` (a string) and `existing` (`{ id, name }`, both strings) from an
+ * exception body. Any other key, a non-string code, or an `existing` of another
+ * shape is dropped, so a body without them yields `{}` and the envelope stays
+ * byte-identical to before.
+ */
+export function envelopeExtras(body: unknown): EnvelopeExtras {
+  if (!body || typeof body !== 'object') return {};
+  const { code, existing } = body as { code?: unknown; existing?: unknown };
+  const out: EnvelopeExtras = {};
+  if (typeof code === 'string') out.code = code;
+  if (existing && typeof existing === 'object') {
+    const { id, name } = existing as { id?: unknown; name?: unknown };
+    if (typeof id === 'string' && typeof name === 'string') out.existing = { id, name };
+  }
+  return out;
 }
 
 function isKnownPrismaError(e: unknown): e is Prisma.PrismaClientKnownRequestError {
