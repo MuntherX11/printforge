@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { safeNextPath } from '@printforge/types';
+import { SPOOL_QR_PATH, safeNextPath } from '@printforge/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -24,10 +24,12 @@ export default function StaffLoginPage() {
   const router = useRouter();
 
   // Already signed in as staff (a QR scanner app can open the link without
-  // the Strict cookie; this same-origin call sends it): go straight to next.
+  // the Strict cookie; this same-origin call sends it): go straight to the
+  // spool. Only a QR spool page, so /staff-login?next= can't carry a
+  // session through a cross-site link to any other page.
   useEffect(() => {
     const next = nextPath();
-    if (!next) return;
+    if (!next || !SPOOL_QR_PATH.test(next)) return;
     let live = true;
     api.get<{ userType?: string }>('/auth/me')
       .then((me) => { if (live && me?.userType === 'staff') router.replace(next); })

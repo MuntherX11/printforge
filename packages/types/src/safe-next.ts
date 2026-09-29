@@ -13,6 +13,14 @@
 /** Longest `next` accepted, in characters. */
 export const SAFE_NEXT_MAX = 512;
 
+/**
+ * A QR spool page, /inventory/spool/<PF-ID>: the only `next` staff login
+ * forwards an already signed-in user to without asking. middleware.ts and
+ * (dashboard)/layout.tsx match the same pattern (the Edge middleware keeps
+ * its own copy rather than import this package).
+ */
+export const SPOOL_QR_PATH = /^\/inventory\/spool\/[A-Za-z0-9-]+$/;
+
 /** Login and sign-up pages: returning to one would just ask again. */
 const LOGIN_PAGE = /^\/(?:login|staff-login|signup|customer-login)(?:[/?#]|$)/i;
 

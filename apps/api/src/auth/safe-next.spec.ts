@@ -1,4 +1,4 @@
-import { SAFE_NEXT_MAX, safeNextPath } from '@printforge/types';
+import { SAFE_NEXT_MAX, SPOOL_QR_PATH, safeNextPath } from '@printforge/types';
 
 /** Safety spec §1: staff login returns only to a safe same-site ?next= path. */
 
@@ -53,5 +53,14 @@ describe('safeNextPath', () => {
     }
     // Dots inside a segment or in the query are fine.
     expect(safeNextPath('/inventory/v1.2?q=..')).toBe('/inventory/v1.2?q=..');
+  });
+});
+
+describe('SPOOL_QR_PATH (the only next staff login forwards a signed-in user to)', () => {
+  it('matches a QR spool page and nothing else', () => {
+    expect(SPOOL_QR_PATH.test('/inventory/spool/PF-A7X2')).toBe(true);
+    for (const path of ['/', '/inventory', '/inventory/spool/PF-A7X2?x=1', '/inventory/spool/PF-A7X2/edit', '/settings/users', '/inventory/spool/']) {
+      expect(SPOOL_QR_PATH.test(path)).toBe(false);
+    }
   });
 });
