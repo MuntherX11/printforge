@@ -72,6 +72,8 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   // invoices and customers specs
   invoice: { order: one('order', 'orderId') },
   customer: { orders: many('order', 'customerId'), quotes: many('quote', 'customerId') },
+  // accounting specs
+  expense: { category: one('expenseCategory', 'categoryId'), account: one('account', 'accountId'), transactions: many('accountTransaction', 'expenseId') },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -95,6 +97,8 @@ const MODELS = [
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
   'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
+  // accounting specs
+  'expense', 'expenseCategory', 'account', 'accountTransaction',
 ];
 
 const LOCK_TABLES: Record<string, string> = {
