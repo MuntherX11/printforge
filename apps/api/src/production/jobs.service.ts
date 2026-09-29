@@ -11,6 +11,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { CostingService } from '../costing/costing.service';
+import { STAFF_CUSTOMER_SELECT } from '../orders/orders.service';
 import { lockOptions, TX_OPTS } from '../products/product-locks';
 import { SettingsService } from '../settings/settings.service';
 import { JobCompletionService } from '../stock-ledger/job-completion.service';
@@ -400,7 +401,7 @@ export class JobsService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { customer: true },
+      include: { customer: { select: STAFF_CUSTOMER_SELECT } },
     });
     if (!order) return;
 

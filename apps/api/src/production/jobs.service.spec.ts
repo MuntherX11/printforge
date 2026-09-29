@@ -245,6 +245,27 @@ describe('J6 completion through JobCompletionService (§3.6, §7.1 item 17)', ()
     expect(h.costing.calculateJobCost).toHaveBeenCalled();
     expect(h.gateway.broadcastNotification).toHaveBeenCalledWith(expect.objectContaining({ title: 'Job Completed' }));
   });
+
+  it('the order-completed notification reads the customer without passwordHash or refreshToken and still reaches them', async () => {
+    const h = box({ only12: true });
+    h.db.insert('customer', { id: 'cust-1', name: 'Ali', email: 'ali@example.com', phone: '+96890000000', passwordHash: 'secret-hash', refreshToken: 'secret-refresh' });
+    const o = addOrder(h.db, [{ productId: BOX_ID, quantity: 10 }]);
+    o.order.customerId = 'cust-1';
+    const email = { notifyCustomerOrderCompleted: jest.fn(async () => undefined) };
+    const whatsapp = { sendOrderCompleted: jest.fn(async () => undefined) };
+    Object.assign(h.jobs as any, { emailNotifications: email, whatsapp });
+    const findUnique = jest.spyOn(h.db.order, 'findUnique');
+
+    const job: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 10, orderId: o.order.id, orderItemId: o.items[0].id });
+    await h.jobs.completeJob(job.id);
+
+    expect(email.notifyCustomerOrderCompleted).toHaveBeenCalledWith('ali@example.com', { orderNumber: o.order.orderNumber });
+    expect(whatsapp.sendOrderCompleted).toHaveBeenCalledWith('+96890000000', expect.objectContaining({ customerName: 'Ali', orderNumber: o.order.orderNumber }));
+    const loaded = await Promise.all(findUnique.mock.results.map((r) => r.value));
+    const withCustomer = loaded.filter((row: any) => row?.customer);
+    expect(withCustomer.some((row: any) => row.customer.email === 'ali@example.com')).toBe(true);
+    expect(withCustomer.flatMap((row: any) => Object.keys(row.customer)).filter((k) => k === 'passwordHash' || k === 'refreshToken')).toEqual([]);
+  });
 });
 
 // ------------------------------------------------------------------ J8 / J9

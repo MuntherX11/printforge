@@ -69,6 +69,9 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
     items: many('orderItem', 'orderId'), customer: one('customer', 'customerId'),
     productionJobs: many('productionJob', 'orderId'), invoices: many('invoice', 'orderId'), quote: one('quote', 'quoteId'),
   },
+  // invoices and customers specs
+  invoice: { order: one('order', 'orderId') },
+  customer: { orders: many('order', 'customerId'), quotes: many('quote', 'customerId') },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -326,7 +329,7 @@ export function fakeCatalogDb() {
         calls.push(`${model}.delete`);
         const r = find(a.where);
         if (!r) throw prismaError('P2025', `${model} not found`);
-        const out = project(model, r, {});
+        const out = project(model, r, a);
         removeRow(model, r);
         return out;
       },

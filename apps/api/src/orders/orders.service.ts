@@ -51,10 +51,11 @@ export const CUSTOMER_ORDER_SELECT = {
 } as const;
 
 /**
- * The customer on a staff order or quote response: every column except the
- * portal login secrets (passwordHash, refreshToken), which CustomersService
- * strips as well. Every staff role, VIEWER and ACCOUNTING included, can read
- * orders and quotes.
+ * The customer on any staff response (orders, quotes, invoices, the customers
+ * endpoints, and the job-completion notification query): every column except
+ * the portal login secrets (passwordHash, refreshToken). Every staff role,
+ * VIEWER and ACCOUNTING included, can read orders, quotes, invoices and
+ * customers, so a Customer row is never loaded whole where it can reach one.
  */
 export const STAFF_CUSTOMER_SELECT = {
   id: true,
