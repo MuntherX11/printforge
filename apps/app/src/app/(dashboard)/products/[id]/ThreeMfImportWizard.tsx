@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
 import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
 import type { ComponentDetail } from '@/lib/types/api';
@@ -43,11 +43,14 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
   const [choices, setChoices] = useState<Record<number, PlateChoice>>({});
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The import request failed without a server rejection: it may have committed, so a retry could duplicate it. */
+  const [maybeImported, setMaybeImported] = useState(false);
 
   useEffect(() => {
     if (!state) return;
     setChoices(initialChoices(state));
     setError(null);
+    setMaybeImported(false);
   }, [state]);
 
   const plates = useMemo(() => state?.analysis.plates ?? [], [state]);
@@ -75,9 +78,10 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
   if (!state) return null;
 
   async function handleImport() {
-    if (!state || selected.length === 0 || invalid) return;
+    if (!state || selected.length === 0 || invalid || maybeImported) return;
     setImporting(true);
     setError(null);
+    let sent = false;
     try {
       const fd = new FormData();
       // A big file was staged once for the analysis; reference it instead of re-uploading.
@@ -100,12 +104,22 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
       if (Object.keys(units).length) fd.append('units', JSON.stringify(units));
       if (Object.keys(targets).length) fd.append('targets', JSON.stringify(targets));
       if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
+      sent = true;
       const r = await api.postForm<ImportResult>(`/products/${productId}/onboard-3mf`, fd);
       importToasts(r, toast);
       onImported();
       onClose();
     } catch (err) {
-      setError(errorText(err, 'The 3MF import failed'));
+      const rejected = err instanceof ApiError && err.status >= 400 && err.status < 500;
+      if (sent && !rejected) {
+        // A lost response (proxy timeout, dropped connection, 5xx) may follow a
+        // committed import: reload the bill of materials and don't offer a retry.
+        setMaybeImported(true);
+        setError(`${errorText(err, 'The 3MF import failed')} — the import may have completed. Check the bill of materials before importing this file again.`);
+        onImported();
+      } else {
+        setError(errorText(err, 'The 3MF import failed'));
+      }
     } finally {
       setImporting(false);
     }
@@ -135,8 +149,8 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
         </div>
         {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex items-center justify-end gap-2 border-t pt-3 dark:border-gray-700">
-          <Button variant="outline" onClick={onClose} disabled={importing}>Cancel</Button>
-          <Button onClick={() => void handleImport()} disabled={importing || selected.length === 0 || invalid}>
+          <Button variant="outline" onClick={onClose} disabled={importing}>{maybeImported ? 'Close' : 'Cancel'}</Button>
+          <Button onClick={() => void handleImport()} disabled={importing || selected.length === 0 || invalid || maybeImported}>
             {importing ? 'Importing…' : `Import ${plural(selected.length, 'plate')}`}
           </Button>
         </div>
