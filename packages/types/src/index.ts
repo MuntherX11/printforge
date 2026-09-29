@@ -369,6 +369,9 @@ export * from './filament-identity';
 // The ?next= path a login page may return to (pure).
 export * from './safe-next';
 
+// Edit Material's brand/colour state and "Other…" mode (pure).
+export * from './material-edit';
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
