@@ -1,15 +1,41 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateStorageLocationDto, UpdateStorageLocationDto } from '@printforge/types';
+import { allowedBody, optionalText, requiredText } from '../common/utils/validate-number';
+
+/** Longest location name and description kept, in characters. */
+const NAME_MAX = 100;
+const DESCRIPTION_MAX = 500;
+
+/**
+ * The only keys POST and PATCH /locations write. The location DTOs are
+ * interfaces the global ValidationPipe can't whitelist, and StorageLocation
+ * has spools and parts relations: passing the body straight to Prisma let
+ * {"spools":{"deleteMany":{}}} delete a shelf's spools with their job history
+ * (getting round the spool delete guard) and {"spools":{"create":[...]}}
+ * create a filament with no duplicate check. Any other key → 400.
+ */
+const LOCATION_KEYS: readonly string[] = ['name', 'description'];
+
+function locationName(raw: unknown): string {
+  if (raw !== undefined && raw !== null && typeof raw !== 'string') throw new BadRequestException('Name must be text');
+  return requiredText(raw, 'Name', NAME_MAX);
+}
 
 @Injectable()
 export class LocationsService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateStorageLocationDto) {
-    const existing = await this.prisma.storageLocation.findUnique({ where: { name: dto.name } });
+    const body = allowedBody(dto, LOCATION_KEYS);
+    const data: Prisma.StorageLocationCreateInput = {
+      name: locationName(body.name),
+      description: optionalText(body.description, 'description', DESCRIPTION_MAX) ?? null,
+    };
+    const existing = await this.prisma.storageLocation.findUnique({ where: { name: data.name } });
     if (existing) throw new ConflictException('Location name already exists');
-    return this.prisma.storageLocation.create({ data: dto });
+    return this.prisma.storageLocation.create({ data });
   }
 
   async findAll() {
@@ -35,8 +61,13 @@ export class LocationsService {
   }
 
   async update(id: string, dto: UpdateStorageLocationDto) {
+    const body = allowedBody(dto, LOCATION_KEYS);
+    const data: Prisma.StorageLocationUpdateInput = {};
+    if (body.name !== undefined) data.name = locationName(body.name);
+    const description = optionalText(body.description, 'description', DESCRIPTION_MAX);
+    if (description !== undefined) data.description = description;
     await this.findOne(id);
-    return this.prisma.storageLocation.update({ where: { id }, data: dto });
+    return this.prisma.storageLocation.update({ where: { id }, data });
   }
 
   /**
