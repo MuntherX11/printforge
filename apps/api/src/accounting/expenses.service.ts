@@ -1,10 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateExpenseDto, CreateExpenseCategoryDto } from '@printforge/types';
-import { requiredNumber } from '../common/utils/validate-number';
 import { round3 } from '../catalog-core/cost-engine';
 import { AccountsService } from './accounts.service';
-import { EXPENSE_AMOUNT, parseExpensePatch } from './expense-input';
+import { parseExpenseCategory, parseExpenseCreate, parseExpensePatch } from './expense-input';
 
 @Injectable()
 export class ExpensesService {
@@ -13,8 +11,12 @@ export class ExpensesService {
     @Optional() private accounts?: AccountsService,
   ) {}
 
-  async createCategory(dto: CreateExpenseCategoryDto) {
-    return this.prisma.expenseCategory.create({ data: dto });
+  /** POST /accounting/categories; the body is parsed by parseExpenseCategory (name, description). */
+  async createCategory(body: unknown) {
+    const data = parseExpenseCategory(body);
+    const existing = await this.prisma.expenseCategory.findUnique({ where: { name: data.name }, select: { id: true } });
+    if (existing) throw new ConflictException(`A category named "${data.name}" already exists`);
+    return this.prisma.expenseCategory.create({ data });
   }
 
   async getCategories() {
@@ -24,10 +26,14 @@ export class ExpensesService {
     });
   }
 
-  async create(dto: CreateExpenseDto & { accountId?: string }) {
-    const amount = requiredNumber(dto.amount, 'amount', EXPENSE_AMOUNT);
-    const date = new Date(dto.date);
-    if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
+  /**
+   * POST /accounting/expenses (ADMIN/OPERATOR). The body is parsed by
+   * parseExpenseCreate, with PATCH's rules (description at most 500
+   * characters, notes 2000, amount 0..1e8).
+   */
+  async create(body: unknown) {
+    const dto = parseExpenseCreate(body);
+    const { amount, date } = dto;
 
     // Money going out reduces an account, so the balance reflects both
     // directions. accountId is optional — an expense can still be recorded
@@ -41,7 +47,7 @@ export class ExpensesService {
           date,
           recurring: dto.recurring,
           notes: dto.notes,
-          accountId: dto.accountId || null,
+          accountId: dto.accountId,
         },
         include: { category: true },
       });
@@ -104,6 +110,7 @@ export class ExpensesService {
   private async repost(
     tx: any,
     expense: { id: string; amount: number; accountId: string | null; description: string; category?: { name?: string | null } | null },
+    reason = 'Expense corrected',
   ) {
     const posted: Array<{ accountId: string; amount: number }> = await tx.accountTransaction.findMany({
       where: { expenseId: expense.id },
@@ -123,15 +130,25 @@ export class ExpensesService {
         accountId,
         amount: delta,
         type: 'ADJUSTMENT',
-        description: `Expense corrected: ${label}`,
+        description: `${reason}: ${label}`,
         expenseId: expense.id,
       });
     }
   }
 
+  /**
+   * DELETE /accounting/expenses/:id. The expense's ledger entries used to stay
+   * behind (their expenseId set to null), so the account kept the deleted
+   * expense's debit. Its entries are now brought to zero first, in the same
+   * transaction: the refund is posted as an ADJUSTMENT, so the history keeps
+   * both the payment and its reversal and the balance agrees with it.
+   */
   async remove(id: string) {
-    const exists = await this.prisma.expense.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Expense not found');
-    return this.prisma.expense.delete({ where: { id } });
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.findUnique({ where: { id }, include: { category: true } });
+      if (!expense) throw new NotFoundException('Expense not found');
+      if (this.accounts) await this.repost(tx, { ...expense, amount: 0 }, 'Expense deleted');
+      return tx.expense.delete({ where: { id } });
+    });
   }
 }

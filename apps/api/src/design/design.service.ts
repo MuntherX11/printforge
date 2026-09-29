@@ -1,9 +1,53 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
-import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
+import { isDesignProjectEntity } from '../attachments/attachments.service';
 import { generateNumber } from '../common/utils/number-generator';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import {
+  parseDesignAssign, parseDesignComment, parseDesignFeedback, parseDesignPatch, parseDesignRequest, parseDesignRevision,
+} from './design-input';
+
+/**
+ * Staff roles that may write in a design project: post in its chat, upload
+ * files, add revisions and change it. They are the roles the Design Center
+ * sidebar shows. VIEWER and ACCOUNTING can read a project but not post in the
+ * customer's chat. They are also the roles a project can be assigned to.
+ */
+export const DESIGN_STAFF_WRITE_ROLES = ['ADMIN', 'OPERATOR'] as const;
+
+/**
+ * What a customer gets back for their own design project: GET
+ * /design-projects/:id, and the approve and request-changes answers. Never the
+ * staff notes, the fee rate and hours behind the total, a revision's internal
+ * notes, a staff author's user id, or the attachment rows' storage paths and
+ * uploader. The customer's design page reads only these fields.
+ */
+export const CUSTOMER_DESIGN_SELECT = {
+  id: true,
+  projectNumber: true,
+  status: true,
+  title: true,
+  brief: true,
+  budget: true,
+  totalDesignFee: true,
+  estimatedDelivery: true,
+  deadline: true,
+  createdAt: true,
+  updatedAt: true,
+  assignedTo: { select: { id: true, name: true } },
+  comments: {
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, revisionId: true, authorName: true, isCustomer: true, content: true, attachmentIds: true, createdAt: true },
+  },
+  revisions: {
+    orderBy: { versionNumber: 'desc' },
+    select: { id: true, versionNumber: true, description: true, customerNotes: true, createdAt: true },
+  },
+  attachments: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true, createdAt: true } },
+  quote: { select: { id: true, quoteNumber: true, total: true, status: true } },
+} satisfies Prisma.DesignProjectSelect;
 
 @Injectable()
 export class DesignService {
@@ -28,7 +72,9 @@ export class DesignService {
 
   // ============ PROJECTS ============
 
-  async create(dto: CreateDesignProjectDto, customerId: string) {
+  /** POST /design-projects/customer/create; the body is parsed by parseDesignRequest. */
+  async create(body: unknown, customerId: string) {
+    const dto = parseDesignRequest(body);
     let projectNumber: string | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -45,8 +91,8 @@ export class DesignService {
         projectNumber,
         customerId,
         title: dto.title,
-        brief: dto.brief || null,
-        budget: dto.budget || null,
+        brief: dto.brief,
+        budget: dto.budget,
         status: 'REQUESTED',
       },
       include: { customer: { select: { id: true, name: true, email: true } } },
@@ -100,10 +146,23 @@ export class DesignService {
     return paginatedResponse(data, total, query);
   }
 
+  /**
+   * GET /design-projects/:id. Staff get the whole project; the project's
+   * customer gets CUSTOMER_DESIGN_SELECT (it used to be the whole project too,
+   * with the staff notes and every revision's internal notes).
+   */
   async findOne(id: string, caller?: { userId: string; userType: string }) {
-    if (caller) {
+    if (caller && caller.userType !== 'staff') {
       await this.verifyAccess(id, caller.userId, caller.userType);
+      const project = await this.prisma.designProject.findUnique({ where: { id }, select: CUSTOMER_DESIGN_SELECT });
+      if (!project) throw new NotFoundException('Design project not found');
+      return project;
     }
+    return this.staffView(id);
+  }
+
+  /** The whole project, for staff routes and the service's own checks. */
+  private async staffView(id: string) {
     const project = await this.prisma.designProject.findUnique({
       where: { id },
       include: {
@@ -119,12 +178,18 @@ export class DesignService {
     return project;
   }
 
-  async update(id: string, dto: UpdateDesignProjectDto) {
-    await this.findOne(id);
+  /**
+   * PATCH /design-projects/:id (ADMIN/OPERATOR). The body is parsed by
+   * parseDesignPatch: bounded fees, a DesignStatus, a real date, notes of at
+   * most 5000 characters, and no assignedToId (POST /:id/assign is the
+   * ADMIN-only way to assign a designer).
+   */
+  async update(id: string, body: unknown) {
+    const dto = parseDesignPatch(body);
+    await this.staffView(id);
 
-    const data: any = {};
+    const data: Prisma.DesignProjectUpdateInput = {};
     if (dto.status) data.status = dto.status;
-    if (dto.assignedToId !== undefined) data.assignedToId = dto.assignedToId || null;
     if (dto.designFeeType) data.designFeeType = dto.designFeeType;
     if (dto.designFeeAmount !== undefined) data.designFeeAmount = dto.designFeeAmount;
     if (dto.designFeeHours !== undefined) {
@@ -137,7 +202,7 @@ export class DesignService {
     if (dto.designFeeAmount !== undefined && !dto.designFeeHours) {
       data.totalDesignFee = dto.designFeeAmount;
     }
-    if (dto.estimatedDelivery) data.estimatedDelivery = new Date(dto.estimatedDelivery);
+    if (dto.estimatedDelivery !== undefined) data.estimatedDelivery = dto.estimatedDelivery;
     if (dto.notes !== undefined) data.notes = dto.notes;
 
     return this.prisma.designProject.update({
@@ -150,10 +215,21 @@ export class DesignService {
     });
   }
 
-  async assign(id: string, userId: string) {
-    const project = await this.findOne(id);
+  /**
+   * POST /design-projects/:id/assign (ADMIN): `{ userId }`, parsed by
+   * parseDesignAssign. The designer must be an active ADMIN or OPERATOR user;
+   * any id used to be written as assignedToId (an unknown one was a 500).
+   */
+  async assign(id: string, body: unknown) {
+    const userId = parseDesignAssign(body);
+    const project = await this.staffView(id);
     if (project.status === 'CANCELLED' || project.status === 'COMPLETED') {
       throw new BadRequestException('Cannot assign a closed project');
+    }
+    const designer = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, isActive: true } });
+    if (!designer) throw new NotFoundException('User not found');
+    if (!designer.isActive || !(DESIGN_STAFF_WRITE_ROLES as readonly string[]).includes(designer.role)) {
+      throw new BadRequestException('A design project can only be assigned to an active ADMIN or OPERATOR user');
     }
 
     return this.prisma.designProject.update({
@@ -170,11 +246,28 @@ export class DesignService {
 
   // ============ COMMENTS (Chat) ============
 
-  async addComment(projectId: string, dto: AddDesignCommentDto, author: { id: string; name: string; isCustomer: boolean }) {
+  /**
+   * POST /design-projects/:id/comments, for the project's customer and for
+   * ADMIN/OPERATOR staff (checked by the controller). The body is parsed by
+   * parseDesignComment, and every attachment id must be one of this project's
+   * attachments: stored by POST /attachments with a design-project entityType
+   * and this project as entityId (Attachment.designProjectId, also accepted,
+   * is never written).
+   */
+  async addComment(projectId: string, body: unknown, author: { id: string; name: string; isCustomer: boolean }) {
+    const dto = parseDesignComment(body);
     if (author.isCustomer) {
       await this.verifyAccess(projectId, author.id, 'customer');
     }
-    await this.findOne(projectId);
+    await this.staffView(projectId);
+    if (dto.attachmentIds.length) {
+      const rows = await this.prisma.attachment.findMany({
+        where: { id: { in: dto.attachmentIds }, OR: [{ designProjectId: projectId }, { entityId: projectId }] },
+        select: { id: true, entityType: true, designProjectId: true },
+      });
+      const onProject = rows.filter((a) => a.designProjectId === projectId || isDesignProjectEntity(a.entityType));
+      if (onProject.length !== dto.attachmentIds.length) throw new BadRequestException('Attachment not found on this project');
+    }
 
     return this.prisma.designComment.create({
       data: {
@@ -183,7 +276,7 @@ export class DesignService {
         authorName: author.name,
         isCustomer: author.isCustomer,
         content: dto.content,
-        attachmentIds: dto.attachmentIds || [],
+        attachmentIds: dto.attachmentIds,
       },
     });
   }
@@ -191,6 +284,13 @@ export class DesignService {
   async getComments(projectId: string, caller?: { userId: string; userType: string }) {
     if (caller) {
       await this.verifyAccess(projectId, caller.userId, caller.userType);
+    }
+    if (caller && caller.userType !== 'staff') {
+      return this.prisma.designComment.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'asc' },
+        select: CUSTOMER_DESIGN_SELECT.comments.select,
+      });
     }
     return this.prisma.designComment.findMany({
       where: { projectId },
@@ -200,8 +300,10 @@ export class DesignService {
 
   // ============ REVISIONS ============
 
-  async addRevision(projectId: string, description?: string, internalNotes?: string) {
-    const project = await this.findOne(projectId);
+  /** POST /design-projects/:id/revisions (ADMIN/OPERATOR); the body is parsed by parseDesignRevision. */
+  async addRevision(projectId: string, body: unknown) {
+    const { description, internalNotes } = parseDesignRevision(body);
+    const project = await this.staffView(projectId);
 
     const lastRevision = project.revisions[0]; // already sorted desc
     const versionNumber = lastRevision ? lastRevision.versionNumber + 1 : 1;
@@ -235,8 +337,9 @@ export class DesignService {
 
   // ============ CUSTOMER ACTIONS ============
 
+  /** Answers with CUSTOMER_DESIGN_SELECT, like GET /design-projects/:id for the customer. */
   async customerApprove(projectId: string, customerId: string) {
-    const project = await this.findOne(projectId);
+    const project = await this.staffView(projectId);
     if (project.customerId !== customerId) throw new NotFoundException('Project not found');
     if (project.status !== 'REVIEW') {
       throw new BadRequestException('Project must be in REVIEW status to approve');
@@ -245,11 +348,17 @@ export class DesignService {
     return this.prisma.designProject.update({
       where: { id: projectId },
       data: { status: 'APPROVED' },
+      select: CUSTOMER_DESIGN_SELECT,
     });
   }
 
-  async customerRequestChanges(projectId: string, customerId: string, feedback: string) {
-    const project = await this.findOne(projectId);
+  /**
+   * The body is parsed by parseDesignFeedback (`{ feedback }`, required,
+   * bounded). Answers with CUSTOMER_DESIGN_SELECT.
+   */
+  async customerRequestChanges(projectId: string, customerId: string, body: unknown) {
+    const feedback = parseDesignFeedback(body);
+    const project = await this.staffView(projectId);
     if (project.customerId !== customerId) throw new NotFoundException('Project not found');
     if (project.status !== 'REVIEW') {
       throw new BadRequestException('Project must be in REVIEW status to request changes');
@@ -270,6 +379,7 @@ export class DesignService {
     const updated = await this.prisma.designProject.update({
       where: { id: projectId },
       data: { status: 'REVISION' },
+      select: CUSTOMER_DESIGN_SELECT,
     });
 
     // Notify admin

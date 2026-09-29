@@ -89,6 +89,8 @@ const SET_NULL: Record<string, Array<[string, string]>> = {
   productColourSlot: [['productComponent', 'colourSlotId'], ['componentMaterial', 'colourSlotId']],
   productComponent: [['jobPlate', 'componentId']],
   plateLayout: [['jobPlate', 'layoutId']],
+  // AccountTransaction.expense has no onDelete: Prisma's default for an optional relation.
+  expense: [['accountTransaction', 'expenseId']],
 };
 
 const MODELS = [

@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Optional, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, InternalServerErrorException, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateInvoiceDto, UpdateInvoiceDto, InvoiceStatus } from '@printforge/types';
+import { CreateInvoiceDto, InvoiceStatus } from '@printforge/types';
+import { parseInvoicePatch } from './invoice-input';
 import { generateNumber } from '../common/utils/number-generator';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { AccountsService } from '../accounting/accounts.service';
@@ -91,7 +92,17 @@ export class InvoicesService {
     return invoice;
   }
 
-  async update(id: string, dto: UpdateInvoiceDto) {
+  /**
+   * PATCH /invoices/:id (ADMIN). The body is parsed by parseInvoicePatch
+   * (status and paidAt only). PAID and CANCELLED are final: moving a PAID
+   * invoice back to ISSUED and then to PAID again used to post a second
+   * INVOICE_PAYMENT and credit the order twice, and PAID → CANCELLED kept both
+   * credits. Marking paid stamps paidAmount (the total) and paidAt (the date
+   * sent, or now), credits the order and posts the deposit dated paidAt, in
+   * one transaction guarded on the status read, so two clicks can't both post.
+   */
+  async update(id: string, body: unknown) {
+    const dto = parseInvoicePatch(body);
     // findOne throws NotFoundException if missing — reuse the result below
     const existing = await this.findOne(id);
 
@@ -101,25 +112,30 @@ export class InvoicesService {
     if (existing.status === 'PAID' && dto.status === 'PAID') {
       throw new BadRequestException('Invoice is already marked as paid');
     }
+    if (existing.status === 'PAID' && (dto.status !== undefined || dto.paidAt !== undefined)) {
+      // An account adjustment would fix only Account.balance, not the invoice's
+      // or the order's paidAmount, so the message doesn't suggest one.
+      throw new BadRequestException(
+        "A paid invoice can't be changed: its payment is already recorded on the invoice, the order and the accounts, and undoing a payment isn't supported yet.",
+      );
+    }
 
     const data: { status?: InvoiceStatus; paidAmount?: number; paidAt?: Date } = {};
-    if (dto.status) data.status = dto.status;
-    if (dto.paidAmount !== undefined) data.paidAmount = dto.paidAmount;
-    if (dto.paidAt) data.paidAt = new Date(dto.paidAt);
+    if (dto.status) data.status = dto.status as InvoiceStatus;
 
     // If marking as paid, stamp paidAmount + paidAt and credit the order atomically
-    if (dto.status === 'PAID') {
+    const markingPaid = dto.status === 'PAID';
+    if (markingPaid) {
       data.paidAmount = existing.total;
-      data.paidAt = new Date();
+      data.paidAt = dto.paidAt ?? new Date();
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.invoice.update({
-        where: { id },
-        data,
-        include: INVOICE_INCLUDE,
-      });
-      if (dto.status === 'PAID' && existing.status !== 'PAID') {
+      const moved = await tx.invoice.updateMany({ where: { id, status: existing.status }, data });
+      if (moved.count === 0) throw new ConflictException('This invoice was changed by another request — reload it and try again');
+      const updated = await tx.invoice.findUnique({ where: { id }, include: INVOICE_INCLUDE });
+      if (!updated) throw new NotFoundException('Invoice not found');
+      if (markingPaid) {
         if (existing.orderId) {
           await tx.order.update({
             where: { id: existing.orderId },
@@ -142,6 +158,7 @@ export class InvoicesService {
                 + (updated.order?.customer?.name ? ` — ${updated.order.customer.name}` : ''),
               reference: existing.invoiceNumber,
               invoiceId: existing.id,
+              occurredAt: data.paidAt,
             });
           } else {
             // No account set up yet: don't block getting paid, just don't post.

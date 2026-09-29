@@ -9,6 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
@@ -19,6 +20,10 @@ import { useToast } from '@/components/ui/toast';
 export default function ProductsPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
+  // Creating a product and the Excel BOM upload are ADMIN or OPERATOR on the
+  // API; other roles reach this page only by URL and see the list read-only.
+  const { role } = useAuth();
+  const canWrite = role === 'ADMIN' || role === 'OPERATOR';
   const [data, setData] = useState<ApiPaginatedResponse<ApiProduct> | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -77,22 +82,24 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Products</h1>
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <Button variant="outline" onClick={handleImportClick} disabled={importing}>
-            <Upload className="h-4 w-4 mr-2" />
-            {importing ? 'Importing...' : 'Import Excel'}
-          </Button>
-          <Link href="/products/new">
-            <Button><Plus className="h-4 w-4 mr-2" /> Add Product</Button>
-          </Link>
-        </div>
+        {canWrite && (
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <Button variant="outline" onClick={handleImportClick} disabled={importing}>
+              <Upload className="h-4 w-4 mr-2" />
+              {importing ? 'Importing...' : 'Import Excel'}
+            </Button>
+            <Link href="/products/new">
+              <Button><Plus className="h-4 w-4 mr-2" /> Add Product</Button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {importResult && (
@@ -117,8 +124,8 @@ export default function ProductsPage() {
             <EmptyState
               icon={<Box className="h-12 w-12" />}
               title="No products added yet"
-              description="Create your first product to link it to orders and production jobs"
-              action={<Link href="/products/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add Product</Button></Link>}
+              description={canWrite ? 'Create your first product to link it to orders and production jobs' : 'Products appear here once they are added'}
+              action={canWrite ? <Link href="/products/new"><Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add Product</Button></Link> : undefined}
             />
           ) : (
             <Table>

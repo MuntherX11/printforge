@@ -1,13 +1,14 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { DesignService } from './design.service';
+import { DESIGN_STAFF_WRITE_ROLES, DesignService } from './design.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 // SVG excluded — can embed JavaScript and cause stored XSS when served back
@@ -42,27 +43,39 @@ export class DesignController {
     return this.designService.findOne(id, { userId: user.id, userType: user.userType });
   }
 
+  /** The body is parsed by parseDesignPatch; assigning a designer is POST :id/assign. */
   @Patch(':id')
   @UseGuards(StaffGuard, RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  update(@Param('id') id: string, @Body() dto: UpdateDesignProjectDto) {
-    return this.designService.update(id, dto);
+  @Roles(...DESIGN_STAFF_WRITE_ROLES)
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.update(id, body);
   }
 
+  /** `{ userId }`, parsed by parseDesignAssign; the user must be an active ADMIN or OPERATOR. */
   @Post(':id/assign')
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN')
-  assign(@Param('id') id: string, @Body() body: { userId: string }) {
-    return this.designService.assign(id, body.userId);
+  assign(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.assign(id, body);
   }
 
+  /**
+   * The project's customer, or ADMIN/OPERATOR staff. The route has to serve
+   * both, so it can't use RolesGuard (a customer has no role); a staff caller's
+   * role is checked here instead. VIEWER and ACCOUNTING used to be able to post
+   * a staff message into the customer's chat. The body is parsed by
+   * parseDesignComment.
+   */
   @Post(':id/comments')
   addComment(
     @Param('id') id: string,
-    @Body() dto: AddDesignCommentDto,
+    @Body() body: unknown,
     @CurrentUser() user: any,
   ) {
-    return this.designService.addComment(id, dto, {
+    if (user?.userType !== 'customer' && !(DESIGN_STAFF_WRITE_ROLES as readonly string[]).includes(user?.role)) {
+      throw new ForbiddenException('Only ADMIN or OPERATOR staff can post in a design project');
+    }
+    return this.designService.addComment(id, body, {
       id: user.id,
       name: user.name,
       isCustomer: user.userType === 'customer',
@@ -74,34 +87,38 @@ export class DesignController {
     return this.designService.getComments(id, { userId: user.id, userType: user.userType });
   }
 
+  /** `{ description?, internalNotes? }`, parsed by parseDesignRevision. */
   @Post(':id/revisions')
   @UseGuards(StaffGuard, RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  addRevision(
-    @Param('id') id: string,
-    @Body() body: { description?: string; internalNotes?: string },
-  ) {
-    return this.designService.addRevision(id, body.description, body.internalNotes);
+  @Roles(...DESIGN_STAFF_WRITE_ROLES)
+  addRevision(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.addRevision(id, body);
   }
 
+  /**
+   * ADMIN/OPERATOR, like revisions: any staff role could write files of up to
+   * 50 MB into uploads/design before, for any :id. The project must exist.
+   */
   @Post(':id/upload')
-  @UseGuards(StaffGuard)
+  @UseGuards(StaffGuard, RolesGuard)
+  @Roles(...DESIGN_STAFF_WRITE_ROLES)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_FILE_SIZE } }))
   async uploadFile(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new Error('No file uploaded');
+    if (!file) throw new BadRequestException('No file uploaded');
 
     // Validate by both MIME type (server-observed) and extension
     const ext = (file.originalname.toLowerCase().split('.').pop() || '').replace(/[^a-z0-9]/g, '');
     const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'stl', '3mf'];
     if (!allowedExtensions.includes(ext)) {
-      throw new Error(`File type .${ext} not allowed`);
+      throw new BadRequestException(`File type .${ext} not allowed`);
     }
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      throw new Error(`MIME type ${file.mimetype} not allowed`);
+      throw new BadRequestException(`MIME type ${file.mimetype} not allowed`);
     }
+    await this.designService.findOne(id); // 404 for an unknown project, before anything is written
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
@@ -127,8 +144,8 @@ export class DesignController {
 
   @Post('customer/create')
   @UseGuards(CustomerGuard)
-  customerCreate(@Body() dto: CreateDesignProjectDto, @CurrentUser() user: any) {
-    return this.designService.create(dto, user.id);
+  customerCreate(@Body() body: unknown, @CurrentUser() user: any) {
+    return this.designService.create(body, user.id);
   }
 
   @Get('customer/my-projects')
@@ -147,9 +164,9 @@ export class DesignController {
   @UseGuards(CustomerGuard)
   customerRequestChanges(
     @Param('id') id: string,
-    @Body() body: { feedback: string },
+    @Body() body: unknown,
     @CurrentUser() user: any,
   ) {
-    return this.designService.customerRequestChanges(id, user.id, body.feedback);
+    return this.designService.customerRequestChanges(id, user.id, body);
   }
 }

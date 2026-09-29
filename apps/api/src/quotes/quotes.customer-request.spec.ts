@@ -125,3 +125,186 @@ describe('customer accept of their own request', () => {
     expect(list.data[0]).toMatchObject({ status: 'DRAFT', source: 'CUSTOMER' });
   });
 });
+
+/**
+ * The customer can accept their request only once staff send it, so its
+ * validity window starts when it is sent. It used to keep the window set when
+ * the customer asked (quote_validity_days, default 3): a request reviewed on
+ * day 4 showed "Quote Ready" with an Accept that answered "Quote has expired",
+ * Convert was refused too, and no screen could set a new date.
+ */
+describe('sending a customer request restarts its validity window', () => {
+  const DAY = 86_400_000;
+  const daysFromNow = (d: unknown) => (new Date(d as any).getTime() - Date.now()) / DAY;
+
+  async function lateRequest(h: OrdersHarness) {
+    const q: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+    // Four days later: the window set at request time has run out.
+    row(h, q.id).validUntil = new Date(Date.now() - DAY);
+    return q;
+  }
+
+  it('DRAFT → SENT after the window: the customer can accept it and staff can convert it', async () => {
+    const h = harness();
+    const q = await lateRequest(h);
+    const sent: any = await h.quotes.update(q.id, { status: 'SENT' });
+    expect(sent.status).toBe('SENT');
+    expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(3, 1);
+    expect((await h.quotes.customerAccept(q.id, CUSTOMER_ID) as any).status).toBe('ACCEPTED');
+
+    const other = await lateRequest(h);
+    await h.quotes.update(other.id, { status: 'SENT' });
+    const order: any = await h.quotes.convertToOrder(other.id, { autoCreateJobs: false });
+    expect(order.orderNumber).toBeTruthy();
+  });
+
+  it('a new request has no window until staff send it, so the portal shows no "Valid until"', async () => {
+    const h = harness();
+    const q: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+    expect(q.validUntil).toBeNull();
+    expect(row(h, q.id).validUntil).toBeNull();
+    const list: any = await h.quotes.findForCustomer(CUSTOMER_ID, { page: 1, limit: 20 } as any);
+    expect(list.data[0].validUntil).toBeNull();
+    await h.quotes.update(q.id, { status: 'SENT' });
+    expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(3, 1);
+  });
+
+  it("the midnight job leaves an unreviewed request alone, even one carrying an older request's placeholder date", async () => {
+    const h = harness();
+    const fresh: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+    const old = await lateRequest(h);
+    expect(await h.quotes.expireOldQuotes()).toBe(0);
+    expect(row(h, fresh.id).status).toBe('DRAFT');
+    expect(row(h, old.id).status).toBe('DRAFT');
+    // Still in the staff DRAFT backlog.
+    const drafts: any = await h.quotes.findAll({ page: 1, limit: 20 } as any, 'DRAFT');
+    expect(drafts.data.map((d: any) => d.id).sort()).toEqual([fresh.id, old.id].sort());
+  });
+
+  it('once sent, a request whose window runs out is expired by the job, and a staff DRAFT still is', async () => {
+    const h = harness();
+    const q: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+    await h.quotes.update(q.id, { status: 'SENT' });
+    row(h, q.id).validUntil = new Date(Date.now() - DAY);
+    const staffDraft = h.db.insert('quote', {
+      quoteNumber: 'QT-0300', customerId: CUSTOMER_ID, status: 'DRAFT', source: 'QUICK_QUOTE', validUntil: new Date(Date.now() - DAY), notes: null,
+      subtotal: 5, tax: 0, total: 5, gcodeMetadata: null, stlMetadata: null,
+    });
+    expect(await h.quotes.expireOldQuotes()).toBe(2);
+    expect(row(h, q.id).status).toBe('EXPIRED');
+    expect(row(h, staffDraft.id).status).toBe('EXPIRED');
+  });
+
+  it('a request the midnight job EXPIRED before this fix can be sent again, with a new window', async () => {
+    const h = harness();
+    const q = await lateRequest(h);
+    row(h, q.id).status = 'EXPIRED';
+    await h.quotes.update(q.id, { status: 'SENT' });
+    expect(row(h, q.id).status).toBe('SENT');
+    expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(3, 1);
+    expect((await h.quotes.customerAccept(q.id, CUSTOMER_ID) as any).status).toBe('ACCEPTED');
+  });
+
+  it('uses the quote_validity_days setting, and a validUntil sent with the status wins', async () => {
+    const h = harness();
+    h.db.insert('systemSetting', { key: 'quote_validity_days', value: '7' });
+    const q = await lateRequest(h);
+    await h.quotes.update(q.id, { status: 'SENT' });
+    expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(7, 1);
+
+    const r = await lateRequest(h);
+    await h.quotes.update(r.id, { status: 'SENT', validUntil: '2099-01-01T00:00:00Z' });
+    expect(new Date(row(h, r.id).validUntil).toISOString()).toBe('2099-01-01T00:00:00.000Z');
+  });
+
+  it("a staff quote's validity is left alone, and re-saving SENT doesn't extend a request", async () => {
+    const h = harness();
+    const until = new Date(Date.now() + 2 * DAY);
+    const staff = h.db.insert('quote', {
+      quoteNumber: 'QT-0200', customerId: CUSTOMER_ID, status: 'DRAFT', source: 'QUICK_QUOTE', validUntil: until, notes: null,
+      subtotal: 5, tax: 0, total: 5, gcodeMetadata: null, stlMetadata: null,
+    });
+    await h.quotes.update(staff.id, { status: 'SENT' });
+    expect(new Date(row(h, staff.id).validUntil).getTime()).toBe(until.getTime());
+
+    const q: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+    row(h, q.id).status = 'SENT';
+    row(h, q.id).validUntil = until;
+    await h.quotes.update(q.id, { status: 'SENT' });
+    expect(new Date(row(h, q.id).validUntil).getTime()).toBe(until.getTime());
+  });
+
+  /**
+   * A Quick Quote gets now + quote_validity_days when it is made, and the
+   * staff quote page has no Valid Until field, so one sent or accepted after
+   * that window used to be stuck: the customer's Accept said "Quote has
+   * expired" and Convert was refused.
+   */
+  describe('any quote sent or accepted after its window gets a new one', () => {
+    const staffQuote = (h: OrdersHarness, status: string, validUntil: Date | null, source = 'QUICK_QUOTE') => h.db.insert('quote', {
+      quoteNumber: `QT-${Math.random().toString(36).slice(2, 8)}`, customerId: CUSTOMER_ID, status, source, validUntil, notes: null,
+      subtotal: 5, tax: 0, total: 5, gcodeMetadata: null, stlMetadata: null,
+    });
+
+    it.each([['DRAFT'], ['EXPIRED']])('a lapsed Quick Quote in %s → SENT: new window, and the customer can accept it', async (status) => {
+      const h = harness();
+      const q = staffQuote(h, status, new Date(Date.now() - 2 * DAY));
+      await h.quotes.update(q.id, { status: 'SENT' });
+      expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(3, 1);
+      expect((await h.quotes.customerAccept(q.id, CUSTOMER_ID) as any).status).toBe('ACCEPTED');
+    });
+
+    it('a lapsed quote marked ACCEPTED by staff gets a new window, so it can still be converted', async () => {
+      const h = harness();
+      const q = await lateRequest(h);
+      await h.quotes.update(q.id, { status: 'ACCEPTED' });
+      expect(row(h, q.id).status).toBe('ACCEPTED');
+      expect(daysFromNow(row(h, q.id).validUntil)).toBeCloseTo(3, 1);
+      const order: any = await h.quotes.convertToOrder(q.id, { autoCreateJobs: false });
+      expect(order.orderNumber).toBeTruthy();
+    });
+
+    it('a window still running, or no window at all, is left as it is', async () => {
+      const h = harness();
+      const until = new Date(Date.now() + 5 * DAY);
+      const running = staffQuote(h, 'SENT', until);
+      await h.quotes.update(running.id, { status: 'ACCEPTED' });
+      expect(new Date(row(h, running.id).validUntil).getTime()).toBe(until.getTime());
+
+      const open = staffQuote(h, 'DRAFT', null, 'MANUAL');
+      await h.quotes.update(open.id, { status: 'SENT' });
+      expect(row(h, open.id).validUntil).toBeNull();
+      await h.quotes.update(open.id, { status: 'ACCEPTED' });
+      expect(row(h, open.id).validUntil).toBeNull();
+
+      // A customer's request accepted straight from DRAFT, with no window: none is added.
+      const req: any = await h.quotes.customerRequestQuote(CUSTOMER_ID, fileRequest() as any);
+      await h.quotes.update(req.id, { status: 'ACCEPTED' });
+      expect(row(h, req.id).validUntil).toBeNull();
+    });
+
+    it('other moves, and re-saving the same status, never restart it', async () => {
+      const h = harness();
+      const lapsed = new Date(Date.now() - DAY);
+      const q = staffQuote(h, 'SENT', lapsed);
+      for (const status of ['SENT', 'REJECTED', 'DRAFT', 'EXPIRED']) {
+        await h.quotes.update(q.id, { status });
+        expect(new Date(row(h, q.id).validUntil).getTime()).toBe(lapsed.getTime());
+      }
+    });
+  });
+
+  it.each<[Record<string, unknown>, string]>([
+    [{ status: 'SENT', total: 0 }, 'property total should not exist'],
+    [{ status: 'SENT', items: { deleteMany: {} } }, 'property items should not exist'],
+    [{ status: 'PAID' }, '"status" must be one of: DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED'],
+    [{ validUntil: 'soon' }, 'validUntil must be a date'],
+    [{ notes: ['a'] }, '"notes" must be text'],
+  ])('PATCH %j → 400 %s and the quote is unchanged', async (body, message) => {
+    const h = harness();
+    const q = await lateRequest(h);
+    const before = JSON.stringify(row(h, q.id));
+    expect(await badRequestOf(h.quotes.update(q.id, body))).toBe(message);
+    expect(JSON.stringify(row(h, q.id))).toBe(before);
+  });
+});

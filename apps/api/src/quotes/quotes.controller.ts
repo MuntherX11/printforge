@@ -8,7 +8,6 @@ import { StaffGuard } from '../auth/guards/staff.guard';
 import { CustomerGuard } from '../auth/guards/customer.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UpdateQuoteDto, SaveQuoteFromAnalysisDto } from '@printforge/types';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -30,8 +29,8 @@ export class QuotesController {
   @Post('from-analysis')
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  createFromAnalysis(@Body() dto: SaveQuoteFromAnalysisDto, @CurrentUser() user: any) {
-    return this.quotesService.createFromAnalysis(dto, user.id);
+  createFromAnalysis(@Body() body: unknown, @CurrentUser() user: any) {
+    return this.quotesService.createFromAnalysis(body, user.id);
   }
 
   @Get()
@@ -49,8 +48,8 @@ export class QuotesController {
   @Patch(':id')
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  update(@Param('id') id: string, @Body() dto: UpdateQuoteDto) {
-    return this.quotesService.update(id, dto);
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.quotesService.update(id, body);
   }
 
   @Post(':id/convert')

@@ -10,7 +10,9 @@ export class QuotesScheduler {
 
   /**
    * Expire overdue quotes every day at midnight.
-   * Moves any DRAFT or SENT quote past its validUntil date to EXPIRED.
+   * Moves any SENT quote, or staff DRAFT, past its validUntil date to
+   * EXPIRED; a customer's request awaiting review is left alone
+   * (QuotesService.expireOldQuotes).
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async expireQuotes() {

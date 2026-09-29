@@ -11,6 +11,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { Plus, Tag, ArrowLeft, Trash2 } from 'lucide-react';
@@ -19,6 +20,11 @@ import { useToast } from '@/components/ui/toast';
 export default function ExpensesPage() {
   const formatCurrency = useFormatCurrency();
   const { toast } = useToast();
+  // The API's rules: adding an expense is ADMIN or OPERATOR; adding a
+  // category and deleting an expense are ADMIN. Other roles see the list.
+  const { role } = useAuth();
+  const canAdd = role === 'ADMIN' || role === 'OPERATOR';
+  const isAdmin = role === 'ADMIN';
   const [expenses, setExpenses] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,12 +105,16 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Expenses</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowAddCategory(true)}>
-            <Tag className="h-4 w-4 mr-2" /> Add Category
-          </Button>
-          <Button onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4 mr-2" /> Add Expense
-          </Button>
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setShowAddCategory(true)}>
+              <Tag className="h-4 w-4 mr-2" /> Add Category
+            </Button>
+          )}
+          {canAdd && (
+            <Button onClick={() => setShowAdd(true)}>
+              <Plus className="h-4 w-4 mr-2" /> Add Expense
+            </Button>
+          )}
         </div>
       </div>
 
@@ -122,7 +132,7 @@ export default function ExpensesPage() {
       <Card>
         {expenses.length === 0 ? (
           <CardContent className="py-12 text-center text-sm text-gray-500">
-            No expenses recorded yet. Add your first expense above.
+            {canAdd ? 'No expenses recorded yet. Add your first expense above.' : 'No expenses recorded yet.'}
           </CardContent>
         ) : (
           <CardContent className="p-0">
@@ -148,14 +158,16 @@ export default function ExpensesPage() {
                     <TableCell>{e.description}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums font-medium">{formatCurrency(e.amount)}</TableCell>
                     <TableCell className="text-right">
-                      <button
-                        onClick={() => setShowDelete(e.id)}
-                        disabled={deleting === e.id}
-                        className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
-                        aria-label="Delete expense"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => setShowDelete(e.id)}
+                          disabled={deleting === e.id}
+                          className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                          aria-label="Delete expense"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -195,7 +207,7 @@ export default function ExpensesPage() {
         <form onSubmit={handleAdd} className="space-y-4">
           {categories.length === 0 ? (
             <p className="text-sm text-amber-600 dark:text-amber-400">
-              No categories yet. Create one first using "Add Category".
+              {isAdmin ? 'No categories yet. Create one first using "Add Category".' : 'No categories yet. Ask an admin to add one.'}
             </p>
           ) : (
             <Select name="categoryId" label="Category" required

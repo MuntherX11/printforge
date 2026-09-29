@@ -7,7 +7,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
-import { CreateInvoiceDto, UpdateInvoiceDto } from '@printforge/types';
+import { CreateInvoiceDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 @Controller('invoices')
@@ -38,11 +38,12 @@ export class InvoicesController {
     return this.invoicesService.findOne(id);
   }
 
+  /** The body is parsed by invoice-input.ts (status, paidAt); paidAmount is set only by marking PAID. */
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateInvoiceDto) {
-    return this.invoicesService.update(id, dto);
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.invoicesService.update(id, body);
   }
 
   @Get(':id/pdf')

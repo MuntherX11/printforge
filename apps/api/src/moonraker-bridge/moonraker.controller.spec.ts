@@ -32,6 +32,15 @@ describe('POST /moonraker/control/:printerId/:action roles', () => {
     expect(guard.canActivate(ctx(P.controlPrint, role as string))).toBe(allowed);
   });
 
+  it.each(['pollAll', 'reconnectPrinter'] as const)('%s is ADMIN/OPERATOR too; VIEWER and ACCOUNTING are refused', (name) => {
+    const handler = P[name];
+    expect(reflector.get(GUARDS_METADATA, handler)).toEqual([RolesGuard]);
+    expect(reflector.get(ROLES_KEY, handler)).toEqual(['ADMIN', 'OPERATOR']);
+    for (const [role, allowed] of [['VIEWER', false], ['ACCOUNTING', false], ['OPERATOR', true], ['ADMIN', true]] as const) {
+      expect(guard.canActivate(ctx(handler, role))).toBe(allowed);
+    }
+  });
+
   it('the live status read stays open to every staff role', () => {
     expect(reflector.get(ROLES_KEY, P.getStatus)).toBeUndefined();
     expect(guard.canActivate(ctx(P.getStatus, 'VIEWER'))).toBe(true);

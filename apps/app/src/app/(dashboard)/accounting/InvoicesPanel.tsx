@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/components/ui/toast';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { FileText, Download, CheckCircle } from 'lucide-react';
@@ -37,6 +38,9 @@ const STATUS_STYLE: Record<string, string> = {
 export function InvoicesPanel() {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
+  // PATCH /invoices/:id is ADMIN-only; ACCOUNTING and VIEWER see the list read-only.
+  const { role } = useAuth();
+  const canMarkPaid = role === 'ADMIN';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
@@ -154,7 +158,7 @@ export function InvoicesPanel() {
                       >
                         <Download className="h-3.5 w-3.5" /> PDF
                       </a>
-                      {inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
+                      {canMarkPaid && inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
                         <Button size="sm" disabled={marking === inv.id} onClick={() => markPaid(inv)}>
                           <CheckCircle className="h-3.5 w-3.5 mr-1" />
                           {marking === inv.id ? 'Saving…' : 'Mark Paid'}
