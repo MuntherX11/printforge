@@ -110,6 +110,11 @@ export class AttachmentsService {
     const entityId = attachment.entityId;
     if (!entityId) return false;
 
+    if (isDesignProjectEntity(type)) {
+      return !!(await this.prisma.designProject.findFirst({
+        where: { id: entityId, customerId }, select: { id: true },
+      }));
+    }
     switch (type) {
       case 'order':
         return !!(await this.prisma.order.findFirst({
@@ -117,11 +122,6 @@ export class AttachmentsService {
         }));
       case 'quote':
         return !!(await this.prisma.quote.findFirst({
-          where: { id: entityId, customerId }, select: { id: true },
-        }));
-      case 'designproject':
-      case 'design_project':
-        return !!(await this.prisma.designProject.findFirst({
           where: { id: entityId, customerId }, select: { id: true },
         }));
       case 'invoice':
@@ -176,4 +176,18 @@ export class AttachmentsService {
 
 function isProductEntity(entityType: unknown): boolean {
   return typeof entityType === 'string' && entityType.trim().toLowerCase() === 'product';
+}
+
+/**
+ * The entityType values (any case) that hang an attachment off a design
+ * project, as POST /attachments?entityType=…&entityId=<project id> stores it.
+ * Attachment.designProjectId is never written, so a design attachment is
+ * found by entityType/entityId: customerOwns above and the design chat's
+ * attachment check both use this.
+ */
+export const DESIGN_PROJECT_ENTITY_TYPES = ['designproject', 'design_project'] as const;
+
+export function isDesignProjectEntity(entityType: unknown): boolean {
+  return typeof entityType === 'string'
+    && (DESIGN_PROJECT_ENTITY_TYPES as readonly string[]).includes(entityType.trim().toLowerCase());
 }

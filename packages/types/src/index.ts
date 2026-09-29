@@ -111,9 +111,12 @@ export interface CreateDesignProjectDto {
   budget?: number;
 }
 
+/**
+ * PATCH /design-projects/:id. Any other key is a 400; a designer is assigned
+ * with POST /design-projects/:id/assign `{ userId }` (ADMIN).
+ */
 export interface UpdateDesignProjectDto {
   status?: DesignStatus;
-  assignedToId?: string;
   designFeeType?: DesignFeeType;
   designFeeAmount?: number;
   designFeeHours?: number;

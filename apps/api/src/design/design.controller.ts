@@ -9,7 +9,6 @@ import { CustomerGuard } from '../auth/guards/customer.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UpdateDesignProjectDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 // SVG excluded — can embed JavaScript and cause stored XSS when served back
@@ -44,18 +43,20 @@ export class DesignController {
     return this.designService.findOne(id, { userId: user.id, userType: user.userType });
   }
 
+  /** The body is parsed by parseDesignPatch; assigning a designer is POST :id/assign. */
   @Patch(':id')
   @UseGuards(StaffGuard, RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  update(@Param('id') id: string, @Body() dto: UpdateDesignProjectDto) {
-    return this.designService.update(id, dto);
+  @Roles(...DESIGN_STAFF_WRITE_ROLES)
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.update(id, body);
   }
 
+  /** `{ userId }`, parsed by parseDesignAssign; the user must be an active ADMIN or OPERATOR. */
   @Post(':id/assign')
   @UseGuards(StaffGuard, RolesGuard)
   @Roles('ADMIN')
-  assign(@Param('id') id: string, @Body() body: { userId: string }) {
-    return this.designService.assign(id, body.userId);
+  assign(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.assign(id, body);
   }
 
   /**
@@ -86,14 +87,12 @@ export class DesignController {
     return this.designService.getComments(id, { userId: user.id, userType: user.userType });
   }
 
+  /** `{ description?, internalNotes? }`, parsed by parseDesignRevision. */
   @Post(':id/revisions')
   @UseGuards(StaffGuard, RolesGuard)
-  @Roles('ADMIN', 'OPERATOR')
-  addRevision(
-    @Param('id') id: string,
-    @Body() body: { description?: string; internalNotes?: string },
-  ) {
-    return this.designService.addRevision(id, body.description, body.internalNotes);
+  @Roles(...DESIGN_STAFF_WRITE_ROLES)
+  addRevision(@Param('id') id: string, @Body() body: unknown) {
+    return this.designService.addRevision(id, body);
   }
 
   /**
