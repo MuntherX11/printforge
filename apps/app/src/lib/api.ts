@@ -5,14 +5,18 @@ const API_BASE = '/api';
 /**
  * Thrown for every non-2xx response. `message` is the server's `error` text
  * (the envelope's `error` field); `status` lets callers tell a 404 from other
- * failures (e.g. the product page shows notFound() only on 404).
+ * failures (e.g. the product page shows notFound() only on 404). `code` is
+ * the envelope's machine-readable reason when the server sent one (e.g.
+ * 'SPOOL_HAS_HISTORY', 'MATERIAL_DUPLICATE').
  */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -28,7 +32,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Request failed' }));
-    throw new ApiError(error.error || `HTTP ${res.status}`, res.status);
+    throw new ApiError(error.error || `HTTP ${res.status}`, res.status, typeof error.code === 'string' ? error.code : undefined);
   }
 
   const json = await res.json();
