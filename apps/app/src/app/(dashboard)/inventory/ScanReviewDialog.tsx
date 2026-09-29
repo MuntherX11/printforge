@@ -82,9 +82,13 @@ interface ScanReviewDialogProps {
   fields: ScannedFields | null;
   /** Every filament from GET /materials/stock, or null until the list has loaded. */
   rows: FilamentStockRow[] | null;
+  /** True when the list has never loaded and the last attempt failed. */
+  loadFailed: boolean;
   onClose(): void;
   /** Reloads the list in the background (after success and after a failure). */
   onChanged(): void;
+  /** Clears the failure and loads the list again. */
+  onRetry(): void;
 }
 
 /**
@@ -92,16 +96,16 @@ interface ScanReviewDialogProps {
  * spool will join (searched over every filament), then add the spool, creating
  * the filament first when none matches.
  */
-export function ScanReviewDialog({ fields, rows, onClose, onChanged }: ScanReviewDialogProps) {
+export function ScanReviewDialog({ fields, ...rest }: ScanReviewDialogProps) {
   return (
-    <Dialog open={!!fields} onClose={onClose} title="Review Scanned Label">
+    <Dialog open={!!fields} onClose={rest.onClose} title="Review Scanned Label">
       {/* The Dialog unmounts its children when closed, so every scan starts fresh. */}
-      {fields && <ScanReviewForm fields={fields} rows={rows} onClose={onClose} onChanged={onChanged} />}
+      {fields && <ScanReviewForm fields={fields} {...rest} />}
     </Dialog>
   );
 }
 
-function ScanReviewForm({ fields, rows, onClose, onChanged }: ScanReviewDialogProps & { fields: ScannedFields }) {
+function ScanReviewForm({ fields, rows, loadFailed, onClose, onChanged, onRetry }: ScanReviewDialogProps & { fields: ScannedFields }) {
   const { toast } = useToast();
   const [draft, setDraft] = useState<Draft>(() => draftFrom(fields));
   const [brands, setBrands] = useState<string[]>([]);
@@ -131,9 +135,10 @@ function ScanReviewForm({ fields, rows, onClose, onChanged }: ScanReviewDialogPr
     };
   }, []);
 
-  // Opened before the list finished loading: ask for it, so the match can run.
+  // Opened before the list finished loading: ask for it (clearing an earlier
+  // failure), so the match can run.
   useEffect(() => {
-    if (rows === null) onChanged();
+    if (rows === null) onRetry();
     // Once per open; a later null is the page's own load still in flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -222,7 +227,14 @@ function ScanReviewForm({ fields, rows, onClose, onChanged }: ScanReviewDialogPr
 
       <div aria-live="polite" className="text-sm">
         {matches === null ? (
-          <p className="text-gray-500 dark:text-gray-400">Checking existing filaments…</p>
+          loadFailed ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p role="alert" className="text-gray-700 dark:text-gray-300">Couldn&apos;t check existing filaments</p>
+              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+            </div>
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">Checking existing filaments…</p>
+          )
         ) : matches.length === 1 ? (
           <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-gray-700 dark:text-gray-300">
             <span>Adds a {gramsText} g spool to:</span>

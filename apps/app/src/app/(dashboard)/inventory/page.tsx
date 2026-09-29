@@ -300,8 +300,10 @@ function FilamentsPage() {
       <ScanReviewDialog
         fields={scannedFields}
         rows={rows}
+        loadFailed={loadFailed}
         onClose={() => setScannedFields(null)}
         onChanged={load}
+        onRetry={retry}
       />
     </div>
   );
