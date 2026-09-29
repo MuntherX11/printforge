@@ -794,6 +794,8 @@ export interface ApiActiveProduct {
   standardColourLabelBySize: Record<string, string> | null;
   baseSellable: boolean;
   baseSellableToCustomers: boolean;
+  /** The shop sells the standard colour (rule 7); it is then the staff default colour (rule 10). */
+  standardColourSellableToCustomers: boolean;
   sizes: Array<{ id: string; name: string; sku: string | null; basePrice: number | null; sortOrder: number; sellableToCustomers: boolean }>;
   colours: Array<{
     id: string;

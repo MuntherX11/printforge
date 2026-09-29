@@ -69,6 +69,9 @@ export function activeProductView(raw: any, config: ProductConfig, pc: PairConte
     standardColourLabelBySize: standardColourLabelBySize(config),
     baseSellable: standardSizeSellable(config, 'STAFF'),
     baseSellableToCustomers: standardSizeSellable(config, 'CUSTOMER'),
+    // §3.1 rule 10: the staff default colour is the first one customers can
+    // buy, and the standard colour comes first when the shop sells it.
+    standardColourSellableToCustomers: standardColourSellable(pc, 'CUSTOMER'),
     sizes,
     colours,
     // One release only: legacy readers (nothing in the app after WP10).

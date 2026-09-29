@@ -365,6 +365,19 @@ describe('ProductsService (§7.1 items 13, 29, 42)', () => {
         expect(d.standardColourMixed).toBe(true);
         expect(d.standardColourSellableToCustomers).toBe(false);
         expect(d.warnings.map((w) => w.code)).toContain('SLOT_STANDARD_MIXED');
+        expect(p.standardColourSellableToCustomers).toBe(false);
+      });
+
+      it('standardColourSellableToCustomers (rule 7, the staff default colour of rule 10) matches ProductDetail', async () => {
+        const sold = await setup().products.active();
+        expect((sold[0] as any).standardColourSellableToCustomers).toBe(true); // Black is sold in the shop
+        expect((await setup().products.findOne(P)).standardColourSellableToCustomers).toBe(true);
+
+        const row = sardineRow();
+        row.standardColourSellable = false;
+        const [off]: any[] = await productsHarness([row]).products.active();
+        expect(off.standardColourSellableToCustomers).toBe(false);
+        expect((await productsHarness([row]).products.findOne(P)).standardColourSellableToCustomers).toBe(false);
       });
     });
 
