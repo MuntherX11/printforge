@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle } from 'lucide-react';
+import { filamentLabel } from '@printforge/types';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Swatch, swatchHex } from '@/components/ui/swatch';
@@ -114,7 +115,7 @@ export function FilamentsTable({ rows, spoolHits, onBeforeNavigate }: FilamentsT
         {rows.map((m) => {
           const hits = spoolHits[m.id] ?? [];
           const href = filamentHref(m, hits);
-          const label = m.color || m.name;
+          const { primary: label, secondary } = filamentLabel(m);
           return (
             <TableRow key={m.id} className="cursor-pointer" onClick={(e) => openRow(e, href)}>
               {/* Colour leads: on the shelf a spool is identified by its
@@ -132,8 +133,8 @@ export function FilamentsTable({ rows, spoolHits, onBeforeNavigate }: FilamentsT
                     >
                       {label}
                     </Link>
-                    {m.color && m.name !== m.color && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{m.name}</p>
+                    {secondary && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{secondary}</p>
                     )}
                     <p className="text-xs text-gray-500 dark:text-gray-400 md:hidden">
                       {[m.type, m.brand].filter(Boolean).join(' · ')}

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { FILAMENT_QUERY_MAX, MATERIAL_TYPE_OPTIONS, rankFilamentChoices } from '@printforge/types';
+import { FILAMENT_QUERY_MAX, MATERIAL_TYPE_OPTIONS, filamentLabel, rankFilamentChoices } from '@printforge/types';
 import { Swatch, swatchHex } from '@/components/ui/swatch';
 import { formatGrams } from '@/lib/product-format';
 import type { FilamentStockRow } from '@/lib/types/api';
@@ -30,10 +30,12 @@ function typeLabel(type: string): string {
 }
 
 /**
- * Search the filaments and pick one: colour dot, name, brand · type and grams
- * in stock per row. Same type first, then in stock, then name A–Z; out of
- * stock rows are marked but can still be picked. Search follows the Filaments
- * list rules (colour, name, brand, type, location, hex, PF-ID).
+ * Search the filaments and pick one: colour dot, colour (the name when there
+ * is none), the name when it differs from the colour, brand · type, and grams
+ * in stock per row (filamentLabel, the Filaments list's rule). Same type
+ * first, then in stock, then name A–Z; out of stock rows are marked but can
+ * still be picked. Search follows the Filaments list rules (colour, name,
+ * brand, type, location, hex, PF-ID).
  */
 export function FilamentPicker(props: FilamentPickerProps) {
   const { rows, loading, error, preferType, currentMaterialId, savingId, disabled, onPick } = props;
@@ -44,7 +46,8 @@ export function FilamentPicker(props: FilamentPickerProps) {
   const listRef = useRef<HTMLUListElement>(null);
 
   const choices = useMemo(
-    () => (rows ? rankFilamentChoices(rows, { q, preferType, currentMaterialId }) : []),
+    () => (rows ? rankFilamentChoices(rows, { q, preferType, currentMaterialId }) : [])
+      .map((choice) => ({ ...choice, label: filamentLabel(choice.row) })),
     [rows, q, preferType, currentMaterialId],
   );
 
@@ -122,7 +125,7 @@ export function FilamentPicker(props: FilamentPickerProps) {
         <div className="py-2 text-sm" aria-live="polite">{status}</div>
       ) : (
         <ul ref={listRef} aria-label="Filaments" className="max-h-[50vh] divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
-          {choices.map(({ row, inStock, current }, i) => (
+          {choices.map(({ row, label, inStock, current }, i) => (
             <li key={row.id}>
               {/* aria-disabled, not disabled: a disabled button drops the focus, so a failed save would strand the keyboard. */}
               <button
@@ -139,11 +142,11 @@ export function FilamentPicker(props: FilamentPickerProps) {
                   current && 'bg-brand-50/60 dark:bg-brand-900/20',
                 )}
               >
-                <Swatch hex={swatchHex(row.colorHex)} title={row.color || row.name} />
+                <Swatch hex={swatchHex(row.colorHex)} title={label.primary} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-gray-900 dark:text-gray-100">{row.name}</span>
+                  <span className="block truncate font-medium text-gray-900 dark:text-gray-100">{label.primary}</span>
                   <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                    {[row.brand, typeLabel(row.type), current ? 'Current' : null].filter(Boolean).join(' · ')}
+                    {[label.secondary, row.brand, typeLabel(row.type), current ? 'Current' : null].filter(Boolean).join(' · ')}
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-xs tabular-nums">

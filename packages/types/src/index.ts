@@ -375,6 +375,9 @@ export * from './filament-filter';
 // Filament identity (brand + type + colour) for the duplicate guard (pure).
 export * from './filament-identity';
 
+// A filament's on-screen label: colour first, the name when it differs (pure).
+export * from './filament-label';
+
 // The ?next= path a login page may return to (pure).
 export * from './safe-next';
 

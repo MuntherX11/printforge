@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowDown, ArrowUp, Download, Package } from 'lucide-react';
-import { filamentInStock } from '@printforge/types';
+import { filamentInStock, filamentLabel } from '@printforge/types';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
@@ -83,13 +83,14 @@ export function ComponentRow(props: Props) {
         <div className="space-y-1">
           {slots.map(s => {
             const part = multi ? `${c.description} colour ${s.colorIndex + 1}` : c.description;
-            const name = s.material?.name ?? 'No filament';
+            // Colour first, the name only when it differs (as the Filaments list and the picker).
+            const label = filamentLabel(s.material);
             const stockRow = s.material ? props.stock?.get(s.material.id) : undefined;
             const chip = (
               <>
-                <Swatch hex={s.material?.colorHex} title={s.material?.name ?? 'No filament'} />
-                <span className="text-gray-800 dark:text-gray-200">{s.material?.name ?? 'No filament'}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{formatGrams(s.grams)}</span>
+                <Swatch hex={s.material?.colorHex} title={label.primary} />
+                <span className="text-gray-800 dark:text-gray-200">{label.primary}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{[label.secondary, formatGrams(s.grams)].filter(Boolean).join(' · ')}</span>
               </>
             );
             return (
@@ -99,7 +100,7 @@ export function ComponentRow(props: Props) {
                     type="button"
                     onClick={() => props.onPickFilament(s.colorIndex)}
                     title={`Change filament — ${part}`}
-                    aria-label={`Filament of ${part}: ${name}, ${formatGrams(s.grams)} per unit. Change filament`}
+                    aria-label={`Filament of ${part}: ${label.text}, ${formatGrams(s.grams)} per unit. Change filament`}
                     aria-haspopup="dialog"
                     className="-mx-1 -my-0.5 inline-flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-gray-700/60"
                   >

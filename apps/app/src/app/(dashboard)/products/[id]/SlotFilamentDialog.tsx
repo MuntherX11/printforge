@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { filamentPickWrite, writeResultMessage } from '@printforge/types';
+import { filamentLabel, filamentPickWrite, writeResultMessage } from '@printforge/types';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Swatch, swatchHex } from '@/components/ui/swatch';
@@ -80,13 +80,16 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
   const slot = c ? slotViews(product, c).find(s => s.colorIndex === colorIndex) : undefined;
   if (!c || !slot) return null;
   const part = slotPartLabel(c, c.description, colorIndex);
+  // Colour first, the name only when it differs (as the Filaments list and the picker).
+  const now = filamentLabel(slot.material);
+  const next = filamentLabel(picked);
   const note = [
     scopeNote(product, c, scopeLabel),
     product.colours.length > 0 ? 'Colour options keep their own filaments.' : null,
   ].filter(Boolean).join(' ');
 
   function finish(warnings: Problem[], row: FilamentStockRow) {
-    const m = writeResultMessage(warnings, `Saved "${part}" — ${row.name}`);
+    const m = writeResultMessage(warnings, `Saved "${part}" — ${filamentLabel(row).text}`);
     toast(m.tone, m.text);
     onSaved();
     onClose();
@@ -120,9 +123,9 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
     <Dialog open={open} onClose={writer.saving ? () => undefined : onClose} title={`Filament — ${part}`} className="max-w-md">
       <div className="space-y-3">
         <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-          Now: <Swatch hex={swatchHex(slot.material?.colorHex)} title={slot.material?.name ?? 'No filament'} />
-          <span className="font-medium">{slot.material?.name ?? 'No filament'}</span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">· {formatGrams(slot.grams)} per unit</span>
+          Now: <Swatch hex={swatchHex(slot.material?.colorHex)} title={now.primary} />
+          <span className="font-medium">{now.primary}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">· {now.secondary ? `${now.secondary} · ` : ''}{formatGrams(slot.grams)} per unit</span>
         </p>
         {note && <p className="text-xs text-gray-500 dark:text-gray-400">{note}</p>}
         <div className={writer.impact ? 'hidden' : undefined}>
@@ -142,8 +145,9 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
         {writer.impact && picked && (
           <>
             <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={picked.color || picked.name} />
-              <span className="font-medium">{picked.name}</span>
+              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={next.primary} />
+              <span className="font-medium">{next.primary}</span>
+              {next.secondary && <span className="text-xs text-gray-500 dark:text-gray-400">· {next.secondary}</span>}
             </p>
             <ImpactList impact={writer.impact} />
             <div className="flex justify-end gap-3">
