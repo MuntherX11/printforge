@@ -6,30 +6,31 @@ import { SidebarProvider } from '@/components/sidebar-provider';
 import { AuthProvider } from '@/lib/auth-context';
 import { WsStatusBanner } from '@/components/ui/ws-status-banner';
 
-// Public pages that render inside the dashboard route group but without chrome
-const publicPathPatterns = [
+// Staff pages that render inside the dashboard route group but without chrome
+// (the QR spool page a phone opens from a label). They still need a login.
+const chromelessPathPatterns = [
   /^\/inventory\/spool\/[A-Za-z0-9-]+$/,
 ];
 
-function isPublicPage(pathname: string): boolean {
-  return publicPathPatterns.some(p => p.test(pathname));
+function isChromeless(pathname: string): boolean {
+  return chromelessPathPatterns.some(p => p.test(pathname));
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const headerList = headers();
   const pathname = headerList.get('x-pathname') || '';
-  const isPublic = isPublicPage(pathname);
+  const chromeless = isChromeless(pathname);
 
-  if (!isPublic) {
-    const cookieStore = cookies();
-    const token = cookieStore.get('token');
-    if (!token) {
-      redirect('/staff-login');
-    }
+  // The middleware normally redirects first; this is the backstop. The path
+  // only picks where to come back to, never whether a login is needed.
+  const cookieStore = cookies();
+  const token = cookieStore.get('token');
+  if (!token) {
+    redirect(chromeless ? '/staff-login?next=' + encodeURIComponent(pathname) : '/staff-login');
   }
 
-  // Public pages: minimal layout without sidebar/topbar
-  if (isPublic) {
+  // Chrome-less pages: minimal layout without sidebar/topbar
+  if (chromeless) {
     return (
       <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
         {children}

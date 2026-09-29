@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loading } from '@/components/ui/loading';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import Link from 'next/link';
@@ -19,9 +19,19 @@ export default function SpoolByPfidPage() {
 
   useEffect(() => {
     api.get(`/spools/by-pfid/${pfid}`)
-      .then((data) => setSpool(data))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((data) => { setSpool(data); setLoading(false); })
+      .catch((err: unknown) => {
+        // An expired or revoked cookie passes the middleware (it only checks
+        // that one exists): sign in as staff and come back to this spool. The
+        // spinner stays while the browser leaves.
+        if (err instanceof ApiError && err.status === 401) {
+          window.location.replace('/staff-login?next=' + encodeURIComponent(window.location.pathname));
+          return;
+        }
+        // A customer gets 403 'Staff access only'; staff with an unknown PF-ID get 'Spool not found'.
+        setError(err instanceof Error ? err.message : 'Failed to load spool');
+        setLoading(false);
+      });
   }, [pfid]);
 
   if (loading) return <Loading />;

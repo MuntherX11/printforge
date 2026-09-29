@@ -1,12 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { safeNextPath } from '@printforge/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { api } from '@/lib/api';
+
+/**
+ * Where to go after signing in: ?next= when it is a safe same-site path (a
+ * scanned QR spool page), otherwise null. Reads window.location rather than
+ * useSearchParams, so the page needs no Suspense boundary to build.
+ */
+const nextPath = () => safeNextPath(new URLSearchParams(window.location.search).get('next'));
 
 export default function StaffLoginPage() {
   const [email, setEmail] = useState('');
@@ -15,6 +23,20 @@ export default function StaffLoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  // Already signed in as staff (a QR scanner app can open the link without
+  // the Strict cookie; this same-origin call sends it): go straight to next.
+  useEffect(() => {
+    const next = nextPath();
+    if (!next) return;
+    let live = true;
+    api.get<{ userType?: string }>('/auth/me')
+      .then((me) => { if (live && me?.userType === 'staff') router.replace(next); })
+      .catch(() => { /* not signed in: show the form */ });
+    return () => { live = false; };
+    // Mount only: next comes from the URL this page was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -22,7 +44,7 @@ export default function StaffLoginPage() {
 
     try {
       await api.post('/auth/login', { email, password });
-      router.push('/');
+      router.push(nextPath() ?? '/');
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {

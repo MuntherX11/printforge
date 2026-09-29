@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 
 // Public routes that don't require authentication
 const publicPatterns = [
-  /^\/inventory\/spool\/[A-Za-z0-9-]+$/, // QR spool pages (PFID)
   /^\/login$/,
   /^\/signup$/,
   /^\/staff-login$/,
@@ -12,6 +11,10 @@ const publicPatterns = [
   /^\/_next\//,     // Next.js internals
   /^\/favicon/,
 ];
+
+// QR spool pages (PF-ID) are staff only. A logged-out scan signs in as staff
+// and comes back to the same spool.
+const SPOOL_QR = /^\/inventory\/spool\/[A-Za-z0-9-]+$/;
 
 // Routes that belong to the customer portal (/(customer)/dashboard → /dashboard/*)
 const CUSTOMER_PREFIX = '/dashboard';
@@ -47,6 +50,11 @@ export function middleware(request: NextRequest) {
   // Check for auth token
   const tokenCookie = request.cookies.get('token');
   if (!tokenCookie && pathname !== '/') {
+    if (SPOOL_QR.test(pathname)) {
+      const u = new URL('/staff-login', request.url);
+      u.searchParams.set('next', pathname);
+      return NextResponse.redirect(u);
+    }
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
