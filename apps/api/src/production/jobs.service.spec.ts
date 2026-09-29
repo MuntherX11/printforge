@@ -125,6 +125,17 @@ describe('J1 create: pair, linkage, plates, lines (§3.7, §7.1 item 17)', () =>
     const h2 = productionHarness([bare]);
     await expectStatus(h2.jobs.create({ productId: BOX_ID, quantityToProduce: 3 }), 400, '"Box" has no sliced data');
   });
+
+  it('printer: absent → the pricing printer; explicit null → no printer ("assign later")', async () => {
+    const h = box({ only12: true });
+    const byDefault: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 12 });
+    expect(jobRow(h, byDefault.id).printerId).toBe('pr-1');
+    const unassigned: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 12, printerId: null });
+    expect(jobRow(h, unassigned.id).printerId).toBeNull();
+    expect(parseCreateJob({ productId: 'p', printerId: null }).printerId).toBeNull();
+    expect(parseCreateJob({ productId: 'p', printerId: '' }).printerId).toBeUndefined();
+    expect(parseCreateJob({ productId: 'p' }).printerId).toBeUndefined();
+  });
 });
 
 // ------------------------------------------------------------ completion

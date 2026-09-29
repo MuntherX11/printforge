@@ -177,7 +177,7 @@ export class JobsService {
           sizeOptionId,
           colourOptionId,
           variantId: sizeOptionId ?? colourOptionId,
-          printerId: dto.printerId ?? config?.product.defaultPrinterId ?? null,
+          printerId: dto.printerId !== undefined ? dto.printerId : config?.product.defaultPrinterId ?? null,
           assignedToId: dto.assignedToId ?? null,
           orderId: dto.orderId ?? null,
           orderItemId: dto.orderItemId ?? null,

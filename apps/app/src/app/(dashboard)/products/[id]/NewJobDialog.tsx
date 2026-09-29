@@ -32,6 +32,7 @@ interface Props {
 const PURPOSES: Array<{ value: JobPurpose; label: string }> = [{ value: 'CUSTOMER', label: 'For sale or stock' }, ...JOB_PURPOSES];
 const POLICIES: SurplusPolicy[] = ['KEEP_FOR_STOCK', 'CANCEL_ON_PRINTER'];
 type Plans = Record<string, PlanPlate[]>;
+const NO_PREVIEW = { data: null, error: null, loading: false } as const;
 
 function reservationToast(r: JobReservation | undefined): string {
   if (!r) return 'Job created';
@@ -52,13 +53,25 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
   const [policy, setPolicy] = useState<SurplusPolicy>(product.surplusPolicy);
   const [printerId, setPrinterId] = useState('');
   const [printers, setPrinters] = useState<ApiPrinter[]>([]);
+  const [printersError, setPrintersError] = useState(false);
   const [plans, setPlans] = useState<Plans | null>(null);
-  const [preview, setPreview] = useState<{ data: JobPreview | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: false });
+  const [preview, setPreview] = useState<{ data: JobPreview | null; error: string | null; loading: boolean }>(NO_PREVIEW);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = prefill !== null;
   const qty = parseWhole(qtyText, 1, 100_000);
   const { setPair } = pair;
+
+  const fetchPrinters = () => {
+    setPrintersError(false);
+    loadPrinters()
+      .then(list => {
+        setPrinters(list);
+        // The pricing printer is only the default while it is active; otherwise the job starts unassigned.
+        setPrinterId(id => (id && !list.some(x => x.isActive && x.id === id) ? '' : id));
+      })
+      .catch(() => { setPrinters([]); setPrintersError(true); });
+  };
 
   useEffect(() => {
     if (!prefill) return;
@@ -66,13 +79,16 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     setQtyText(String(prefill.quantity));
     setPurpose('CUSTOMER'); setStockMode(''); setPolicy(product.surplusPolicy);
     setPrinterId(product.defaultPrinterId ?? ''); setPlans(null); setError(null);
-    loadPrinters().then(setPrinters).catch(() => setPrinters([]));
+    // The last session's plan never shows for this one.
+    setPreview(NO_PREVIEW);
+    fetchPrinters();
     // Reset on open only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
 
-  // A different pair, quantity or policy gets fresh suggested plates.
-  useEffect(() => { setPlans(null); }, [pair.sizeKey, pair.colourKey, qty, policy]);
+  // A different pair, quantity or policy gets fresh suggested plates, and the
+  // old plan is dropped so no plate is edited against another pair's components.
+  useEffect(() => { setPlans(null); setPreview(NO_PREVIEW); }, [pair.sizeKey, pair.colourKey, qty, policy]);
 
   const planProblems = (p: JobPreview | null, edited: Plans | null) => {
     if (!p || !edited) return null;
@@ -107,6 +123,14 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
 
   if (!open) return null;
   const p = preview.data;
+  // Until the list loads (or when it fails) the pricing printer is still shown by name, so what is sent is what is shown.
+  const printerOptions = [
+    { value: '', label: 'No printer — assign later' },
+    ...printers.filter(x => x.isActive).map(x => ({ value: x.id, label: x.name })),
+    ...(printerId && !printers.some(x => x.isActive && x.id === printerId)
+      ? [{ value: printerId, label: printerId === product.defaultPrinterId ? product.defaultPrinter?.name ?? 'Pricing printer' : 'Selected printer' }]
+      : []),
+  ];
   const planOf = (componentId: string): PlanPlate[] =>
     plans?.[componentId] ?? p?.components.find(c => c.componentId === componentId)?.plates.map(x => ({ layoutId: x.layoutId, plateCount: x.plateCount })) ?? [];
   const editPlan = (componentId: string, next: PlanPlate[]) => {
@@ -130,7 +154,8 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     setError(null);
     try {
       const job = await api.post<{ id: string; reservation?: JobReservation }>('/jobs', {
-        ...common, quantityToProduce: qty, purpose, ...(printerId ? { printerId } : {}),
+        // null = "No printer — assign later"; an absent printerId would fall back to the pricing printer (J1).
+        ...common, quantityToProduce: qty, purpose, printerId: printerId || null,
       });
       toast(job.reservation && job.reservation.short.length ? 'warning' : 'success', reservationToast(job.reservation));
       onClose();
@@ -153,8 +178,15 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
             onChange={e => setQtyText(e.target.value)} error={qty === null ? 'Whole number from 1 to 100,000' : undefined} />
           <Select label="Extras on the last plate" value={policy} onChange={e => setPolicy(e.target.value as SurplusPolicy)}
             options={POLICIES.map(v => ({ value: v, label: `${policyLabel(v)}${v === product.surplusPolicy ? ' (product setting)' : ''}` }))} />
-          <Select label="Printer" value={printerId} onChange={e => setPrinterId(e.target.value)}
-            options={[{ value: '', label: 'No printer — assign later' }, ...printers.filter(x => x.isActive).map(x => ({ value: x.id, label: x.name }))]} />
+          <div>
+            <Select label="Printer" value={printerId} onChange={e => setPrinterId(e.target.value)} options={printerOptions} />
+            {printersError && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                Couldn&apos;t load printers.{' '}
+                <button type="button" className="underline" onClick={fetchPrinters}>Retry</button>
+              </p>
+            )}
+          </div>
         </div>
         {p && <ProblemList problems={p.warnings} tone="warning" />}
 
