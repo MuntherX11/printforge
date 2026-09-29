@@ -20,15 +20,16 @@ const SPOOL_QR = /^\/inventory\/spool\/[A-Za-z0-9-]+$/;
 const CUSTOMER_PREFIX = '/dashboard';
 
 // Decode the JWT payload without verifying the signature.
-// Verification happens in the API/NestJS guards; here we only need the userType claim
+// Verification happens in the API/NestJS guards; here we only need the `type` claim
 // for routing. Returns null if the token is absent or malformed.
 function decodeTokenPayload(token: string | undefined): Record<string, unknown> | null {
   if (!token) return null;
   try {
     const parts = token.split('.');
     if (parts.length < 2) return null;
-    // atob is available in the Next.js Edge Runtime
-    return JSON.parse(atob(parts[1])) as Record<string, unknown>;
+    // JWT segments are base64url without padding; atob (Edge Runtime) needs base64.
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '='))) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -59,10 +60,10 @@ export function middleware(request: NextRequest) {
   }
 
   // Decode the JWT to determine user type for route-level enforcement.
-  // Staff users have userType === 'staff' or no userType field at all (legacy tokens).
+  // Tokens carry `type: 'staff' | 'customer'` (JwtPayload). Reading `userType`
+  // here never matched, so customers were sent to the staff dashboard.
   const payload = decodeTokenPayload(tokenCookie?.value);
-  const userType = payload?.userType as string | undefined;
-  const isCustomer = userType === 'customer';
+  const isCustomer = (payload?.type ?? payload?.userType) === 'customer';
 
   if (pathname.startsWith(CUSTOMER_PREFIX)) {
     // Customer portal routes — staff must not enter
