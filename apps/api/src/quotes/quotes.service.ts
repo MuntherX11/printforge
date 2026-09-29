@@ -4,10 +4,11 @@ import type { Problem } from '@printforge/types';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
 import { parseCustomerQuoteRequest } from './customer-quote-input';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { UpdateQuoteDto, SaveQuoteFromAnalysisDto, QuoteStatus, QuoteSource } from '@printforge/types';
+import { QuoteStatus } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { generateNumber } from '../common/utils/number-generator';
-import { optionalNumber } from '../common/utils/validate-number';
+import { allowedBody, optionalNumber, optionalText } from '../common/utils/validate-number';
+import { parseQuoteFromAnalysis } from './quote-from-analysis-input';
 import { BomResolverService } from '../catalog-core/bom-resolver.service';
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
 import { round3 } from '../catalog-core/cost-engine';
@@ -53,6 +54,33 @@ export const CUSTOMER_QUOTE_SELECT = {
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
+const QUOTE_STATUSES = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'] as const;
+
+/**
+ * PATCH /quotes/:id: `{ status?, notes?, validUntil? }` (UpdateQuoteDto is an
+ * interface). A status outside QuoteStatus, notes that are not text, or a
+ * validUntil that is not a date used to reach Prisma as a 500; any other key
+ * → 400. A null or blank validUntil leaves it alone, as before.
+ */
+export function parseQuotePatch(raw: unknown): { status?: QuoteStatus; notes?: string | null; validUntil?: Date } {
+  const b = allowedBody(raw, ['status', 'notes', 'validUntil']);
+  const out: { status?: QuoteStatus; notes?: string | null; validUntil?: Date } = {};
+  if (b.status !== undefined && b.status !== null) {
+    if (typeof b.status !== 'string' || !(QUOTE_STATUSES as readonly string[]).includes(b.status)) {
+      throw new BadRequestException(`"status" must be one of: ${QUOTE_STATUSES.join(', ')}`);
+    }
+    out.status = b.status as QuoteStatus;
+  }
+  const notes = optionalText(b.notes, 'notes', 5000);
+  if (notes !== undefined) out.notes = notes;
+  if (b.validUntil !== undefined && b.validUntil !== null && b.validUntil !== '') {
+    const date = typeof b.validUntil === 'string' ? new Date(b.validUntil) : null;
+    if (!date || Number.isNaN(date.getTime())) throw new BadRequestException('validUntil must be a date');
+    out.validUntil = date;
+  }
+  return out;
+}
+
 /** S7's preconditions: the quote exists, has no order yet, is SENT or ACCEPTED and hasn't expired. */
 function assertConvertible(quote: { status: string; validUntil: Date | string | null; order?: unknown } | null): asserts quote {
   if (!quote) throw new NotFoundException('Quote not found');
@@ -79,65 +107,60 @@ export class QuotesService {
     @Optional() private settingsService?: SettingsService,
   ) {}
 
-  async createFromAnalysis(dto: SaveQuoteFromAnalysisDto, createdById?: string) {
-    let quoteNumber: string | undefined;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        quoteNumber = await generateNumber(this.prisma, 'QT', 'quote');
-        break;
-      } catch (e: unknown) {
-        if ((e as { code?: string }).code !== 'P2002' || attempt === 4) throw e;
-      }
-    }
-    if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
+  /**
+   * POST /quotes/from-analysis (ADMIN/OPERATOR). The body is parsed by
+   * parseQuoteFromAnalysis: a bounded price, a staff source, and only the
+   * analysis and cost fields the file parser and cost estimate produce. The
+   * customer must exist. The quote and its line are written in one transaction.
+   */
+  async createFromAnalysis(body: unknown, createdById?: string) {
+    const input = parseQuoteFromAnalysis(body);
+    const customer = await this.prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException('Customer not found');
 
-    const cost = dto.costEstimate;
-    const suggestedPrice = cost?.suggestedPrice || 0;
+    const quoteNumber = await this.nextNumber('QT', 'quote');
+    const validUntil = await this.validUntilFromNow();
+    const { subtotal, tax, total } = documentTotals([{ totalPrice: input.price }], await taxRateOf(this.prisma));
 
-    const validityDays = parseInt(
-      (await this.prisma.systemSetting.findUnique({ where: { key: 'quote_validity_days' } }))?.value ?? '3',
-      10,
-    );
-    const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + validityDays);
-
-    const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
-    const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
-    const tax = suggestedPrice * taxRate;
-
-    const isGcode = !!dto.analysis?.slicer;
-
-    return this.prisma.quote.create({
-      data: {
-        quoteNumber,
-        customerId: dto.customerId,
-        source: (dto.source as QuoteSource) || QuoteSource.QUICK_QUOTE,
-        notes: dto.notes || null,
-        validUntil,
-        subtotal: suggestedPrice,
-        tax,
-        total: suggestedPrice + tax,
-        gcodeMetadata: isGcode ? dto.analysis : undefined,
-        stlMetadata: !isGcode ? dto.analysis : undefined,
-        costBreakdown: cost || undefined,
-        createdById: createdById || null,
-        items: {
-          create: [{
-            description: dto.description,
-            quantity: 1,
-            unitPrice: suggestedPrice,
-            totalPrice: suggestedPrice,
-            estimatedGrams: dto.analysis?.filamentUsedGrams || dto.analysis?.estimatedGrams || null,
-            estimatedMinutes: dto.analysis?.estimatedTimeSeconds
-              ? Math.round(dto.analysis.estimatedTimeSeconds / 60)
-              : dto.analysis?.estimatedMinutes || null,
-            estimatedColors: dto.analysis?.toolCount || null,
-            estimatedCost: cost?.totalCost || null,
-          }],
+    const quoteId = await this.prisma.$transaction(async (tx: any) => {
+      const quote = await tx.quote.create({
+        data: {
+          quoteNumber,
+          customerId: input.customerId,
+          source: input.source,
+          notes: input.notes,
+          validUntil,
+          subtotal,
+          tax,
+          total,
+          gcodeMetadata: input.isGcode && input.metadata ? input.metadata : undefined,
+          stlMetadata: !input.isGcode && input.metadata ? input.metadata : undefined,
+          costBreakdown: input.costBreakdown,
+          createdById: createdById || null,
         },
-      },
-      include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true },
+      });
+      await tx.quoteItem.create({
+        data: {
+          quoteId: quote.id,
+          description: input.description,
+          quantity: 1,
+          unitPrice: input.price,
+          totalPrice: input.price,
+          ...input.line,
+        },
+      });
+      return quote.id as string;
     });
+    return this.prisma.quote.findUnique({ where: { id: quoteId }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
+  }
+
+  /** now + the quote_validity_days setting (default 3; a bad value counts as 3). */
+  private async validUntilFromNow(): Promise<Date> {
+    const raw = parseInt((await this.prisma.systemSetting.findUnique({ where: { key: 'quote_validity_days' } }))?.value ?? '3', 10);
+    const days = Number.isFinite(raw) && raw >= 0 && raw <= 3650 ? raw : 3;
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + days);
+    return validUntil;
   }
 
   /**
@@ -159,12 +182,9 @@ export class QuotesService {
     }
     if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
-    const validityDays = parseInt(
-      (await this.prisma.systemSetting.findUnique({ where: { key: 'quote_validity_days' } }))?.value ?? '3',
-      10,
-    );
-    const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + validityDays);
+    // Only a placeholder: the window the customer can accept in starts again
+    // when staff send the reviewed request (update(), DRAFT → SENT).
+    const validUntil = await this.validUntilFromNow();
 
     const { items, subtotal: total, analysis } = input;
     // The allowlisted analysis, without the keys the customer left out.
@@ -362,17 +382,26 @@ export class QuotesService {
     return { ...quote, items: quote.items.map((i: any) => ({ ...i, ...options.get(i.id) })) };
   }
 
-  async update(id: string, dto: UpdateQuoteDto) {
+  /**
+   * PATCH /quotes/:id. The body is parsed by parseQuotePatch. Sending a
+   * customer's own request (source CUSTOMER, → SENT) restarts its validity
+   * window from now unless the request sets validUntil: the customer can only
+   * accept it once it is SENT, and the window set when they asked has often
+   * run out by the time staff review it (the staff quote page has no Valid
+   * Until field), which left the request impossible to accept or convert.
+   */
+  async update(id: string, body: unknown) {
+    const dto = parseQuotePatch(body);
     const existing = await this.findOne(id);
-    const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
+
+    let validUntil = dto.validUntil;
+    if (dto.status === 'SENT' && existing.status !== 'SENT' && existing.source === 'CUSTOMER' && validUntil === undefined) {
+      validUntil = await this.validUntilFromNow();
+    }
 
     const updated = await this.prisma.quote.update({
       where: { id },
-      data: {
-        status: dto.status ?? undefined,
-        notes: dto.notes,
-        validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
-      },
+      data: { status: dto.status, notes: dto.notes, validUntil },
       include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true },
     });
 
