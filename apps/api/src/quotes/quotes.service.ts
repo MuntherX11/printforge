@@ -81,6 +81,22 @@ export function parseQuotePatch(raw: unknown): { status?: QuoteStatus; notes?: s
   return out;
 }
 
+/**
+ * Whether moving `existing` to `status` starts a new validity window (see
+ * QuotesService.update): only a move to SENT or ACCEPTED from another status,
+ * and then when the window has run out, or when a customer's own request is
+ * being sent.
+ */
+export function restartsValidity(
+  existing: { status: string; source: string; validUntil: Date | string | null },
+  status: QuoteStatus | undefined,
+  now = new Date(),
+): boolean {
+  if ((status !== 'SENT' && status !== 'ACCEPTED') || existing.status === status) return false;
+  if (existing.validUntil !== null && new Date(existing.validUntil) < now) return true;
+  return status === 'SENT' && existing.source === 'CUSTOMER';
+}
+
 /** S7's preconditions: the quote exists, has no order yet, is SENT or ACCEPTED and hasn't expired. */
 function assertConvertible(quote: { status: string; validUntil: Date | string | null; order?: unknown } | null): asserts quote {
   if (!quote) throw new NotFoundException('Quote not found');
@@ -182,10 +198,6 @@ export class QuotesService {
     }
     if (!quoteNumber) throw new InternalServerErrorException('Failed to generate unique document number');
 
-    // Only a placeholder: the window the customer can accept in starts again
-    // when staff send the reviewed request (update(), DRAFT → SENT).
-    const validUntil = await this.validUntilFromNow();
-
     const { items, subtotal: total, analysis } = input;
     // The allowlisted analysis, without the keys the customer left out.
     const metadata = analysis
@@ -204,7 +216,10 @@ export class QuotesService {
         // Awaiting staff review; customerAccept refuses it until it is SENT.
         status: 'DRAFT',
         notes: input.notes,
-        validUntil,
+        // No validity window yet: it is not an offer the customer can accept,
+        // so the portal shows no "Valid until" and the midnight job leaves it
+        // alone. Sending it (update(), → SENT) starts the window.
+        validUntil: null,
         subtotal: total,
         tax,
         total: total + tax,
@@ -292,11 +307,19 @@ export class QuotesService {
     });
   }
 
+  /**
+   * The midnight job: a SENT quote, or a staff DRAFT, whose validUntil has
+   * passed becomes EXPIRED. A customer's own request still in DRAFT is left
+   * alone: it is waiting for staff review, not an offer, and its window starts
+   * when staff send it (requests made before v2.17.1 still carry the
+   * placeholder date set when the customer asked, which used to expire them
+   * unreviewed and drop them out of the DRAFT backlog).
+   */
   async expireOldQuotes() {
     const result = await this.prisma.quote.updateMany({
       where: {
-        status: { in: ['DRAFT', 'SENT'] },
         validUntil: { lt: new Date() },
+        OR: [{ status: 'SENT' }, { status: 'DRAFT', source: { not: 'CUSTOMER' } }],
       },
       data: { status: 'EXPIRED' },
     });
@@ -383,19 +406,24 @@ export class QuotesService {
   }
 
   /**
-   * PATCH /quotes/:id. The body is parsed by parseQuotePatch. Sending a
-   * customer's own request (source CUSTOMER, → SENT) restarts its validity
-   * window from now unless the request sets validUntil: the customer can only
-   * accept it once it is SENT, and the window set when they asked has often
-   * run out by the time staff review it (the staff quote page has no Valid
-   * Until field), which left the request impossible to accept or convert.
+   * PATCH /quotes/:id. The body is parsed by parseQuotePatch. Unless the
+   * request sets validUntil, moving a quote to SENT or ACCEPTED starts a new
+   * validity window from now (quote_validity_days) when (restartsValidity):
+   * - it is a customer's own request being sent: it had no window (or only
+   *   the placeholder older requests got when the customer asked), since the
+   *   customer can accept it only once it is SENT;
+   * - its window has already run out, whatever its source: a Quick Quote gets
+   *   now + N days when it is made, and the staff quote page has no Valid
+   *   Until field, so a quote sent or accepted after that was left impossible
+   *   to accept or convert.
+   * A quote with no validUntil otherwise keeps having none.
    */
   async update(id: string, body: unknown) {
     const dto = parseQuotePatch(body);
     const existing = await this.findOne(id);
 
     let validUntil = dto.validUntil;
-    if (dto.status === 'SENT' && existing.status !== 'SENT' && existing.source === 'CUSTOMER' && validUntil === undefined) {
+    if (validUntil === undefined && restartsValidity(existing, dto.status)) {
       validUntil = await this.validUntilFromNow();
     }
 
