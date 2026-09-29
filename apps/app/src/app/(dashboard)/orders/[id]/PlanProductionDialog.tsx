@@ -66,12 +66,23 @@ function bucketsOf(rows: PlanRow[], edits: Record<string, RowEdit>): Map<string,
   return out;
 }
 
+/**
+ * The most this row can take from stock: what is left to plan, and what the
+ * other rows of its balance leave of it (J5 refuses a larger sum with a 400).
+ */
+function stockCap(row: PlanRow, fromStock: number, buckets: Map<string, Bucket>): number {
+  const others = (buckets.get(bucketOf(row))?.taken ?? fromStock) - fromStock;
+  return Math.max(0, Math.min(row.remaining, row.onHand - others));
+}
+
 function rowProblem(row: PlanRow, e: RowEdit | undefined, buckets: Map<string, Bucket>): string | null {
   const { fromStock, toProduce } = values(row, e);
   if (fromStock > Math.min(row.onHand, row.remaining)) return `At most ${Math.min(row.onHand, row.remaining)} from stock`;
   const shared = buckets.get(bucketOf(row));
   if (fromStock > 0 && shared && shared.taken > row.onHand) return `Lines sharing this stock take ${shared.taken} — only ${row.onHand} on hand`;
   if (fromStock + toProduce > row.remaining) return `Only ${row.remaining} left to plan`;
+  // J5 can't plan plates without a layout (NO_USABLE_LAYOUT) and would refuse the whole plan.
+  if (toProduce > 0 && row.layouts.length === 0) return 'Nothing to print it from — set To Produce to 0 to plan the other rows';
   if (toProduce > 0 && e?.plates) return planProblem(e.plates, row.layouts, toProduce);
   return null;
 }
@@ -237,12 +248,16 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
                         <input
                           type="number"
                           min="0"
-                          max={Math.min(row.onHand, row.remaining)}
+                          max={stockCap(row, fromStock, buckets)}
                           aria-label={`${row.componentDescription}: from stock`}
                           disabled={done || row.onHand === 0}
                           className={`${cell} w-16 text-center font-mono`}
                           value={fromStock}
-                          onChange={ev => edit(row.rowKey, { fromStock: Math.max(0, parseInt(ev.target.value, 10) || 0) })}
+                          onChange={ev => {
+                            const n = Math.max(0, parseInt(ev.target.value, 10) || 0);
+                            // To Produce follows From stock unless typed, so plates chosen for the old amount no longer fit it.
+                            edit(row.rowKey, e?.toProduce === undefined ? { fromStock: n, plates: undefined } : { fromStock: n });
+                          }}
                         />
                       </TableCell>
                       <TableCell className="align-top">
