@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Optional, InternalS
 import { JobStatus } from '@prisma/client';
 import type { Problem } from '@printforge/types';
 import { CustomerQuoteRequestDto } from './dto/customer-quote-request.dto';
+import { parseCustomerQuoteRequest } from './customer-quote-input';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { UpdateQuoteDto, SaveQuoteFromAnalysisDto, QuoteStatus, QuoteSource } from '@printforge/types';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
@@ -45,6 +46,8 @@ export const CUSTOMER_QUOTE_SELECT = {
   createdAt: true,
   gcodeMetadata: true,
   notes: true,
+  // CUSTOMER = the customer's own request, which they can accept only once staff send it.
+  source: true,
   items: { select: { id: true, description: true, quantity: true, unitPrice: true, totalPrice: true } },
 } as const;
 
@@ -137,7 +140,14 @@ export class QuotesService {
     });
   }
 
+  /**
+   * A customer's own quote request. The body is parsed by
+   * parseCustomerQuoteRequest (bounded numbers and text); its prices come from
+   * the customer's estimate and are only a starting point: the quote is a
+   * DRAFT staff review, and customerAccept refuses it until they send it.
+   */
   async customerRequestQuote(customerId: string, dto: CustomerQuoteRequestDto) {
+    const input = parseCustomerQuoteRequest(dto);
     let quoteNumber: string | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -156,44 +166,11 @@ export class QuotesService {
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + validityDays);
 
-    let items: {
-      description: string;
-      quantity: number;
-      unitPrice: number;
-      totalPrice: number;
-      estimatedGrams?: number | null;
-      estimatedMinutes?: number | null;
-      estimatedCost?: number | null;
-    }[];
-    let total: number;
-
-    if (dto.plates && dto.plates.length > 0) {
-      items = dto.plates.map(plate => ({
-        description: plate.name,
-        quantity: 1,
-        unitPrice: plate.breakdown.suggestedPrice,
-        totalPrice: plate.breakdown.suggestedPrice,
-        estimatedGrams: Math.round(plate.weightGrams),
-        estimatedMinutes: Math.round(plate.printSeconds / 60),
-        estimatedCost: plate.breakdown.totalCost,
-      }));
-      total = dto.plates.reduce((sum, p) => sum + p.breakdown.suggestedPrice, 0);
-    } else if (dto.analysis && dto.costEstimate) {
-      items = [{
-        description: dto.analysis.fileName || 'Custom print',
-        quantity: 1,
-        unitPrice: dto.costEstimate.suggestedPrice,
-        totalPrice: dto.costEstimate.suggestedPrice,
-        estimatedGrams: dto.analysis.filamentUsedGrams ?? null,
-        estimatedMinutes: dto.analysis.estimatedTimeSeconds
-          ? Math.round(dto.analysis.estimatedTimeSeconds / 60)
-          : null,
-        estimatedCost: dto.costEstimate.totalCost,
-      }];
-      total = dto.costEstimate.suggestedPrice;
-    } else {
-      throw new BadRequestException('Provide either plates (3MF) or analysis + costEstimate');
-    }
+    const { items, subtotal: total, analysis } = input;
+    // The allowlisted analysis, without the keys the customer left out.
+    const metadata = analysis
+      ? Object.fromEntries(Object.entries(analysis).filter(([, v]) => v !== null && v !== undefined))
+      : undefined;
 
     const taxRateSetting = await this.prisma.systemSetting.findUnique({ where: { key: 'tax_rate' } });
     const taxRate = parseFloat(taxRateSetting?.value || '0') / 100;
@@ -204,14 +181,15 @@ export class QuotesService {
         quoteNumber,
         customerId,
         source: 'CUSTOMER',
-        notes: dto.notes || null,
+        // Awaiting staff review; customerAccept refuses it until it is SENT.
+        status: 'DRAFT',
+        notes: input.notes,
         validUntil,
         subtotal: total,
         tax,
         total: total + tax,
-        // JSON round-trip produces a plain object Prisma's InputJsonValue accepts
-        gcodeMetadata: dto.analysis?.slicer ? JSON.parse(JSON.stringify(dto.analysis)) : undefined,
-        stlMetadata: dto.analysis && !dto.analysis.slicer ? JSON.parse(JSON.stringify(dto.analysis)) : undefined,
+        gcodeMetadata: analysis?.slicer ? metadata : undefined,
+        stlMetadata: analysis && !analysis.slicer ? metadata : undefined,
         items: { create: items },
       },
       select: CUSTOMER_QUOTE_SELECT,
@@ -242,6 +220,7 @@ export class QuotesService {
           createdAt: true,
           gcodeMetadata: true, // keep for customer review
           notes: true,
+          source: true, // the portal hides Accept on a CUSTOMER request still in DRAFT
           items: {
             select: {
               id: true,
@@ -264,6 +243,11 @@ export class QuotesService {
     if (!quote || quote.customerId !== customerId) throw new NotFoundException('Quote not found');
     if (quote.status !== 'SENT' && quote.status !== 'DRAFT') {
       throw new BadRequestException('Quote cannot be accepted in its current status');
+    }
+    // A request the customer priced themselves (their own estimate) is not an
+    // offer until staff have reviewed it and sent it.
+    if (quote.source === 'CUSTOMER' && quote.status === 'DRAFT') {
+      throw new BadRequestException('This quote is still being reviewed. You can accept it once we send it to you.');
     }
     if (quote.validUntil && quote.validUntil < new Date()) {
       throw new BadRequestException('Quote has expired');
