@@ -160,7 +160,21 @@ export class FakeTable {
   relations: Record<string, (row: Row, select: any) => any> = {};
 }
 
+/** `/* lock:Product:UPDATE *\/ … WHERE id = ANY($1)` from product-locks.ts → { mode, ids }, else null. */
+function lockStatement(args: any[]): { table: string; mode: string; ids: string[] } | null {
+  const sql = args[0];
+  const m = typeof sql?.sql === 'string' ? /lock:(\w+):(\w+)/.exec(sql.sql) : null;
+  return m ? { table: m[1], mode: m[2], ids: sql.values?.[0] ?? [] } : null;
+}
+
 export function photoPrisma() {
+  const TABLES = ['product', 'productImage', 'attachment', 'productComponent', 'plateLayout', 'jobPlate', 'systemSetting'];
+  /** Tail of each row lock's wait queue: a transaction holds its locks until it ends. */
+  const lockQueue = new Map<string, Promise<void>>();
+  const snapshot = () => TABLES.map((t) => (db as any)[t].rows.map((r: Row) => ({ ...r })));
+  const lockedRows = (l: { table: string; ids: string[] }) =>
+    l.table === 'Product' ? db.product.rows.filter((r) => l.ids.includes(r.id)).map((r) => ({ id: r.id, name: r.name })) : [];
+
   const db = {
     product: new FakeTable('prod'),
     productImage: new FakeTable('img', () => ({ sortOrder: 0, legacyAttachmentId: null, uploadedById: null })),
@@ -169,18 +183,59 @@ export function photoPrisma() {
     plateLayout: new FakeTable('lay', () => ({ attachmentId: null })),
     jobPlate: new FakeTable('jp', () => ({ attachmentId: null })),
     systemSetting: new FakeTable('set'),
-    /** Rolls back every table when the callback throws. */
+    /** Every row lock taken, in order: { table, mode, ids }. */
+    locks: [] as Array<{ table: string; mode: string; ids: string[] }>,
+    /**
+     * Rolls back every table when the callback throws. Row locks taken through
+     * the transaction's `$queryRaw` are held until it ends, so two transactions
+     * locking the same row run one after the other. A transaction that had to
+     * wait rolls back to what it found once it got the lock (every service here
+     * takes its locks before its first write).
+     */
     $transaction: async (fn: (tx: any) => Promise<any>) => {
-      const tables = ['product', 'productImage', 'attachment', 'productComponent', 'plateLayout', 'jobPlate', 'systemSetting'];
-      const snap = tables.map((t) => (db as any)[t].rows.map((r: Row) => ({ ...r })));
+      let snap = snapshot();
+      const held = new Map<string, () => void>();
+      const tx = Object.create(db);
+      tx.$queryRaw = async (...args: any[]) => {
+        const l = lockStatement(args);
+        if (!l) return db.$queryRaw(...args);
+        db.locks.push(l);
+        for (const id of l.ids) {
+          const key = `${l.table}:${id}`;
+          if (held.has(key)) continue;
+          const prev = lockQueue.get(key);
+          let release!: () => void;
+          const mine = new Promise<void>((r) => (release = r));
+          const tail = (prev ?? Promise.resolve()).then(() => mine);
+          lockQueue.set(key, tail);
+          held.set(key, () => {
+            release();
+            if (lockQueue.get(key) === tail) lockQueue.delete(key);
+          });
+          if (prev) {
+            await prev;
+            snap = snapshot();
+          }
+        }
+        return lockedRows(l);
+      };
       try {
-        return await fn(db);
+        return await fn(tx);
       } catch (e) {
-        tables.forEach((t, i) => ((db as any)[t].rows = snap[i]));
+        TABLES.forEach((t, i) => ((db as any)[t].rows = snap[i]));
         throw e;
+      } finally {
+        for (const release of held.values()) release();
       }
     },
-    $queryRaw: async (..._a: any[]) => [{ value: 'lease' }],
+    $queryRaw: async (...args: any[]): Promise<any[]> => {
+      const l = lockStatement(args);
+      if (l) {
+        db.locks.push(l);
+        return lockedRows(l);
+      }
+      return [{ value: 'lease' }];
+    },
     $executeRaw: async (..._a: any[]) => 1,
   };
   db.productImage.relations.product = (row, select) => {

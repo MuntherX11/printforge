@@ -97,6 +97,45 @@ describe('ProductImagesService', () => {
       expect(photoFiles()).toHaveLength(30);
     });
 
+    it('locks the product row before the in-transaction count', async () => {
+      await svc.upload('p1', [file('a.png', makePng({ width: 2, height: 2 }))]);
+      expect(prisma.locks).toEqual([{ table: 'Product', mode: 'UPDATE', ids: ['p1'] }]);
+    });
+
+    it('two concurrent uploads cannot pass 30 together', async () => {
+      const five = (tag: string) => Array.from({ length: 5 }, (_, j) => file(`${tag}${j}.png`, makePng({ width: 2, height: 2 })));
+      for (const tag of ['a', 'b', 'c', 'd', 'e']) await svc.upload('p1', five(tag));
+      expect(prisma.productImage.rows).toHaveLength(25);
+      // A slow database: each count returns what it read only once the other
+      // upload has counted too (or after 100 ms, when the other is blocked).
+      const realCount = prisma.productImage.count.bind(prisma.productImage);
+      const waiting: Array<() => void> = [];
+      jest.spyOn(prisma.productImage, 'count').mockImplementation(async (args: any) => {
+        const n = await realCount(args);
+        await new Promise<void>((resolve) => {
+          waiting.push(resolve);
+          if (waiting.length >= 2) waiting.splice(0).forEach((r) => r());
+          else setTimeout(resolve, 100);
+        });
+        return n;
+      });
+      // Both pass the early check (25 + 5); only one may commit.
+      const results = await Promise.allSettled([svc.upload('p1', five('x')), svc.upload('p1', five('y'))]);
+      expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')!;
+      expect(rejected.reason.message).toBe('A product can have at most 30 photos');
+      expect(prisma.productImage.rows).toHaveLength(30);
+      expect(new Set(prisma.productImage.rows.map((r) => r.sortOrder)).size).toBe(30);
+      expect(photoFiles().sort()).toEqual(prisma.productImage.rows.map((r) => r.storageKey).sort());
+    });
+
+    it('a product deleted after the early checks → 404 and no files left', async () => {
+      jest.spyOn(prisma.product, 'findUnique').mockResolvedValueOnce({ id: 'gone' });
+      await expect(svc.upload('gone', [file('a.png', makePng({ width: 2, height: 2 }))])).rejects.toThrow(NotFoundException);
+      expect(prisma.productImage.rows).toHaveLength(0);
+      expect(photoFiles()).toHaveLength(0);
+    });
+
     it('rejects more than 10 files per request and an empty request', async () => {
       await expect(
         svc.upload('p1', Array.from({ length: 11 }, (_, j) => file(`${j}.png`, makePng({ width: 2, height: 2 })))),
@@ -139,6 +178,21 @@ describe('ProductImagesService', () => {
       const served = await svc.resolveForServe('p1', row.id, { userType: 'customer', isApproved: true });
       expect(has(fs.readFileSync(served.absPath), 'GPS')).toBe(false);
     });
+
+    it('stores nothing after the JPEG EOI: an appended secondary image with GPS and a trailer are gone', async () => {
+      const primary = makeJpeg({ width: 100, height: 50 });
+      const src = Buffer.concat([
+        primary,
+        makeJpeg({ width: 20, height: 10, exif: true }),
+        Buffer.from('MotionPhoto_Data Image_UTC_Data +23.5880+058.3829', 'latin1'),
+      ]);
+      await svc.upload('p1', [file('phone.jpg', src)]);
+      const row = prisma.productImage.rows[0];
+      const stored = fs.readFileSync(imagePathForKey(row.storageKey)!);
+      for (const s of ['GPS', 'Exif\0\0', 'Image_UTC_Data', '+23.5880']) expect(has(stored, s)).toBe(false);
+      expect(stored.equals(primary)).toBe(true);
+      expect(row.sizeBytes).toBe(primary.length);
+    });
   });
 
   describe('sanitizeImageName', () => {
@@ -166,6 +220,12 @@ describe('ProductImagesService', () => {
       const out = await svc.reorder('p1', { imageIds: [ids[2], ids[0], ids[1]] });
       expect(out.map((x) => x.id)).toEqual([ids[2], ids[0], ids[1]]);
       expect(out[0].isCover).toBe(true);
+    });
+
+    it('locks the product row like G2 does', async () => {
+      prisma.locks.length = 0;
+      await svc.reorder('p1', { imageIds: [ids[1], ids[0], ids[2]] });
+      expect(prisma.locks).toEqual([{ table: 'Product', mode: 'UPDATE', ids: ['p1'] }]);
     });
 
     it('requires the exact id set', async () => {
