@@ -120,6 +120,17 @@ describe('colourOffered (§3.1 rule 8)', () => {
     expect(colourOffered(ctx, OPT.large, OPT.red, 'CUSTOMER')).toBe(true);
     expect(colourOffered(ctx, OPT.large, OPT.blue, 'CUSTOMER')).toBe(true);
   });
+  it('an inactive colour or an inactive product is offered to nobody (a colour is sellable only when both are active)', () => {
+    const inactiveRed = sardine((r) => { opt(r, OPT.red).isActive = false; });
+    for (const a of ['CUSTOMER', 'STAFF'] as const) {
+      expect(colourOffered(inactiveRed, OPT.large, OPT.red, a)).toBe(false);
+      expect(colourOffered(inactiveRed, null, OPT.red, a)).toBe(false);
+      expect(colourOffered(inactiveRed, OPT.large, OPT.blue, a)).toBe(true);
+    }
+    const inactiveProduct = sardine((r) => { r.isActive = false; });
+    expect(colourOffered(inactiveProduct, OPT.large, OPT.blue, 'CUSTOMER')).toBe(false);
+    expect(colourOffered(inactiveProduct, OPT.large, OPT.blue, 'STAFF')).toBe(false);
+  });
 });
 
 describe('effectiveOptions (§3.2)', () => {

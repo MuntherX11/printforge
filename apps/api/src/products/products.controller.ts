@@ -65,8 +65,10 @@ export class ProductsController {
     return this.products.catalogDetail(id);
   }
 
+  /** Creates and reprices products by SKU, so it is a write like P6: ADMIN or OPERATOR. */
   @Post('upload-bom')
-  @UseGuards(StaffGuard)
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
   async uploadBom(@UploadedFile() file: any) {
     if (!file) throw new BadRequestException('No file uploaded');

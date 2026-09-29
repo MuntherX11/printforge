@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { ComponentDetail, Problem } from '@printforge/types';
+import { round3 } from '../catalog-core/cost-engine';
 import { OpenLinesImpactService, type OpenLineImpact } from '../catalog-core/open-lines-impact.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { baseColourKeyOf, isMultiColourComponent, ownSlotsOf, parseColourKey } from '../stock-ledger/colour-key';
@@ -30,6 +31,29 @@ export function linkAfter(current: { colourSlotId: string | null; colourFixed: b
 
 const linkChanged = (cur: { colourSlotId: string | null; colourFixed: boolean | null }, next: Link | null) =>
   !!next && (next.colourSlotId !== (cur.colourSlotId ?? null) || (next.colourFixed === true) !== (cur.colourFixed === true));
+
+/**
+ * A multicolour part's per-unit grams are the sum of its colours'
+ * `ComponentMaterial.gramsUsed` (§3.2), so a P10 `gramsUsed` change on one is
+ * split across its colours in their current proportions (an equal split when
+ * they sum to 0), like M4 does for layout slots. Rounded to 0.001 g; the
+ * rounding remainder goes on the heaviest colour so the colours sum to `total`.
+ */
+export function rescaleSlotGrams(slots: Array<{ colorIndex: number; gramsUsed: number }>, total: number): Array<{ colorIndex: number; gramsUsed: number }> {
+  if (!slots.length) return [];
+  const weight = (g: number) => (Number.isFinite(g) && g > 0 ? g : 0);
+  const sum = slots.reduce((s, m) => s + weight(m.gramsUsed), 0);
+  const out = slots.map((m) => ({
+    colorIndex: m.colorIndex,
+    gramsUsed: round3(sum > 0 ? (total * weight(m.gramsUsed)) / sum : total / slots.length),
+  }));
+  const rest = round3(total - out.reduce((s, x) => s + x.gramsUsed, 0));
+  if (rest !== 0) {
+    const heaviest = out.reduce((a, b) => (b.gramsUsed > a.gramsUsed ? b : a));
+    heaviest.gramsUsed = round3(heaviest.gramsUsed + rest);
+  }
+  return out;
+}
 
 type ComponentResponse = ComponentDetail & { warnings: Problem[]; impact: OpenLineImpact[] };
 
@@ -135,6 +159,13 @@ export class ProductComponentsService {
       if (input.gramsUsed !== undefined || input.printMinutes !== undefined) data.perUnitEstimatedFromLayoutId = null;
       if (link) Object.assign(data, link);
       if (Object.keys(data).length) await tx.productComponent.update({ where: { id: componentId }, data });
+      if (multi && input.gramsUsed !== undefined) {
+        // The resolver and cost engine price a multicolour part from its colours' grams (§3.2).
+        const mats = await tx.componentMaterial.findMany({ where: { componentId }, select: { colorIndex: true, gramsUsed: true } });
+        for (const s of rescaleSlotGrams(mats, input.gramsUsed)) {
+          await tx.componentMaterial.updateMany({ where: { componentId, colorIndex: s.colorIndex }, data: { gramsUsed: s.gramsUsed } });
+        }
+      }
       if (materialChanged) {
         const oldKey = baseColourKeyOf(comp);
         const newKey = baseColourKeyOf({ ...comp, materialId: input.materialId! });

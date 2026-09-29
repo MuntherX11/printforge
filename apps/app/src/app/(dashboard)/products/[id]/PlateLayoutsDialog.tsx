@@ -11,7 +11,7 @@ import { stageLargeFile } from '@/lib/chunked-upload';
 import { formatGrams, formatMinutes } from '@/lib/product-format';
 import type { ApiGcodeAnalysis, ComponentDetail, PlateLayoutCreateResult, ProductDetail } from '@/lib/types/api';
 import { LinkButton, Toggle, errorText } from './options-ui';
-import { parseDecimal, parseWhole, vsSingle } from './bom-model';
+import { componentGrams, parseDecimal, parseWhole, vsSingle } from './bom-model';
 
 interface Props {
   product: ProductDetail;
@@ -118,7 +118,7 @@ export function PlateLayoutsDialog({ product, component: c, open, canEdit, onClo
       <div className="max-h-[75vh] space-y-4 overflow-y-auto">
         <p className="text-sm text-gray-600 dark:text-gray-400">{INTRO}</p>
         {layouts.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No layouts yet — jobs print single units ({formatMinutes(c.printMinutes)}, {formatGrams(c.gramsUsed)} each).</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">No layouts yet — jobs print single units ({formatMinutes(c.printMinutes)}, {formatGrams(componentGrams(c))} each).</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

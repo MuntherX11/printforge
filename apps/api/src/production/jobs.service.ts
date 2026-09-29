@@ -11,6 +11,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { CostingService } from '../costing/costing.service';
+import { STAFF_CUSTOMER_SELECT } from '../orders/orders.service';
 import { lockOptions, TX_OPTS } from '../products/product-locks';
 import { SettingsService } from '../settings/settings.service';
 import { JobCompletionService } from '../stock-ledger/job-completion.service';
@@ -181,7 +182,7 @@ export class JobsService {
           sizeOptionId,
           colourOptionId,
           variantId: sizeOptionId ?? colourOptionId,
-          printerId: dto.printerId ?? config?.product.defaultPrinterId ?? null,
+          printerId: dto.printerId !== undefined ? dto.printerId : config?.product.defaultPrinterId ?? null,
           assignedToId: dto.assignedToId ?? null,
           orderId: dto.orderId ?? null,
           orderItemId: dto.orderItemId ?? null,
@@ -404,7 +405,7 @@ export class JobsService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { customer: true },
+      include: { customer: { select: STAFF_CUSTOMER_SELECT } },
     });
     if (!order) return;
 

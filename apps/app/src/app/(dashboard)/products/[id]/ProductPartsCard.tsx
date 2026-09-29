@@ -160,23 +160,26 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
             {lines.map(line => {
               const isLow = line.part.reorderPoint > 0 && line.part.stockQty <= line.part.reorderPoint;
               const busy = busyPartId === line.partId;
+              // P21 refuses any change to an inactive part's line; it can only be removed.
+              const locked = !line.part.isActive;
+              const lockedHint = locked ? `${line.part.name} is inactive — reactivate it in the catalog to change the quantity, or remove it` : undefined;
               return (
                 <TableRow key={line.id}>
                   <TableCell>
                     <div className="font-medium dark:text-gray-100">{line.part.name}</div>
                     {line.part.sku && <div className="font-mono text-xs text-gray-400">{line.part.sku}</div>}
-                    {!line.part.isActive && <div className="text-xs text-amber-600 dark:text-amber-400">Inactive in the catalog</div>}
+                    {!line.part.isActive && <div className="text-xs text-amber-600 dark:text-amber-400">Inactive in the catalog — reactivate it to change the quantity</div>}
                   </TableCell>
                   <TableCell>
                     {canEdit ? (
                       <div className="inline-flex items-center gap-1">
-                        <Button variant="outline" size="sm" className="px-2" aria-label={`One fewer ${line.part.name}`}
-                          disabled={busy || line.quantity <= 1} onClick={() => void setQty(line, line.quantity - 1)}>
+                        <Button variant="outline" size="sm" className="px-2" aria-label={`One fewer ${line.part.name}`} title={lockedHint}
+                          disabled={busy || locked || line.quantity <= 1} onClick={() => void setQty(line, line.quantity - 1)}>
                           <Minus className="h-3.5 w-3.5" aria-hidden="true" />
                         </Button>
                         <span className="w-14 text-center tabular-nums">{line.quantity} pcs</span>
-                        <Button variant="outline" size="sm" className="px-2" aria-label={`One more ${line.part.name}`}
-                          disabled={busy || line.quantity >= MAX_QTY} onClick={() => void setQty(line, line.quantity + 1)}>
+                        <Button variant="outline" size="sm" className="px-2" aria-label={`One more ${line.part.name}`} title={lockedHint}
+                          disabled={busy || locked || line.quantity >= MAX_QTY} onClick={() => void setQty(line, line.quantity + 1)}>
                           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                         </Button>
                       </div>

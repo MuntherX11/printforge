@@ -58,12 +58,14 @@ export function isExcluded(colour: OptionRow, sizeOptionId: string | null): bool
 
 /**
  * Is `colour` offered on `size` to `audience` (§3.1 rule 8)? The standard colour
- * (null) is always offered to staff, and to customers per rule 7.
+ * (null) is always offered to staff, and to customers per rule 7. A real colour
+ * must be sellable first: `colour.isActive && product.isActive`.
  */
 export function colourOffered(ctx: PairContext, sizeOptionId: string | null, colourOptionId: string | null, audience: Audience): boolean {
   if (colourOptionId === null) return standardColourSellable(ctx, audience);
   const colour = ctx.config.options.find((o) => o.id === colourOptionId);
   if (!colour) return false;
+  if (!colour.isActive || !ctx.config.product.isActive) return false;
   if (isExcluded(colour, sizeOptionId)) return false;
   if (audience === 'STAFF') return true;
   const codes = ctx.colourWarningCodes(sizeOptionId, colourOptionId);

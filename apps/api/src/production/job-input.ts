@@ -85,7 +85,8 @@ export interface CreateJobInput {
   variantId?: string;
   sizeOptionId?: string | null;
   colourOptionId?: string | null;
-  printerId?: string;
+  /** null = explicitly no printer; absent = the product's pricing printer. */
+  printerId?: string | null;
   assignedToId?: string;
   orderId?: string;
   orderItemId?: string;
@@ -121,7 +122,8 @@ export function parseCreateJob(raw: unknown): CreateJobInput {
     variantId: optionalId(b.variantId, 'variantId'),
     sizeOptionId: nullableId(b.sizeOptionId, 'sizeOptionId'),
     colourOptionId: nullableId(b.colourOptionId, 'colourOptionId'),
-    printerId: optionalId(b.printerId, 'printerId'),
+    // Only an explicit null means "no printer"; '' stays "not chosen" for older clients.
+    printerId: b.printerId === null ? null : optionalId(b.printerId, 'printerId'),
     assignedToId: optionalId(b.assignedToId, 'assignedToId'),
     orderId,
     orderItemId: optionalId(b.orderItemId, 'orderItemId'),

@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { notFound } from 'next/navigation';
+import { PLANNABLE_ORDER_STATUSES } from '@printforge/types';
 import { AlertTriangle, CheckCircle, Factory, FileDown } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { LinePriceHint } from '@/components/pricing/LinePriceHint';
@@ -175,7 +176,10 @@ export default function OrderDetailPage() {
             className="w-40"
             disabled={updating}
           />
-          {['CONFIRMED', 'PENDING'].includes(order.status) && (
+          {/* Every status J4/J5 plan, IN_PRODUCTION too: J5 moves a confirmed
+              order there on its first job, and it is planned again after a
+              line colour change or for lines a partial plan left open. */}
+          {canEdit && (PLANNABLE_ORDER_STATUSES as readonly string[]).includes(order.status) && (
             <Button onClick={loadPlan} disabled={planLoading}>
               <Factory className="h-4 w-4 mr-2" /> {planLoading ? 'Loading...' : 'Plan Production'}
             </Button>

@@ -2,7 +2,9 @@ import { Injectable, NotFoundException, BadRequestException, Optional } from '@n
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateExpenseDto, CreateExpenseCategoryDto } from '@printforge/types';
 import { requiredNumber } from '../common/utils/validate-number';
+import { round3 } from '../catalog-core/cost-engine';
 import { AccountsService } from './accounts.service';
+import { EXPENSE_AMOUNT, parseExpensePatch } from './expense-input';
 
 @Injectable()
 export class ExpensesService {
@@ -23,7 +25,7 @@ export class ExpensesService {
   }
 
   async create(dto: CreateExpenseDto & { accountId?: string }) {
-    const amount = requiredNumber(dto.amount, 'amount', { min: 0, max: 100_000_000 });
+    const amount = requiredNumber(dto.amount, 'amount', EXPENSE_AMOUNT);
     const date = new Date(dto.date);
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
 
@@ -74,18 +76,57 @@ export class ExpensesService {
     });
   }
 
-  async update(id: string, data: Partial<CreateExpenseDto>) {
-    const exists = await this.prisma.expense.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Expense not found');
-
-    return this.prisma.expense.update({
-      where: { id },
-      data: {
-        ...data,
-        date: data.date ? new Date(data.date) : undefined,
-      } as any,
-      include: { category: true },
+  /**
+   * PATCH /accounting/expenses/:id. The body goes through parseExpensePatch
+   * (the expense's own columns only). When amount or accountId changes, the
+   * ledger is brought back in line in the same transaction, so the account
+   * balance and its transactions still agree with the expense.
+   */
+  async update(id: string, body: unknown) {
+    const data = parseExpensePatch(body);
+    return this.prisma.$transaction(async (tx) => {
+      const exists = await tx.expense.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) throw new NotFoundException('Expense not found');
+      const expense = await tx.expense.update({ where: { id }, data, include: { category: true } });
+      if (this.accounts && (data.amount !== undefined || data.accountId !== undefined)) {
+        await this.repost(tx, expense);
+      }
+      return expense;
     });
+  }
+
+  /**
+   * Make the expense's ledger entries net to -amount on its account (and to 0
+   * on any account it used to name), posting only the difference through
+   * AccountsService.post so each balance step has its transaction. An expense
+   * with no account, or an amount of 0, nets to nothing.
+   */
+  private async repost(
+    tx: any,
+    expense: { id: string; amount: number; accountId: string | null; description: string; category?: { name?: string | null } | null },
+  ) {
+    const posted: Array<{ accountId: string; amount: number }> = await tx.accountTransaction.findMany({
+      where: { expenseId: expense.id },
+      select: { accountId: true, amount: true },
+    });
+    const have = new Map<string, number>();
+    for (const t of posted) have.set(t.accountId, round3((have.get(t.accountId) ?? 0) + t.amount));
+    const want = new Map<string, number>();
+    if (expense.accountId && expense.amount > 0) want.set(expense.accountId, round3(-expense.amount));
+
+    const label = `${expense.category?.name ? expense.category.name + ' — ' : ''}${expense.description}`;
+    for (const accountId of new Set([...have.keys(), ...want.keys()])) {
+      const delta = round3((want.get(accountId) ?? 0) - (have.get(accountId) ?? 0));
+      if (delta === 0) continue;
+      await this.accounts!.post({
+        tx,
+        accountId,
+        amount: delta,
+        type: 'ADJUSTMENT',
+        description: `Expense corrected: ${label}`,
+        expenseId: expense.id,
+      });
+    }
   }
 
   async remove(id: string) {

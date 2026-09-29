@@ -101,6 +101,9 @@ export function sendImageFile(res: Response, absPath: string, mime: string): voi
     { dotfiles: 'deny', cacheControl: false, etag: true, lastModified: true },
     (err) => {
       if (err && !res.headersSent) {
+        // res.json keeps a Content-Type that is already set, so the image type
+        // must go first or the JSON body is labelled image/*.
+        res.removeHeader('Content-Type');
         res.removeHeader('Content-Disposition');
         res.status(404).json({ success: false, error: IMAGE_NOT_FOUND, statusCode: 404 });
       }

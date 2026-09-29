@@ -125,6 +125,17 @@ describe('J1 create: pair, linkage, plates, lines (§3.7, §7.1 item 17)', () =>
     const h2 = productionHarness([bare]);
     await expectStatus(h2.jobs.create({ productId: BOX_ID, quantityToProduce: 3 }), 400, '"Box" has no sliced data');
   });
+
+  it('printer: absent → the pricing printer; explicit null → no printer ("assign later")', async () => {
+    const h = box({ only12: true });
+    const byDefault: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 12 });
+    expect(jobRow(h, byDefault.id).printerId).toBe('pr-1');
+    const unassigned: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 12, printerId: null });
+    expect(jobRow(h, unassigned.id).printerId).toBeNull();
+    expect(parseCreateJob({ productId: 'p', printerId: null }).printerId).toBeNull();
+    expect(parseCreateJob({ productId: 'p', printerId: '' }).printerId).toBeUndefined();
+    expect(parseCreateJob({ productId: 'p' }).printerId).toBeUndefined();
+  });
 });
 
 // ------------------------------------------------------------ completion
@@ -233,6 +244,27 @@ describe('J6 completion through JobCompletionService (§3.6, §7.1 item 17)', ()
     expect(h.db.t('printer')[0].totalPrintHours).toBe(3);
     expect(h.costing.calculateJobCost).toHaveBeenCalled();
     expect(h.gateway.broadcastNotification).toHaveBeenCalledWith(expect.objectContaining({ title: 'Job Completed' }));
+  });
+
+  it('the order-completed notification reads the customer without passwordHash or refreshToken and still reaches them', async () => {
+    const h = box({ only12: true });
+    h.db.insert('customer', { id: 'cust-1', name: 'Ali', email: 'ali@example.com', phone: '+96890000000', passwordHash: 'secret-hash', refreshToken: 'secret-refresh' });
+    const o = addOrder(h.db, [{ productId: BOX_ID, quantity: 10 }]);
+    o.order.customerId = 'cust-1';
+    const email = { notifyCustomerOrderCompleted: jest.fn(async () => undefined) };
+    const whatsapp = { sendOrderCompleted: jest.fn(async () => undefined) };
+    Object.assign(h.jobs as any, { emailNotifications: email, whatsapp });
+    const findUnique = jest.spyOn(h.db.order, 'findUnique');
+
+    const job: any = await h.jobs.create({ productId: BOX_ID, quantityToProduce: 10, orderId: o.order.id, orderItemId: o.items[0].id });
+    await h.jobs.completeJob(job.id);
+
+    expect(email.notifyCustomerOrderCompleted).toHaveBeenCalledWith('ali@example.com', { orderNumber: o.order.orderNumber });
+    expect(whatsapp.sendOrderCompleted).toHaveBeenCalledWith('+96890000000', expect.objectContaining({ customerName: 'Ali', orderNumber: o.order.orderNumber }));
+    const loaded = await Promise.all(findUnique.mock.results.map((r) => r.value));
+    const withCustomer = loaded.filter((row: any) => row?.customer);
+    expect(withCustomer.some((row: any) => row.customer.email === 'ali@example.com')).toBe(true);
+    expect(withCustomer.flatMap((row: any) => Object.keys(row.customer)).filter((k) => k === 'passwordHash' || k === 'refreshToken')).toEqual([]);
   });
 });
 
@@ -402,6 +434,23 @@ describe('Sardine tin J1 (§3.6.1, §7.1 item 27)', () => {
     expect(Object.keys(identity(h, job.id)).sort()).toEqual([
       `${M.blue}/${M.black}`, `${M.gold}/${M.black}`, `${M.orange}/-`, `${M.white}/-`, `${M.white}/${M.silver}`,
     ].sort());
+  });
+
+  it('(Regular, Blue) with one White spool: both White lines stay PLA White on that spool (no Silver substitute); completion files nothing under Silver', async () => {
+    const h = sardine();
+    const job: any = await h.jobs.create({ productId: PRODUCT_ID, colourOptionId: OPT.blue, quantityToProduce: 10, stockMode: 'BUILD_STOCK' });
+    const white = lines(h, job.id).filter((l: any) => l.plannedMaterialId === M.white);
+    expect(white.map((l: any) => [l.plannedSlicedMaterialId ?? null, l.materialId, l.spoolId]).sort()).toEqual([
+      [M.silver, M.white, `sp-${M.white}`],
+      [null, M.white, `sp-${M.white}`],
+    ].sort());
+    expect(lines(h, job.id).every((l: any) => l.materialId === l.plannedMaterialId)).toBe(true);
+    expect(job.reservation).toMatchObject({ withSpool: 5, short: [] });
+    const done: any = await h.jobs.completeJob(job.id);
+    expect(done.stockCredits.length).toBeGreaterThan(0);
+    // Silver is only ever a sliced-for colour here, never an actual one.
+    expect(done.stockCredits.filter((c: any) => c.colourKey.includes(M.silver))).toEqual([]);
+    expect(spool(h, `sp-${M.silver}`).currentWeight).toBe(5000);
   });
 });
 

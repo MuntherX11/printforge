@@ -4,6 +4,15 @@ import { CreateInvoiceDto, UpdateInvoiceDto, InvoiceStatus } from '@printforge/t
 import { generateNumber } from '../common/utils/number-generator';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
 import { AccountsService } from '../accounting/accounts.service';
+import { STAFF_CUSTOMER_SELECT } from '../orders/orders.service';
+
+/**
+ * An invoice with its order, the order lines and the customer, for the staff
+ * invoice responses and the invoice PDF: never the customer's login secrets.
+ */
+const INVOICE_INCLUDE = {
+  order: { include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } },
+} as const;
 
 @Injectable()
 export class InvoicesService {
@@ -55,7 +64,7 @@ export class InvoicesService {
         issuedAt: new Date(),
         status: 'ISSUED',
       },
-      include: { order: { include: { customer: true, items: true } } },
+      include: INVOICE_INCLUDE,
     });
   }
 
@@ -76,9 +85,7 @@ export class InvoicesService {
   async findOne(id: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id },
-      include: {
-        order: { include: { customer: true, items: true } },
-      },
+      include: INVOICE_INCLUDE,
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     return invoice;
@@ -110,7 +117,7 @@ export class InvoicesService {
       const updated = await tx.invoice.update({
         where: { id },
         data,
-        include: { order: { include: { customer: true, items: true } } },
+        include: INVOICE_INCLUDE,
       });
       if (dto.status === 'PAID' && existing.status !== 'PAID') {
         if (existing.orderId) {

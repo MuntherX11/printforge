@@ -68,6 +68,15 @@ export enum OrderStatus {
   CANCELLED = 'CANCELLED',
 }
 
+/**
+ * Orders production can be planned for (J4/J5, spec §4.4). IN_PRODUCTION is
+ * one of them: J5 moves a CONFIRMED order there on its first job, and the order
+ * is planned again after a line colour change (§3.6.1) or for lines a partial
+ * plan left open. A cancelled order holds no allocation and a finished one has
+ * nothing left to plan.
+ */
+export const PLANNABLE_ORDER_STATUSES: ReadonlyArray<`${OrderStatus}`> = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION'];
+
 export enum InvoiceStatus {
   DRAFT = 'DRAFT',
   ISSUED = 'ISSUED',
@@ -1129,7 +1138,8 @@ export interface SizeOptionDetail {
   components: ComponentDetail[];
   priceTiers: PriceTierRow[];
   setup: { complete: boolean; problems: Problem[] };
-  kindChange: { allowed: boolean; blockers: string[] };
+  /** rewrites = orders, quotes and jobs using it as their size with no colour, which O7 moves to the colour axis on SIZE→COLOUR. */
+  kindChange: { allowed: boolean; blockers: string[]; rewrites: number };
 }
 
 export interface ColourOptionDetail {
@@ -1369,12 +1379,16 @@ export interface Readiness {
     label: string;
     colorHex: string | null;
     slicedMaterialId: string | null;
+    /** this planned-identity line's grams */
     gramsNeeded: number;
+    /** Σ gramsNeeded of every line of this material (one filament can be split over several lines) */
+    materialGramsNeeded: number;
     totalStock: number;
     reserved: number;
     free: number;
-    /** "after open orders" */
+    /** "after open orders": free >= materialGramsNeeded */
     hasEnough: boolean;
+    /** effectiveRemaining nets the grams of earlier lines that share the spool */
     suggestedSpool: { id: string; pfid: string | null; location: string | null; effectiveRemaining: number } | null;
     /** "spool to use" */
     spoolHasEnough: boolean;

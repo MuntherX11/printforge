@@ -62,9 +62,13 @@ export class MoonrakerController {
 
   /**
    * Control a print: pause, resume, or cancel.
-   * Routes to the correct bridge based on connectionType.
+   * Routes to the correct bridge based on connectionType. A physical action on
+   * a live print, so ADMIN or OPERATOR like G-code above; VIEWER and ACCOUNTING
+   * can watch printers but not stop them.
    */
   @Post('control/:printerId/:action')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   async controlPrint(
     @Param('printerId') printerId: string,
     @Param('action') action: string,

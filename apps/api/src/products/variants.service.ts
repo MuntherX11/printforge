@@ -25,6 +25,27 @@ const ONLY_COLOURS = 'Only colours assign filaments — sizes have their own com
 const NEEDS_COMPONENTS = "Add the product's components before adding colours";
 const kindWord = (k: string, plural = false) => (k === 'SIZE' ? (plural ? 'sizes' : 'size') : plural ? 'colours' : 'colour');
 const money = (n: number) => n.toFixed(3);
+const notNeeded = (k: string) => new BadRequestException(`keepStandard isn't needed for ${kindWord(k, true)}`);
+
+type Switches = { baseOptionSellable: boolean | null; standardColourSellable: boolean | null };
+
+/**
+ * §3.1 rules 6 and 7: the `Keep selling …` step belongs to an axis that no
+ * active option opens yet and whose switch is undecided. Only ACTIVE options
+ * count, as in O7 and in the customer rules: while every option of a kind is
+ * inactive, customers buy the standard option (§3.10), so the next option of
+ * that kind is the one that would take it out of the shop.
+ */
+function axisUndecided(product: Switches, kind: 'SIZE' | 'COLOUR', sameKind: Array<{ isActive: boolean }>): boolean {
+  const sellable = kind === 'COLOUR' ? product.standardColourSellable : product.baseOptionSellable;
+  return sellable === null && !sameKind.some((o) => o.isActive);
+}
+
+function keepStandardData(kind: 'SIZE' | 'COLOUR', keep: { label: string; sellInShop: boolean }) {
+  return kind === 'COLOUR'
+    ? { standardColourLabel: keep.label, standardColourSellable: keep.sellInShop }
+    : { baseOptionLabel: keep.label, baseOptionSellable: keep.sellInShop };
+}
 
 @Injectable()
 export class VariantsService {
@@ -42,25 +63,24 @@ export class VariantsService {
     return v as any;
   }
 
-  /** O1. */
+  /**
+   * O1. `keepStandard` (optional here; OptionDialog makes it a required step)
+   * is accepted while the axis is undecided — no active option of the kind and
+   * its switch null — and rejected otherwise (§3.1 rules 6 and 7).
+   */
   async create(productId: string, body: unknown) {
     const input = parseOptionCreate(body);
     await assertSkuFree(this.prisma, input.sku);
     const option = await this.prisma.$transaction(async (tx: any) => {
       if (!(await lockProduct(tx, productId, 'UPDATE'))) throw new NotFoundException('Product not found');
       const product = await tx.product.findUnique({ where: { id: productId }, select: { baseOptionSellable: true, standardColourSellable: true } });
-      const sameKind = await tx.productVariant.findMany({ where: { productId, kind: input.kind }, select: { sortOrder: true } });
+      // Inactive options count towards the cap (rule 1), not towards the keep-selling step (rules 6 and 7).
+      const sameKind = await tx.productVariant.findMany({ where: { productId, kind: input.kind }, select: { sortOrder: true, isActive: true } });
       if (sameKind.length >= MAX_PER_KIND) throw new BadRequestException(`A product can have at most ${MAX_PER_KIND} ${kindWord(input.kind, true)}`);
       if (input.kind === 'COLOUR' && (await tx.productComponent.count({ where: { productId } })) === 0) throw new BadRequestException(NEEDS_COMPONENTS);
       if (input.keepStandard) {
-        const axisOpen = input.kind === 'COLOUR' ? product.standardColourSellable === null : product.baseOptionSellable === null;
-        if (sameKind.length > 0 || !axisOpen) throw new BadRequestException(`keepStandard isn't needed for ${kindWord(input.kind, true)}`);
-        await tx.product.update({
-          where: { id: productId },
-          data: input.kind === 'COLOUR'
-            ? { standardColourLabel: input.keepStandard.label, standardColourSellable: input.keepStandard.sellInShop }
-            : { baseOptionLabel: input.keepStandard.label, baseOptionSellable: input.keepStandard.sellInShop },
-        });
+        if (!axisUndecided(product, input.kind, sameKind)) throw notNeeded(input.kind);
+        await tx.product.update({ where: { id: productId }, data: keepStandardData(input.kind, input.keepStandard) });
       }
       const sortOrder = input.sortOrder ?? (sameKind.length ? Math.max(...sameKind.map((s: any) => s.sortOrder)) + 1 : 0);
       return tx.productVariant.create({ data: { productId, name: input.name, sku: input.sku, kind: input.kind, isActive: input.isActive, sortOrder } });
@@ -71,13 +91,30 @@ export class VariantsService {
     return { ...option, warnings };
   }
 
-  /** O2. */
+  /**
+   * O2. `keepStandard` is the O1 step for a re-activation: accepted only when
+   * the patch activates an inactive option on an axis with no active option
+   * whose switch is undecided (§3.1 rules 6 and 7), checked under the option
+   * and product locks (O7's order), 400 otherwise.
+   */
   async update(productId: string, variantId: string, body: unknown) {
-    const input = parseOptionPatch(body);
+    const { keepStandard, ...input } = parseOptionPatch(body);
     await this.owned(productId, variantId);
     if (input.sku) await assertSkuFree(this.prisma, input.sku, { variantId });
-    if (!Object.keys(input).length) return this.owned(productId, variantId);
-    return this.prisma.productVariant.update({ where: { id: variantId }, data: input });
+    if (!keepStandard) {
+      if (!Object.keys(input).length) return this.owned(productId, variantId);
+      return this.prisma.productVariant.update({ where: { id: variantId }, data: input });
+    }
+    return this.prisma.$transaction(async (tx: any) => {
+      const [row] = await lockOptions(tx, [variantId], 'UPDATE');
+      if (!row || row.productId !== productId) throw new NotFoundException('Option not found');
+      if (!(await lockProduct(tx, productId, 'UPDATE'))) throw new NotFoundException('Product not found');
+      const product = await tx.product.findUnique({ where: { id: productId }, select: { baseOptionSellable: true, standardColourSellable: true } });
+      const sameKind = await tx.productVariant.findMany({ where: { productId, kind: row.kind }, select: { isActive: true } });
+      if (row.isActive || input.isActive !== true || !axisUndecided(product, row.kind, sameKind)) throw notNeeded(row.kind);
+      await tx.product.update({ where: { id: productId }, data: keepStandardData(row.kind, keepStandard) });
+      return tx.productVariant.update({ where: { id: variantId }, data: input });
+    }, TX_OPTS);
   }
 
   /** O3. */

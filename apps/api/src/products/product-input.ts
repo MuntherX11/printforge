@@ -296,6 +296,38 @@ export function parsePartLine(raw: unknown): { partId: string; quantity: number 
   return { partId, quantity: q };
 }
 
+/** The cells one Excel BOM row supplies; a number cell that is blank or not a number is null. */
+export interface BomRowCells {
+  name: string | null;
+  sku: string | null;
+  description: string | null;
+  basePrice: number | null;
+  estimatedMinutes: number | null;
+  estimatedGrams: number | null;
+}
+
+export type BomRowInput = Omit<BomRowCells, 'name'> & { name: string };
+
+/**
+ * One row of POST /products/upload-bom (known exception C17: a SKU match still
+ * writes basePrice). The columns were picked by header but written unbounded,
+ * so a negative or Infinity basePrice repriced a product by SKU. Text follows
+ * parseProductCreate; a number outside its bound throws, and the upload reports
+ * it as that row's error.
+ */
+export function parseBomRow(cells: BomRowCells): BomRowInput {
+  const num = (v: number | null, field: string, range: { min: number; max: number }) =>
+    (v === null ? null : requiredNumber(v, field, range));
+  return {
+    name: name(cells.name, 'Product name', 200),
+    sku: cells.sku ? nullableText(cells.sku, 'sku', 64, false) : null,
+    description: cells.description ? nullableText(cells.description, 'description', 2000) : null,
+    basePrice: num(cells.basePrice, 'basePrice', { min: 0, max: 1_000_000 }),
+    estimatedMinutes: num(cells.estimatedMinutes, 'estimatedMinutes', MINUTES),
+    estimatedGrams: num(cells.estimatedGrams, 'estimatedGrams', { min: 0, max: GRAMS.max }),
+  };
+}
+
 // ------------------------------------------------------------------- options
 
 export interface KeepStandardInput { label: string; sellInShop: boolean }
@@ -332,15 +364,25 @@ export function parseOptionCreate(raw: unknown): OptionCreateInput {
   return out;
 }
 
+export interface OptionPatchInput {
+  name?: string;
+  sku?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+  /** Only when the patch re-activates an option on an axis with no active option (§3.1 rules 6 and 7). */
+  keepStandard?: KeepStandardInput;
+}
+
 /** O2. A `kind` key → 400 (§3.1 rule 3); `basePrice`/`estimated*` ignored. */
-export function parseOptionPatch(raw: unknown): { name?: string; sku?: string | null; isActive?: boolean; sortOrder?: number } {
+export function parseOptionPatch(raw: unknown): OptionPatchInput {
   const b = asBody(raw);
   if (has(b, 'kind')) throw new BadRequestException('Change an option between size and colour on the Sizes & colours card');
-  const out: { name?: string; sku?: string | null; isActive?: boolean; sortOrder?: number } = {};
+  const out: OptionPatchInput = {};
   if (has(b, 'name')) out.name = name(b.name, 'Name', 80);
   if (has(b, 'sku')) out.sku = nullableText(b.sku, 'sku', 64, false);
   if (has(b, 'isActive')) out.isActive = bool(b.isActive, 'isActive');
   if (has(b, 'sortOrder')) out.sortOrder = requiredNumber(b.sortOrder, 'sortOrder', SORT_ORDER);
+  if (has(b, 'keepStandard')) out.keepStandard = keepStandard(b.keepStandard, 'keepStandard');
   return out;
 }
 

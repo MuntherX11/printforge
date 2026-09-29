@@ -18,6 +18,9 @@ import {
   sniffImage,
   stripImageMetadata,
 } from '../common/utils/image-sniff';
+// product-locks imports this module's path helpers back; both sides only use
+// the other's exports inside functions, so the cycle is safe.
+import { lockProduct } from './product-locks';
 
 /** §3.11 limits. */
 export const MAX_PHOTOS_PER_PRODUCT = 30;
@@ -209,7 +212,10 @@ export class ProductImagesService {
       }
 
       created = await this.prisma.$transaction(async (tx) => {
-        // Re-count inside the transaction: two concurrent uploads must not pass 30 together.
+        // Lock the product row, then re-count: under READ COMMITTED two concurrent
+        // uploads would otherwise both count the same rows and pass 30 together.
+        // The lock also orders this after a concurrent reorder or product delete.
+        if (!(await lockProduct(tx, productId, 'UPDATE'))) throw new NotFoundException('Product not found');
         const count = await tx.productImage.count({ where: { productId } });
         if (count + prepared.length > MAX_PHOTOS_PER_PRODUCT) {
           throw new BadRequestException(`A product can have at most ${MAX_PHOTOS_PER_PRODUCT} photos`);
@@ -257,6 +263,8 @@ export class ProductImagesService {
     await this.assertProduct(productId);
 
     await this.prisma.$transaction(async (tx) => {
+      // Same product lock as G2, so a concurrent upload can't slip in between the set check and the writes.
+      if (!(await lockProduct(tx, productId, 'UPDATE'))) throw new NotFoundException('Product not found');
       const rows = await tx.productImage.findMany({ where: { productId }, select: { id: true } });
       const current = new Set(rows.map((r) => r.id));
       const sent = new Set(imageIds as string[]);

@@ -129,11 +129,55 @@ export function formatDelta(pct: number): string {
 
 // ------------------------------------------------------ keep-selling step
 
-/** O1: the `Keep selling …` step is required on the first option of a kind while that axis is undecided. */
+/**
+ * No ACTIVE option of this kind and its switch undecided (§3.1 rules 6 and 7).
+ * Inactive options don't count: while every option of a kind is inactive the
+ * shop sells the standard option (§3.10), so the next active one would hide it.
+ */
+function axisUndecided(p: ProductDetail, kind: OptionKind): boolean {
+  const list: Array<{ isActive: boolean }> = kind === 'COLOUR' ? p.colours : p.sizes;
+  const sellable = kind === 'COLOUR' ? p.standardColourSellable : p.baseOptionSellable;
+  return sellable === null && !list.some(o => o.isActive);
+}
+
+/** O1: the `Keep selling …` step is required on the first active option of a kind while that axis is undecided. */
 export function needsKeepStandardOnCreate(p: ProductDetail, kind: OptionKind): boolean {
-  return kind === 'COLOUR'
-    ? p.colours.length === 0 && p.standardColourSellable === null
-    : p.sizes.length === 0 && p.baseOptionSellable === null;
+  return axisUndecided(p, kind);
+}
+
+/** O2: the same step when activating an inactive option on an axis with no active option and an undecided switch. */
+export function needsKeepStandardOnActivate(p: ProductDetail, kind: OptionKind, option: { isActive: boolean }): boolean {
+  return !option.isActive && axisUndecided(p, kind);
+}
+
+/** Texts of the `Keep selling …` step of OptionDialog and the Activate confirm. */
+export function keepStepText(p: ProductDetail, kind: OptionKind, sellInShop: boolean): { intro: string; placeholder: string; note?: string } {
+  if (kind === 'COLOUR') {
+    const filamentNames = standardFilaments(p).map(m => m.name).join(', ');
+    return {
+      intro: `Customers buy this today in ${filamentNames || 'the filaments it was sliced with'}. Keep selling that as a colour named:`,
+      placeholder: 'e.g. Black',
+      note: sellInShop ? undefined : 'Unticked: customers no longer see the as-sliced colour once colours exist. Staff can always order it.',
+    };
+  }
+  return {
+    intro: 'Customers buy this product today. Keep selling the current one as a size named:',
+    placeholder: 'e.g. Regular',
+    note: sellInShop ? undefined : 'Unticked: once sizes exist, customers only see the sizes you add. Staff can still order the current one.',
+  };
+}
+
+/** Prefill of the step's name: the stored label, else the as-sliced colour names. */
+export function keepStepLabel(p: ProductDetail, kind: OptionKind): string {
+  return kind === 'COLOUR' ? suggestedColourLabel(p) : p.baseOptionLabel ?? '';
+}
+
+/** The step's name must be 1–40 characters; null when it is. */
+export function keepStepProblem(kind: OptionKind, label: string): string | null {
+  const l = label.trim();
+  return l.length < 1 || l.length > 40
+    ? `Enter a name (1 to 40 characters) for the ${kind === 'SIZE' ? 'current size' : 'as-sliced colour'}`
+    : null;
 }
 
 export interface KindChange {

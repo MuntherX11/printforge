@@ -70,10 +70,32 @@ export function colourKeyHexes(key: string, materials: Map<string, MaterialLite>
   return key.split('|').map(part => materials.get(part.split(':')[1] ?? '')?.colorHex ?? null);
 }
 
-/** Σ grams and minutes of one product unit, over the scope's components. */
+const round3 = (x: number) => Math.round(x * 1000) / 1000;
+
+/**
+ * Grams per unit the way the server prices it (spec §3.2): a multicolour
+ * part's grams are the sum of its colours' grams, a single-material part's
+ * are its own column.
+ */
+export function componentGrams(c: Pick<ComponentDetail, 'gramsUsed' | 'isMultiColor' | 'materialId' | 'materials'>): number {
+  return isMultiColour(c) ? round3(c.materials.reduce((s, m) => s + m.gramsUsed, 0)) : c.gramsUsed;
+}
+
+/**
+ * The colours' grams after a P10 `gramsUsed` change on a multicolour part:
+ * split in their current proportions (equal split when they sum to 0), as the
+ * server does.
+ */
+export function splitSlotGrams(materials: Array<{ colorIndex: number; gramsUsed: number }>, total: number): Map<number, number> {
+  const weight = (g: number) => (Number.isFinite(g) && g > 0 ? g : 0);
+  const sum = materials.reduce((s, m) => s + weight(m.gramsUsed), 0);
+  return new Map(materials.map(m => [m.colorIndex, sum > 0 ? (total * weight(m.gramsUsed)) / sum : total / materials.length]));
+}
+
+/** Σ grams and minutes of one product unit, over the scope's components (matches the Pricing per-unit stats). */
 export function perProductTotals(components: ComponentDetail[]): { grams: number; minutes: number } {
   return components.reduce(
-    (t, c) => ({ grams: t.grams + c.gramsUsed * c.quantity, minutes: t.minutes + c.printMinutes * c.quantity }),
+    (t, c) => ({ grams: t.grams + componentGrams(c) * c.quantity, minutes: t.minutes + c.printMinutes * c.quantity }),
     { grams: 0, minutes: 0 },
   );
 }

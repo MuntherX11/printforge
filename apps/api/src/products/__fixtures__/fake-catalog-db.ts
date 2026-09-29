@@ -69,6 +69,11 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
     items: many('orderItem', 'orderId'), customer: one('customer', 'customerId'),
     productionJobs: many('productionJob', 'orderId'), invoices: many('invoice', 'orderId'), quote: one('quote', 'quoteId'),
   },
+  // invoices and customers specs
+  invoice: { order: one('order', 'orderId') },
+  customer: { orders: many('order', 'customerId'), quotes: many('quote', 'customerId') },
+  // accounting specs
+  expense: { category: one('expenseCategory', 'categoryId'), account: one('account', 'accountId'), transactions: many('accountTransaction', 'expenseId') },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -92,9 +97,16 @@ const MODELS = [
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
   'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
+  // accounting specs
+  'expense', 'expenseCategory', 'account', 'accountTransaction',
 ];
 
-const LOCK_TABLES: Record<string, string> = { Product: 'product', ProductVariant: 'productVariant', Material: 'material', Spool: 'spool' };
+const LOCK_TABLES: Record<string, string> = {
+  Product: 'product', ProductVariant: 'productVariant', Material: 'material', Spool: 'spool', OrderItem: 'orderItem', QuoteItem: 'quoteItem', Quote: 'quote',
+};
+
+/** Column defaults (`@default` in schema.prisma) that services read back. */
+const DEFAULTS: Record<string, Row> = { order: { status: 'PENDING' } };
 
 function prismaError(code: string, message: string) {
   const e: any = new Error(message);
@@ -288,7 +300,7 @@ export function fakeCatalogDb() {
       count: async (a: Row = {}) => all(a.where).length,
       create: async (a: Row) => {
         const now = new Date();
-        const row: Row = { id: `${model}-${++seq}`, createdAt: now, updatedAt: now, ...structuredClone(a.data) };
+        const row: Row = { id: `${model}-${++seq}`, createdAt: now, updatedAt: now, ...DEFAULTS[model], ...structuredClone(a.data) };
         uniqueGuard(model, row);
         tables[model].push(row);
         return project(model, row, a);
@@ -321,7 +333,7 @@ export function fakeCatalogDb() {
         calls.push(`${model}.delete`);
         const r = find(a.where);
         if (!r) throw prismaError('P2025', `${model} not found`);
-        const out = project(model, r, {});
+        const out = project(model, r, a);
         removeRow(model, r);
         return out;
       },
@@ -368,6 +380,7 @@ export function fakeCatalogDb() {
       case 'setColumnIf': { const c = comp(v[1]); if (!c || c.stockOnHand !== v[2]) return []; c.stockOnHand = v[0]; c.stockConfirmedAt = new Date(); return ret(c.stockOnHand); }
       case 'ensureRow': { if (!rk(v[1], v[2])) tables.componentColourStock.push({ id: `ccs-${++seq}`, componentId: v[1], colourKey: v[2], stockOnHand: 0, updatedAt: new Date() }); return []; }
       case 'setRowIf': { const r = rk(v[1], v[2]); if (!r || r.stockOnHand !== v[3]) return []; r.stockOnHand = v[0]; return ret(v[0]); }
+      case 'lockLine': return tables.orderItem.filter((r) => r.id === v[0]).map((r) => ({ id: r.id }));
     }
     throw new Error(`fake db: unsupported raw query ${text.slice(0, 60)}`);
   }

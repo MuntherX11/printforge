@@ -84,6 +84,74 @@ describe('VariantsService (§7.1 items 14, 33, 35, 41)', () => {
     });
   });
 
+  describe('keep-selling step counts active options only (§3.1 rules 6 and 7, §3.10)', () => {
+    const keep = (label: string, sellInShop = true) => ({ label, sellInShop });
+    /** "Keyring": its one size is a deactivated legacy size with history, so customers buy the standard size today. */
+    const keyring = () => boxWith(option('v-old', 'Old', 'SIZE', { basePrice: 1.1, isActive: false }));
+
+    it('O1: the first ACTIVE size after only inactive ones takes keepStandard, and the standard size stays in the shop', async () => {
+      const h = productsHarness([keyring()]);
+      expect((await h.products.catalogDetail(BOX_ID)).sizes.map((s) => [s.sizeOptionId, s.price])).toEqual([[null, 0.93]]);
+      await h.variants.create(BOX_ID, { name: 'Large', kind: 'SIZE', keepStandard: keep('Regular') });
+      expect(h.db.t('product')[0]).toMatchObject({ baseOptionLabel: 'Regular', baseOptionSellable: true });
+      expect((await h.products.catalogDetail(BOX_ID)).sizes.map((s) => [s.sizeOptionId, s.label])).toEqual([[null, 'Regular']]);
+      // Now an active size exists: the step is over.
+      await expect(h.variants.create(BOX_ID, { name: 'Mini', kind: 'SIZE', keepStandard: keep('Regular') })).rejects.toThrow("keepStandard isn't needed for sizes");
+    });
+
+    it('O1: the first active colour after an inactive colour left by O7 takes keepStandard; the standard colour stays in the shop', async () => {
+      const h = productsHarness([keyring()]);
+      // O7 turns the inactive legacy option into a colour: no active colour results, so no step there.
+      await h.variants.setKinds(BOX_ID, { changes: [{ variantId: 'v-old', kind: 'COLOUR' }] });
+      expect(h.db.t('product')[0].standardColourSellable).toBeNull();
+      await h.variants.create(BOX_ID, { name: 'Blue', kind: 'COLOUR', keepStandard: keep('Black') });
+      expect(h.db.t('product')[0]).toMatchObject({ standardColourLabel: 'Black', standardColourSellable: true });
+      const d = await h.products.catalogDetail(BOX_ID);
+      expect(d.colours.map((c) => [c.colourOptionId, c.label])).toEqual([[null, 'Black']]);
+    });
+
+    it('O1: keepStandard is still rejected, with nothing written, once the switch is decided', async () => {
+      const row = keyring();
+      row.baseOptionSellable = false;
+      const h = productsHarness([row]);
+      await expect(h.variants.create(BOX_ID, { name: 'Large', kind: 'SIZE', keepStandard: keep('Regular') })).rejects.toThrow("keepStandard isn't needed for sizes");
+      expect(h.db.t('productVariant')).toHaveLength(1);
+      expect(h.db.t('product')[0]).toMatchObject({ baseOptionLabel: null, baseOptionSellable: false });
+    });
+
+    it('O2: re-activating the only size takes keepStandard and keeps the standard size in the shop', async () => {
+      const h = productsHarness([keyring()]);
+      const out: any = await h.variants.update(BOX_ID, 'v-old', { isActive: true, keepStandard: keep('Regular') });
+      expect(out).toMatchObject({ id: 'v-old', isActive: true });
+      expect(h.db.t('product')[0]).toMatchObject({ baseOptionLabel: 'Regular', baseOptionSellable: true });
+      expect((await h.products.catalogDetail(BOX_ID)).sizes.map((s) => [s.sizeOptionId, s.price])).toEqual([[null, 0.93], ['v-old', 1.1]]);
+    });
+
+    it('O2: keepStandard without a re-activation, on an active option, beside another active option or a decided switch → 400, nothing written', async () => {
+      const cases: Array<[any, string, Record<string, unknown>]> = [
+        [keyring(), 'v-old', { name: 'Older' }],
+        [keyring(), 'v-old', { isActive: false }],
+        [boxWith(option('v-a', 'A', 'SIZE')), 'v-a', { isActive: true }],
+        [boxWith(option('v-a', 'A', 'SIZE'), option('v-b', 'B', 'SIZE', { isActive: false })), 'v-b', { isActive: true }],
+        [Object.assign(keyring(), { baseOptionSellable: true }), 'v-old', { isActive: true }],
+      ];
+      for (const [row, id, patch] of cases) {
+        const h = productsHarness([row]);
+        const before = JSON.stringify(h.db.tables());
+        await expect(h.variants.update(BOX_ID, id, { ...patch, keepStandard: keep('Regular') })).rejects.toThrow("keepStandard isn't needed for sizes");
+        expect(JSON.stringify(h.db.tables())).toBe(before);
+      }
+    });
+
+    it('O2: keepStandard of an option of another product → 404; a re-activation without it still works', async () => {
+      const h = productsHarness([keyring(), sardineRow()]);
+      expect(await statusOf(h.variants.update(BOX_ID, OPT.large, { isActive: true, keepStandard: keep('Regular') }))).toBe(404);
+      await h.variants.update(BOX_ID, 'v-old', { isActive: true });
+      expect(h.db.t('productVariant').find((v: any) => v.id === 'v-old').isActive).toBe(true);
+      expect(h.db.t('product').find((p: any) => p.id === BOX_ID).baseOptionSellable).toBeNull();
+    });
+  });
+
   describe('O7 reclassification (§3.1 rule 3)', () => {
     it('reclassifies two of three legacy options (one inactive) in one call', async () => {
       const h = productsHarness([legacy(option('v-r', 'Red', 'SIZE', { basePrice: 1.5 }), option('v-b', 'Blue', 'SIZE', { isActive: false }), option('v-s', 'Small', 'SIZE'))]);

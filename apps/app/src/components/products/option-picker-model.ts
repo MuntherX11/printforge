@@ -169,10 +169,10 @@ export function pickerOptionsFromDetail(p: ProductDetail): PickerOptions {
 }
 
 /**
- * From a P2 `/products/active` row (WP10 forms). P2 does not say whether the
- * standard colour is offered to customers, so the staff default colour is the
- * first real colour offered to customers on the size (the standard colour
- * stays in the list).
+ * From a P2 `/products/active` row (WP10 forms). As on the product page, the
+ * standard colour is offered to customers on every customer size while the
+ * shop sells it (`standardColourSellableToCustomers`), so it is then the staff
+ * default colour (rule 10: the first entry customers can buy, standard first).
  */
 export function pickerOptionsFromActive(p: ApiActiveProduct): PickerOptions {
   const activeSizes = [...p.sizes].sort(byOrder);
@@ -184,6 +184,7 @@ export function pickerOptionsFromActive(p: ApiActiveProduct): PickerOptions {
       ]
     : [];
   const staffKeys = hasSizes ? sizes.map(s => s.key) : [STANDARD];
+  const customerKeys = hasSizes ? sizes.filter(s => s.customerSellable).map(s => s.key) : p.baseSellableToCustomers ? [STANDARD] : [];
   const hasColours = p.colours.length > 0;
   if (!hasColours) return { productId: p.id, hasSizes, hasColours, sizes, colours: [] };
   const colours: PickerColour[] = [
@@ -192,7 +193,7 @@ export function pickerOptionsFromActive(p: ApiActiveProduct): PickerOptions {
       label: p.standardColourLabel ?? 'Standard',
       labelBySize: p.standardColourLabelBySize ?? undefined,
       sizeKeys: staffKeys,
-      customerSizeKeys: [],
+      customerSizeKeys: p.standardColourSellableToCustomers ? customerKeys : [],
       excludedSizeKeys: [],
     },
     ...[...p.colours].sort(byOrder).map(c => ({

@@ -1,3 +1,4 @@
+import { OrderStatus, PLANNABLE_ORDER_STATUSES } from '@printforge/types';
 import { BOX_ID, boxRow } from '../catalog-core/__fixtures__/box-product';
 import { M, OPT, PRODUCT_ID, fixtureComponent, fixtureMaterial, key, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
 import { addJobRow, addOrder, addSpool, expectStatus, productionHarness, type ProductionHarness } from './__fixtures__/production-harness';
@@ -134,6 +135,57 @@ describe('J4/J5 rows (§4.4.1, §7.1 item 18)', () => {
     expect(bands.map((r: any) => [r.colourKey, r.onHand])).toEqual([[key([0, M.gold], [1, M.white]), 3], [key([0, M.gold], [1, M.white]), 3]]);
   });
 
+  /** Red ×2 and Blue ×2: the Band bucket (Gold + White, 3) and the fixed Fish column (5) are each read by both lines. */
+  function sharedBuckets() {
+    const h = sardine((row) => {
+      row.components.find((c: any) => c.id === 'c5').colourStock = [{ colourKey: key([0, M.gold], [1, M.white]), stockOnHand: 3 }];
+      row.components.find((c: any) => c.id === 'c3').stockOnHand = 5;
+    });
+    const { order, items } = addOrder(h.db, [{ productId: PRODUCT_ID, colourOptionId: OPT.red, quantity: 2 }, { productId: PRODUCT_ID, colourOptionId: OPT.blue, quantity: 2 }]);
+    return { h, order, items };
+  }
+  const sharedAllocations = (items: any[]) => [
+    { rowKey: `${items[0].id}:c3`, fromStock: 4 },
+    { rowKey: `${items[0].id}:c5`, fromStock: 2 },
+    { rowKey: `${items[1].id}:c3`, fromStock: 1 },
+    { rowKey: `${items[1].id}:c5`, fromStock: 1 },
+  ];
+
+  it('rows of two lines that read one bucket share it: J4 nets the suggestions, and J5 accepts them unchanged', async () => {
+    const { h, order, items } = sharedBuckets();
+    const plan: any = await h.planning.previewPlan(order.id);
+    const figures = (c: string) => plan.rows.filter((r: any) => r.componentId === c).map((r: any) => [r.onHand, r.remaining, r.fromStock, r.toProduce]);
+    expect(figures('c5')).toEqual([[3, 2, 2, 0], [3, 2, 1, 1]]);
+    expect(figures('c3')).toEqual([[5, 4, 4, 0], [5, 4, 1, 3]]);
+
+    const res = await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion });
+    expect(res.allocations).toEqual(sharedAllocations(items));
+    expect(h.db.t('componentColourStock').find((r: any) => r.componentId === 'c5').stockOnHand).toBe(0);
+    expect(h.db.t('productComponent').find((c: any) => c.id === 'c3').stockOnHand).toBe(0);
+    const made = jobsOf(h, order.id).filter((j: any) => ['c3', 'c5'].includes(j.componentId)).map((j: any) => [j.orderItemId, j.componentId, j.quantityToProduce]);
+    expect(made).toEqual([[items[1].id, 'c3', 3], [items[1].id, 'c5', 1]]);
+  });
+
+  it('planWithSuggestions plans both lines of shared buckets (no 409, no JOBS_NOT_PLANNED)', async () => {
+    const { h, order, items } = sharedBuckets();
+    const res = await h.planning.planWithSuggestions(order.id);
+    expect(res.allocations).toEqual(sharedAllocations(items));
+    expect(res.jobsCreated).toBe(8);
+    expect(res.warnings.map((w) => w.code)).not.toContain('JOBS_NOT_PLANNED');
+  });
+
+  it('J5: rows of one bucket that together take more than it holds → 400 naming the part (not a 409), nothing written', async () => {
+    const { h, order, items } = sharedBuckets();
+    const plan: any = await h.planning.previewPlan(order.id);
+    const rows = [{ rowKey: `${items[0].id}:c5`, fromStock: 2 }, { rowKey: `${items[1].id}:c5`, fromStock: 2 }];
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion, rows }), 400, '"Band" in PLA Gold + PLA White: 2 lines take 4 from printed stock — only 3 in printed stock');
+    expect(h.db.t('componentStockMovement')).toHaveLength(0);
+    expect(jobsOf(h, order.id)).toHaveLength(0);
+    // Each row alone still fits, and the netted split is accepted.
+    await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion, rows: [{ rowKey: `${items[0].id}:c5`, fromStock: 1 }, { rowKey: `${items[1].id}:c5`, fromStock: 2 }] });
+    expect(h.db.t('componentColourStock').find((r: any) => r.componentId === 'c5').stockOnHand).toBe(0);
+  });
+
   it('fromStock allocation writes a movement and decrements; stock-only submit creates no job and leaves the order status', async () => {
     const h = box({ stock: 2 });
     const { order, items } = addOrder(h.db, [{ productId: BOX_ID, quantity: 2 }]);
@@ -250,6 +302,86 @@ describe('J4/J5 rows (§4.4.1, §7.1 item 18)', () => {
     expect(h.db.$queryRaw.mock.calls.some(([q]: any) => /plan:advisory/.test(q.sql))).toBe(false);
     const plan: any = await h.planning.previewPlan(order.id);
     await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion, rows: [{ rowKey }, { rowKey }] }), 400, 'More plan rows');
+  });
+});
+
+// -------------------------------------------- order status
+
+describe('J4/J5 and the order status (§3.6 "Release on order cancellation")', () => {
+  const nothingWritten = (h: H) => {
+    expect(h.db.t('productionJob')).toHaveLength(0);
+    expect(h.db.t('componentStockMovement')).toHaveLength(0);
+    expect(h.db.t('productComponent')[0].stockOnHand).toBe(2);
+  };
+
+  it('PENDING and IN_PRODUCTION orders are planned; a cancelled, ready, shipped or delivered order → 409 on J4 and J5, nothing written', async () => {
+    for (const status of ['PENDING', 'IN_PRODUCTION']) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const plan: any = await h.planning.previewPlan(order.id);
+      const res = await h.planning.createFromPlan(order.id, { planVersion: plan.planVersion });
+      expect(res).toMatchObject({ jobsCreated: 1, allocations: [expect.objectContaining({ fromStock: 2 })] });
+    }
+    for (const status of ['CANCELLED', 'READY', 'SHIPPED', 'DELIVERED']) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const message = `This order is ${status.toLowerCase()} — production can't be planned for it`;
+      await expectStatus(h.planning.previewPlan(order.id), 409, message);
+      await expectStatus(h.planning.createFromPlan(order.id, { planVersion: 'x' }), 409, message);
+      await expectStatus(h.planning.planWithSuggestions(order.id), 409, message);
+      nothingWritten(h);
+    }
+  });
+
+  it('PLANNABLE_ORDER_STATUSES (the order page shows Plan Production for these) is exactly what J4 plans', async () => {
+    expect([...PLANNABLE_ORDER_STATUSES]).toEqual(['PENDING', 'CONFIRMED', 'IN_PRODUCTION']);
+    for (const status of Object.values(OrderStatus)) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const preview = h.planning.previewPlan(order.id);
+      if ((PLANNABLE_ORDER_STATUSES as readonly string[]).includes(status)) await expect(preview).resolves.toBeTruthy();
+      else await expectStatus(preview, 409);
+    }
+  });
+
+  it('re-planning after J5 moved the order to IN_PRODUCTION (§3.6.1 "Staff re-plan"): the open units get their job, the status stays', async () => {
+    const h = box({ stock: 2 });
+    const { order, items } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const first: any = await h.planning.previewPlan(order.id);
+    await h.planning.createFromPlan(order.id, { planVersion: first.planVersion });
+    expect(h.db.t('order')[0].status).toBe('IN_PRODUCTION');
+
+    h.db.t('orderItem').find((i: any) => i.id === items[0].id).quantity = 9; // 4 more units open on the line
+    const again: any = await h.planning.previewPlan(order.id);
+    expect(again.rows[0]).toMatchObject({ alreadyPlanned: 3, allocatedFromStock: 2, remaining: 4, fromStock: 0, toProduce: 4 });
+    const res = await h.planning.createFromPlan(order.id, { planVersion: again.planVersion });
+    expect(res.jobsCreated).toBe(1);
+    expect(jobsOf(h, order.id).map((j: any) => j.quantityToProduce)).toEqual([3, 4]);
+    expect(h.db.t('order')[0].status).toBe('IN_PRODUCTION');
+  });
+
+  it('a cancel between J4 and J5 (the Plan dialog still open): J5 → 409, no job, no PLAN_ALLOCATE, the stock stays on hand', async () => {
+    const h = box({ stock: 2 });
+    const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const plan: any = await h.planning.previewPlan(order.id);
+    expect(plan.rows[0]).toMatchObject({ fromStock: 2, toProduce: 3 });
+    h.db.t('order')[0].status = 'CANCELLED'; // S9 changes no plan row, so the planVersion still matches
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion }), 409, 'This order is cancelled');
+    nothingWritten(h);
+  });
+
+  it('J5 reads the status after taking the plan lock: a cancel that commits while J5 waits for it → 409', async () => {
+    const h = box({ stock: 2 });
+    const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const plan: any = await h.planning.previewPlan(order.id);
+    const inner = h.db.$queryRaw.getMockImplementation()!;
+    h.db.$queryRaw.mockImplementation(async (q: any) => {
+      if (/plan:advisory/.test(q?.sql ?? '')) h.db.t('order')[0].status = 'CANCELLED'; // S9 held the lock and committed
+      return inner(q);
+    });
+    await expectStatus(h.planning.createFromPlan(order.id, { planVersion: plan.planVersion }), 409, 'This order is cancelled');
+    nothingWritten(h);
+    expect(h.db.$queryRaw.mock.calls.filter(([q]: any) => /plan:advisory/.test(q.sql)).map(([q]: any) => q.values)).toEqual([[`plan:${order.id}`]]);
   });
 });
 

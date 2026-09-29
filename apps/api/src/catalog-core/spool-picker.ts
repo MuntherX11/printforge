@@ -11,6 +11,15 @@ import { filamentColourDistance } from '../common/utils/colour';
  * - otherwise the same type, ranked by colour distance (a hex-measured pool is
  *   preferred over name-only matches, never mixed), then by weight;
  * - one spool per line; `substituted` when the spool isn't the exact material.
+ *
+ * A spool is promised to one filament per call. Today's needs had one line per
+ * material, so "a spool can only be promised to one line of this job" meant one
+ * filament. Needs are now split by planned identity (§3.6.1: (Regular, Blue)
+ * needs both `PLA White / sliced PLA Silver` and `PLA White / —`), so the lines
+ * of one filament may share its spools, netted line by line, while no other
+ * filament's line may take them. A same-type substitute is therefore chosen only
+ * when no spool of the exact material is open to the line at all, never because
+ * an earlier line of the same filament picked the only one.
  */
 
 export interface SpoolMaterial {
@@ -53,21 +62,26 @@ export function pickSpools<M extends SpoolMaterial, S extends SpoolRow>(
 ): Array<SpoolPick<M, S>> {
   const reserved = opts.reservedBySpool ?? new Map<string, number>();
   const eff = (s: S) => s.currentWeight - (reserved.get(s.id) ?? 0);
-  // Today's query orders by currentWeight asc; the ranking below uses effective weight.
-  const pool = [...spools].sort((a, b) => eff(a) - eff(b));
-  const taken = new Set<string>();
+  // Spool id → the filament (need material id) it was promised to earlier in this call.
+  const promisedTo = new Map<string, string>();
+  const openFor = (s: S, materialId: string) => (promisedTo.get(s.id) ?? materialId) === materialId;
 
-  const smallestThatCovers = (list: S[], grams: number): S | null =>
-    list.find((s) => !taken.has(s.id) && eff(s) >= grams) ?? [...list].reverse().find((s) => !taken.has(s.id)) ?? null;
+  const smallestThatCovers = (list: S[], grams: number, materialId: string): S | null => {
+    const open = list.filter((s) => openFor(s, materialId));
+    return open.find((s) => eff(s) >= grams) ?? open[open.length - 1] ?? null;
+  };
 
   return needs.map(({ material, grams }) => {
+    // Today's query orders by currentWeight asc; the ranking uses effective weight,
+    // re-read per line because a spool shared by earlier lines has less left.
+    const pool = [...spools].sort((a, b) => eff(a) - eff(b));
     const exact = pool.filter((s) => s.materialId === material.id);
-    let spool = smallestThatCovers(exact, grams);
+    let spool = smallestThatCovers(exact, grams, material.id);
     let substituted = false;
 
     if (!spool) {
       const scored = pool
-        .filter((s) => !taken.has(s.id) && s.material?.type === material.type)
+        .filter((s) => openFor(s, material.id) && s.material?.type === material.type)
         .map((s) => ({
           s,
           d: filamentColourDistance(
@@ -80,13 +94,13 @@ export function pickSpools<M extends SpoolMaterial, S extends SpoolRow>(
       const ranked = (byHex.length > 0 ? byHex : scored)
         .sort((a, b) => a.d!.distance - b.d!.distance || eff(a.s) - eff(b.s))
         .map((x) => x.s);
-      spool = smallestThatCovers(ranked, grams);
+      spool = smallestThatCovers(ranked, grams, material.id);
       substituted = !!spool;
     }
 
     const effectiveRemaining = spool ? eff(spool) : 0;
     if (spool) {
-      taken.add(spool.id);
+      promisedTo.set(spool.id, material.id);
       reserved.set(spool.id, (reserved.get(spool.id) ?? 0) + grams);
     }
     return { material, grams, spool, substituted, effectiveRemaining, hasEnough: !!spool && effectiveRemaining >= grams };

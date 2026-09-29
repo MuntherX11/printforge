@@ -37,11 +37,12 @@ export class ExpensesController {
     return this.expensesService.findAll(startDate, endDate);
   }
 
+  /** The body is parsed by expense-input.ts; any key but the expense's own columns → 400. */
   @Patch('expenses/:id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  updateExpense(@Param('id') id: string, @Body() dto: Partial<CreateExpenseDto>) {
-    return this.expensesService.update(id, dto);
+  updateExpense(@Param('id') id: string, @Body() body: unknown) {
+    return this.expensesService.update(id, body);
   }
 
   @Delete('expenses/:id')

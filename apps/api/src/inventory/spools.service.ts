@@ -40,11 +40,12 @@ const SPOOL_PATCH_KEYS: readonly string[] = [
  * The Prisma data for PATCH /spools/:id, built key by key from the allowlist.
  * UpdateSpoolDto is an interface, so the global ValidationPipe never strips
  * extra keys: passing the body through let `jobMaterials: { deleteMany: {} }`
- * erase a spool's job history (getting round the delete guard) and
+ * erase a spool's job history (getting round the delete guard),
  * `material: { update: … }` rename or reprice its filament (getting round the
- * duplicate guard and the material bounds). Any other key → 400. Weights are
- * grams, purchasePrice OMR, all bounded; a negative currentWeight was once
- * stored live (-50 g).
+ * duplicate guard and the material bounds), and `printforgeId` or
+ * `materialId` change the spool's QR identity or cost basis. Any other key →
+ * 400. Weights are grams, purchasePrice OMR, all bounded; a negative
+ * currentWeight was once stored live (-50 g).
  */
 export function spoolPatchData(raw: unknown): Prisma.SpoolUncheckedUpdateInput {
   const body = allowedBody(raw, SPOOL_PATCH_KEYS);

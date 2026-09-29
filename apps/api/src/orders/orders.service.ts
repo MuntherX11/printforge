@@ -15,11 +15,11 @@ import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
 import { PricingService, type ResolvedLine } from '../catalog-core/pricing.service';
 import { ProductionPlannerService } from '../catalog-core/production-planner.service';
 import { ProductStockService } from '../stock-ledger/product-stock.service';
-import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE } from '../production/job-transitions';
-import { lockOptions, lockProduct, TX_OPTS } from '../products/product-locks';
+import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE, lockOrderPlan } from '../production/job-transitions';
+import { TX_OPTS } from '../products/product-locks';
 import {
-  documentTotals, lineOptionsOf, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit, parseCustomerLine,
-  parseItemsArray, parseStaffLine, priceWarningsOf, splitLineByColour, taxRateOf,
+  documentTotals, lineOptionsOf, lockLineForSplit, lockLineRows, MAX_LINES, optionalId, orderItemColumns, parseColourSplit,
+  parseCustomerLine, parseItemsArray, parseStaffLine, priceWarningsOf, splitLineByColour, taxRateOf,
 } from './order-lines';
 import {
   labelStock, materialAvailability, netAllocations, printFilesFor, resolveOrderLines, type PlannedLine,
@@ -48,6 +48,28 @@ export const CUSTOMER_ORDER_SELECT = {
   total: true,
   createdAt: true,
   items: { select: { description: true, quantity: true, unitPrice: true, totalPrice: true } },
+} as const;
+
+/**
+ * The customer on any staff response (orders, quotes, invoices, the customers
+ * endpoints, and the job-completion notification query): every column except
+ * the portal login secrets (passwordHash, refreshToken). Every staff role,
+ * VIEWER and ACCOUNTING included, can read orders, quotes, invoices and
+ * customers, so a Customer row is never loaded whole where it can reach one.
+ */
+export const STAFF_CUSTOMER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  address: true,
+  notes: true,
+  portalAccess: true,
+  isApproved: true,
+  isActive: true,
+  lastLoginAt: true,
+  createdAt: true,
+  updatedAt: true,
 } as const;
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -121,7 +143,7 @@ export class OrdersService {
     }, TX_OPTS);
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
 
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true, items: true } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     // Advisory only. The order stands; staff just need to know they have to
     // buy filament before this one can be printed.
     const stock = await this.availabilityOf(this.productLines(lines), null, new CatalogRequestContext()).catch(() => null);
@@ -164,7 +186,7 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
-        customer: true,
+        customer: { select: STAFF_CUSTOMER_SELECT },
         items: { include: { productionJobs: { select: { id: true, name: true, status: true, totalCost: true } } } },
         productionJobs: {
           include: { printer: { select: { id: true, name: true } } },
@@ -224,8 +246,8 @@ export class OrdersService {
       const n = typeof q === 'number' ? q : typeof q === 'string' ? Number(q) : NaN;
       if (!Number.isInteger(n) || n < 1 || n > 100_000) throw new BadRequestException(`${prefix}quantity must be a whole number from 1 to 100000`);
       const line = parseStaffLine(it, i);
-      if (!line.productId && !line.variantId) continue; // custom line: nothing to print
       if (!line.productId && (line.sizeOptionId || line.colourOptionId)) throw new BadRequestException(`${prefix}choose the product for this size or colour`);
+      if (!line.productId && !line.variantId) continue; // custom line: nothing to print
       const mapped = mapLegacyVariantId(line, (id) => ctx.variants.get(id) ?? null, prefix);
       const config = mapped.productId ? await this.resolver.loadConfig(mapped.productId, ctx) : null;
       if (!config) throw new BadRequestException(`${prefix}product not found`);
@@ -367,7 +389,9 @@ export class OrdersService {
   /**
    * S9. Moving an order to CANCELLED (from any other status) and returning its
    * printed-stock allocations happen in one transaction; the guarded status
-   * change comes first, so a second cancel releases nothing.
+   * change comes first, so a second cancel releases nothing. It runs under the
+   * order's plan lock, so a J5 of this order either commits first (and its
+   * allocations are returned here) or runs after and finds the order cancelled.
    */
   async update(id: string, body: unknown) {
     const b = isObject(body) ? body : {};
@@ -381,6 +405,7 @@ export class OrdersService {
     let released: Array<{ componentId: string; colourKey: string; units: number }> = [];
     if (status === 'CANCELLED' && existing.status !== 'CANCELLED') {
       released = await this.prisma.$transaction(async (tx: any) => {
+        await lockOrderPlan(tx, id);
         const flipped = await tx.order.updateMany({ where: { id, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED', notes, dueDate } });
         if (flipped.count === 0) return [];
         const credits = await this.stock.releaseForOrder(tx, id);
@@ -389,7 +414,7 @@ export class OrdersService {
     } else {
       await this.prisma.order.update({ where: { id }, data: { status: status ?? undefined, notes, dueDate } });
     }
-    const updated = await this.prisma.order.findUnique({ where: { id }, include: { customer: true, items: true } });
+    const updated = await this.prisma.order.findUnique({ where: { id }, include: { customer: { select: STAFF_CUSTOMER_SELECT }, items: true } });
     if (!updated) throw new NotFoundException('Order not found');
 
     // Fire customer notifications on status transitions
@@ -432,26 +457,33 @@ export class OrdersService {
    * (409 if a job of the line has started), releaseForItem, then the line writes.
    * `dryRun` lists the jobs and stock without writing; the write needs `confirm`
    * when either list is non-empty.
+   *
+   * It first takes the order's plan lock, the one J5 and S9 take: a J5 in
+   * flight commits before the line is read (its jobs and allocations are then
+   * cancelled and released here), a later J5 recomputes on the split lines, a
+   * cancel committed while this waited is seen by the status check below, and a
+   * second S11 of the order reads the line this one wrote (so its colours no
+   * longer add up → 400, never extra units on the invoice).
+   *
+   * Then lockLineForSplit: the option and product rows FOR SHARE, and the line
+   * itself FOR UPDATE, re-read — a writer outside the plan lock (O7 rewriting the
+   * line's pair) that changed it since the first read → 409. Everything below
+   * works on that locked row and on kinds read after the option locks.
    */
   async changeLineColour(orderId: string, itemId: string, body: unknown, dryRun = false, userId?: string | null) {
     const out = await this.prisma.$transaction(async (tx: any) => {
-      const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
-      if (!item || item.orderId !== orderId) throw new NotFoundException('Order line not found');
-      if (item.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');
-      if (!item.productId) throw new BadRequestException('Only product lines have colours');
-      const input = parseColourSplit(body, item.quantity);
+      await lockOrderPlan(tx, orderId);
+      const seen = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: { select: { id: true, status: true } } } });
+      if (!seen || seen.orderId !== orderId) throw new NotFoundException('Order line not found');
+      if (seen.order?.status === 'CANCELLED') throw new ConflictException('This order is cancelled');
+      if (!seen.productId) throw new BadRequestException('Only product lines have colours');
+      const input = parseColourSplit(body, seen.quantity);
+      const { item } = await lockLineForSplit(tx, 'OrderItem', seen, input.colours, () => tx.orderItem.findUnique({ where: { id: itemId } }));
 
       const ctx = new CatalogRequestContext();
       await this.resolver.preloadVariants([item.variantId, item.sizeOptionId, item.colourOptionId].filter((x: string | null): x is string => !!x), ctx, tx);
       const eff = this.resolver.effectiveOptions(item, ctx);
       if (eff.skip) throw new BadRequestException("This line's size or colour no longer exists");
-
-      if (!(await lockProduct(tx, item.productId, 'SHARE'))) throw new BadRequestException("This line's product no longer exists");
-      const optionIds = [...new Set([eff.sizeOptionId, eff.colourOptionId, ...input.colours.map((c) => c.colourOptionId)].filter((x): x is string => !!x))].sort();
-      const locked = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
-      for (const c of input.colours) {
-        if (c.colourOptionId && !locked.has(c.colourOptionId)) throw new BadRequestException('That colour no longer exists');
-      }
 
       const config = await this.resolver.requireConfig(item.productId, ctx, tx);
       const pc = this.resolver.pairContext(config);

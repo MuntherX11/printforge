@@ -15,7 +15,8 @@ import { activeProductView, catalogDetailView, catalogProductView } from './prod
 import { buildProductDetail, coverUrl, DETAIL_INCLUDE, type AttachmentLite } from './product-detail';
 import { containedUploadPath } from './product-images.service';
 import {
-  parseMinQtys, parsePage, pairParam, parseProductCreate, parseProductPatch, parseReadinessQty, parseTiers, rejectStaleQuery,
+  type BomRowInput, parseBomRow, parseMinQtys, parsePage, pairParam, parseProductCreate, parseProductPatch, parseReadinessQty, parseTiers,
+  rejectStaleQuery,
 } from './product-input';
 import { assertSkuFree, lockOptions, lockProduct, photoPaths, productHistory, TX_OPTS, unlinkAfterCommit } from './product-locks';
 
@@ -274,9 +275,10 @@ export class ProductsService {
   }
 
   /**
-   * Excel BOM upload (unchanged). Known exception C17: SKU-matched rows still
-   * write basePrice; the Pricing card shows "differs" and the next trigger
-   * overwrites it.
+   * Excel BOM upload. Known exception C17: SKU-matched rows still write
+   * basePrice; the Pricing card shows "differs" and the next trigger overwrites
+   * it. Each row goes through parseBomRow, so an out-of-range price, minutes or
+   * grams (negative, Infinity, absurd) is that row's error, not a write.
    */
   async uploadBom(fileBuffer: Buffer): Promise<{ created: number; updated: number; errors: string[] }> {
     const workbook = new ExcelJS.Workbook();
@@ -319,15 +321,25 @@ export class ProductsService {
         errors.push(`Row ${rowNum}: "name" is required`);
         continue;
       }
-      const sku = cellStr(row, 'sku') || null;
-      const description = cellStr(row, 'description') || null;
-      const basePrice = cellNum(row, 'baseprice') ?? cellNum(row, 'base_price') ?? cellNum(row, 'price') ?? null;
-      const estimatedMinutes = cellNum(row, 'estimatedminutes') ?? cellNum(row, 'estimated_minutes') ?? null;
-      const estimatedGrams = cellNum(row, 'estimatedgrams') ?? cellNum(row, 'estimated_grams') ?? null;
+      let input: BomRowInput;
+      try {
+        input = parseBomRow({
+          name,
+          sku: cellStr(row, 'sku') || null,
+          description: cellStr(row, 'description') || null,
+          basePrice: cellNum(row, 'baseprice') ?? cellNum(row, 'base_price') ?? cellNum(row, 'price') ?? null,
+          estimatedMinutes: cellNum(row, 'estimatedminutes') ?? cellNum(row, 'estimated_minutes') ?? null,
+          estimatedGrams: cellNum(row, 'estimatedgrams') ?? cellNum(row, 'estimated_grams') ?? null,
+        });
+      } catch (err: any) {
+        errors.push(`Row ${rowNum} ("${name}"): ${err?.message ?? 'Invalid row'}`);
+        continue;
+      }
+      const { sku, description, basePrice, estimatedMinutes, estimatedGrams } = input;
       try {
         const existing = sku ? await this.prisma.product.findFirst({ where: { sku } }) : null;
         if (existing) {
-          const data: any = { name };
+          const data: any = { name: input.name };
           if (description !== null) data.description = description;
           if (basePrice !== null) data.basePrice = basePrice;
           if (estimatedMinutes !== null) data.estimatedMinutes = estimatedMinutes;
@@ -336,7 +348,7 @@ export class ProductsService {
           updated++;
         } else {
           await this.prisma.product.create({
-            data: { name, sku, description, basePrice: basePrice ?? 0, estimatedMinutes: estimatedMinutes ?? 0, estimatedGrams: estimatedGrams ?? 0 },
+            data: { name: input.name, sku, description, basePrice: basePrice ?? 0, estimatedMinutes: estimatedMinutes ?? 0, estimatedGrams: estimatedGrams ?? 0 },
           });
           created++;
         }

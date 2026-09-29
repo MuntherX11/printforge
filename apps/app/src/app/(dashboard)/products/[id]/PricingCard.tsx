@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,12 +53,19 @@ export function PricingCard({ product, cost, standardCost, costError, canEdit, l
   const { toast } = useToast();
   const [showBreakdown, setShowBreakdown] = useState(true);
   const [printers, setPrinters] = useState<ApiPrinter[] | null>(null);
+  const [printersError, setPrintersError] = useState(false);
   const [busy, setBusy] = useState<'recalc' | 'printer' | null>(null);
+
+  // A failed load keeps the read-only printer name (never a list without the current printer).
+  const fetchPrinters = useCallback(() => {
+    setPrintersError(false);
+    loadPrinters().then(setPrinters).catch(() => setPrintersError(true));
+  }, [loadPrinters]);
 
   useEffect(() => {
     if (!canEdit) return;
-    loadPrinters().then(setPrinters).catch(() => setPrinters([]));
-  }, [canEdit, loadPrinters]);
+    fetchPrinters();
+  }, [canEdit, fetchPrinters]);
 
   async function recalculate() {
     setBusy('recalc');
@@ -201,6 +208,12 @@ export function PricingCard({ product, cost, standardCost, costError, canEdit, l
             ) : (
               <p id="pricing-printer" className="mt-1 text-sm text-gray-900 dark:text-gray-100">
                 {product.defaultPrinter?.name ?? 'None — uses Settings'}
+                {canEdit && printersError && (
+                  <span className="ml-2 text-xs text-red-600 dark:text-red-400">
+                    Couldn&apos;t load printers.{' '}
+                    <button type="button" className="underline" onClick={fetchPrinters}>Retry</button>
+                  </span>
+                )}
               </p>
             )}
           </div>

@@ -3,10 +3,13 @@
 import { useState } from 'react';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
-import type { ApiOptionHistory, ApiOptionRow, ColourOptionDetail, ProductDetail, SizeOptionDetail } from '@/lib/types/api';
+import type { ApiKeepStandard, ApiOptionHistory, ApiOptionRow, ColourOptionDetail, ProductDetail, SizeOptionDetail } from '@/lib/types/api';
 import { ConfirmDialog } from './ConfirmDialog';
-import { errorText } from './options-ui';
-import { isLastActive, lastOfAxisText, orderedColours, orderedSizes, reorder, type OptionKind } from './options-model';
+import { KeepStandardStep, errorText } from './options-ui';
+import {
+  isLastActive, keepStepLabel, keepStepProblem, keepStepText, lastOfAxisText, needsKeepStandardOnActivate, orderedColours, orderedSizes,
+  reorder, type OptionKind,
+} from './options-model';
 
 type Option = SizeOptionDetail | ColourOptionDetail;
 
@@ -15,14 +18,18 @@ interface Pending {
   message: React.ReactNode;
   confirmLabel: string;
   destructive?: boolean;
-  run: () => Promise<void>;
+  /** Shows the `Keep selling …` step for this axis; its answer is passed to `run`. */
+  keepKind?: OptionKind;
+  run: (keepStandard?: ApiKeepStandard) => Promise<void>;
 }
 
 /**
  * Row actions shared by the Sizes and Colours tables (spec §5.2 C, §3.10):
  * move up/down (O2 `sortOrder`), activate/deactivate (O2 `isActive`, with the
- * last-of-axis confirm), and delete (ADMIN, O3 history first; with history the
- * only offer is Deactivate — options with history are never hard-deleted).
+ * last-of-axis confirm, and the `Keep selling …` step when activating opens an
+ * axis with no active option, §3.1 rules 6 and 7), and delete (ADMIN, O3
+ * history first; with history the only offer is Deactivate — options with
+ * history are never hard-deleted).
  */
 export function useOptionActions(product: ProductDetail, onChanged: () => void) {
   const { toast } = useToast();
@@ -30,10 +37,11 @@ export function useOptionActions(product: ProductDetail, onChanged: () => void) 
   const [pending, setPending] = useState<Pending | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [keep, setKeep] = useState<ApiKeepStandard>({ label: '', sellInShop: true });
 
   const base = `/products/${product.id}/variants`;
 
-  async function patch(option: Option, body: { isActive?: boolean; sortOrder?: number }) {
+  async function patch(option: Option, body: { isActive?: boolean; sortOrder?: number; keepStandard?: ApiKeepStandard }) {
     await api.patch<ApiOptionRow>(`${base}/${option.id}`, body);
   }
 
@@ -56,13 +64,31 @@ export function useOptionActions(product: ProductDetail, onChanged: () => void) 
     }
   }
 
-  async function writeActive(option: Option, isActive: boolean) {
-    await patch(option, { isActive });
+  async function writeActive(option: Option, isActive: boolean, keepStandard?: ApiKeepStandard) {
+    await patch(option, { isActive, ...(keepStandard ? { keepStandard } : {}) });
     toast('success', `${option.name} ${isActive ? 'activated' : 'deactivated'}`);
     onChanged();
   }
 
   function setActive(kind: OptionKind, option: Option, isActive: boolean) {
+    if (isActive && needsKeepStandardOnActivate(product, kind, option)) {
+      setConfirmError(null);
+      setKeep({ label: keepStepLabel(product, kind), sellInShop: true });
+      setPending({
+        title: `Activate ${option.name}?`,
+        message: (
+          <p>
+            {kind === 'SIZE'
+              ? `No other size is active, so the shop sells the standard size today. Once ${option.name} is active, customers only see the standard size if you keep selling it.`
+              : `No other colour is active, so the shop sells the standard colour today. Once ${option.name} is active, customers only see the standard colour if you keep selling it.`}
+          </p>
+        ),
+        confirmLabel: 'Activate',
+        keepKind: kind,
+        run: keepStandard => writeActive(option, true, keepStandard),
+      });
+      return;
+    }
     if (!isActive && isLastActive(product, kind, option.id)) {
       setConfirmError(null);
       setPending({
@@ -137,10 +163,16 @@ export function useOptionActions(product: ProductDetail, onChanged: () => void) 
   async function confirm() {
     if (!pending) return;
     const current = pending;
+    let keepStandard: ApiKeepStandard | undefined;
+    if (current.keepKind) {
+      const problem = keepStepProblem(current.keepKind, keep.label);
+      if (problem) { setConfirmError(problem); return; }
+      keepStandard = { label: keep.label.trim(), sellInShop: keep.sellInShop };
+    }
     setConfirmBusy(true);
     setConfirmError(null);
     try {
-      await current.run();
+      await current.run(keepStandard);
       setPending(p => (p === current ? null : p));
     } catch (err) {
       if (!(err instanceof Error && err.message === '__handled__')) setConfirmError(errorText(err, 'Failed'));
@@ -153,7 +185,18 @@ export function useOptionActions(product: ProductDetail, onChanged: () => void) 
     <ConfirmDialog
       open={!!pending}
       title={pending?.title ?? ''}
-      message={pending?.message ?? null}
+      message={pending?.keepKind ? (
+        <div className="space-y-3">
+          {pending.message}
+          <KeepStandardStep
+            {...keepStepText(product, pending.keepKind, keep.sellInShop)}
+            label={keep.label}
+            sellInShop={keep.sellInShop}
+            onLabel={label => setKeep(k => ({ ...k, label }))}
+            onSell={sellInShop => setKeep(k => ({ ...k, sellInShop }))}
+          />
+        </div>
+      ) : pending?.message ?? null}
       confirmLabel={pending?.confirmLabel ?? 'OK'}
       destructive={pending?.destructive}
       busy={confirmBusy}

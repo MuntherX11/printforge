@@ -36,7 +36,9 @@ export function ComponentPlanLines({ components }: { components: Readiness['comp
   );
 }
 
-const shortBy = (f: Filament) => Math.max(0, f.gramsNeeded - f.free);
+/** "After open orders" is judged per material: one filament can be split over several lines. */
+const materialGrams = (f: Filament) => f.materialGramsNeeded ?? f.gramsNeeded;
+const shortBy = (f: Filament) => Math.max(0, materialGrams(f) - f.free);
 const spoolShortBy = (f: Filament) => Math.max(0, f.gramsNeeded - (f.suggestedSpool?.effectiveRemaining ?? 0));
 
 export function FilamentTable({ filament }: { filament: Filament[] }) {
@@ -65,7 +67,12 @@ export function FilamentTable({ filament }: { filament: Filament[] }) {
                 </span>{' '}
                 {f.hasEnough
                   ? <span className="text-green-700 dark:text-green-400">✓</span>
-                  : <span className="text-amber-700 dark:text-amber-300">Short {formatGrams(shortBy(f))}</span>}
+                  : (
+                    <span className="text-amber-700 dark:text-amber-300">
+                      Short {formatGrams(shortBy(f))}
+                      {materialGrams(f) > f.gramsNeeded ? ` for all ${formatGrams(materialGrams(f))} of ${f.label}` : ''}
+                    </span>
+                  )}
               </td>
               <td className="pr-3">
                 {f.suggestedSpool ? (
@@ -117,7 +124,8 @@ export function PartsTable({ parts }: { parts: Part[] }) {
 
 /** The two summary lines, never merged (§5.2 F). */
 export function ReadinessSummary({ readiness }: { readiness: Readiness }) {
-  const shortF = readiness.filament.filter(f => !f.hasEnough);
+  // One entry per material, even when the filament is split over several lines.
+  const shortF = readiness.filament.filter((f, i, all) => !f.hasEnough && all.findIndex(g => g.materialId === f.materialId) === i);
   const shortP = readiness.parts.filter(p => !p.hasEnough);
   return (
     <div className="space-y-0.5 text-sm">

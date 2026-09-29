@@ -171,9 +171,11 @@ export function useLineItems(products: ApiActiveProduct[]) {
   const priceKey = JSON.stringify(items.map(l => [l.key, l.productId, l.sizeOptionId, l.colourOptionId, l.quantity, l.priceOverride ? l.unitPrice : null]));
   const seq = useRef(0);
   useEffect(() => {
+    // Every change counts, even one that leaves nothing to price: a reply still
+    // in flight is then for lines that no longer exist as they were sent.
+    const my = ++seq.current;
     const priced = items.filter(l => l.productId && l.quantity > 0);
     if (!priced.length) return;
-    const my = ++seq.current;
     const t = setTimeout(() => {
       const lines: PricingLineInput[] = priced.map(l => ({
         productId: l.productId, sizeOptionId: l.sizeOptionId, colourOptionId: l.colourOptionId, quantity: l.quantity,
@@ -182,10 +184,13 @@ export function useLineItems(products: ApiActiveProduct[]) {
       api.post<{ lines: PricingLinePreview[] }>('/pricing/lines', { lines })
         .then(res => {
           if (my !== seq.current) return;
-          const byKey = new Map(priced.map((l, i) => [l.key, res.lines[i]]));
+          const byKey = new Map(priced.map((l, i) => [l.key, { sent: l, p: res.lines[i] }]));
           setItems(prev => prev.map(l => {
-            const p = byKey.get(l.key);
-            if (!p) return l;
+            const hit = byKey.get(l.key);
+            // Only a line still as it was priced (product, size, colour, quantity).
+            if (!hit || !hit.p || hit.sent.productId !== l.productId || hit.sent.sizeOptionId !== l.sizeOptionId
+              || hit.sent.colourOptionId !== l.colourOptionId || hit.sent.quantity !== l.quantity) return l;
+            const p = hit.p;
             const unitPrice = !l.priceOverride && p.autoUnitPrice !== null ? p.autoUnitPrice : l.unitPrice;
             return { ...l, pricing: p, unitPrice };
           }));

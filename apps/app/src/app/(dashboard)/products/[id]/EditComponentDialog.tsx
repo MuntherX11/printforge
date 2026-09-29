@@ -12,6 +12,7 @@ import type {
 import { ImpactList, errorText } from './options-ui';
 import { isMultiColour } from './options-model';
 import { ComponentFields, materialOptions, useMaterialList, validateComponentFields, type ComponentFormValues } from './component-form';
+import { componentGrams, splitSlotGrams } from './bom-model';
 
 interface Props {
   product: ProductDetail;
@@ -22,13 +23,16 @@ interface Props {
   onSaved: () => void;
 }
 
+/** A multicolour part starts from the sum of its colours' grams: that is what prices it (§3.2). */
 function valuesOf(c: ComponentDetail): ComponentFormValues {
-  return { description: c.description, grams: String(c.gramsUsed), minutes: String(c.printMinutes), quantity: String(c.quantity) };
+  return { description: c.description, grams: String(componentGrams(c)), minutes: String(c.printMinutes), quantity: String(c.quantity) };
 }
 
 /**
  * Edit a component (spec §5.1, P10/P11). Single-material parts edit their
- * filament here; multicolour parts list one filament select per colour (P11).
+ * filament here; multicolour parts list one filament select per colour (P11),
+ * and their grams per unit is the colours' total — a change is split across
+ * the colours in proportion by P10.
  * Colour links are edited in `Edit links` only. A filament change runs the
  * dry run first and lists the open-line impact before `Save anyway`; a
  * STOCK_REKEYED warning is shown after saving.
@@ -63,13 +67,16 @@ export function EditComponentDialog({ product, component: c, open, loadMaterials
   const materialChanged = !multi && materialId !== '' && materialId !== c.materialId;
   const slotsChanged = multi && c.materials.some(m => slotMaterials[m.colorIndex] !== m.materialId);
   const slotsBody = () => ({ slots: c.materials.map(m => ({ colorIndex: m.colorIndex, materialId: slotMaterials[m.colorIndex] })) });
+  const currentGrams = componentGrams(c);
+  const gramsChanged = !!parsed && parsed.gramsUsed !== currentGrams;
+  const newSlotGrams = multi && gramsChanged ? splitSlotGrams(c.materials, parsed!.gramsUsed) : null;
 
   async function write(confirm: boolean) {
     if (!parsed || !c) return;
     const warnings: Problem[] = [];
     const patch: Record<string, unknown> = {};
     if (parsed.description !== c.description) patch.description = parsed.description;
-    if (parsed.gramsUsed !== c.gramsUsed) patch.gramsUsed = parsed.gramsUsed;
+    if (parsed.gramsUsed !== currentGrams) patch.gramsUsed = parsed.gramsUsed;
     if (parsed.printMinutes !== c.printMinutes) patch.printMinutes = parsed.printMinutes;
     if (parsed.quantity !== c.quantity) patch.quantity = parsed.quantity;
     if (materialChanged) patch.materialId = materialId;
@@ -126,10 +133,15 @@ export function EditComponentDialog({ product, component: c, open, loadMaterials
         {multi ? (
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-gray-700 dark:text-gray-300">Filament per colour</legend>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Grams per unit is the total of these colours. Changing it splits the new total across the colours in their current proportions.
+            </p>
             {[...c.materials].sort((a, b) => a.colorIndex - b.colorIndex).map(m => (
               <Select
                 key={m.colorIndex}
-                label={`Colour ${m.colorIndex + 1} (${m.gramsUsed.toFixed(1)} g per unit)`}
+                label={newSlotGrams
+                  ? `Colour ${m.colorIndex + 1} (${m.gramsUsed.toFixed(1)} → ${(newSlotGrams.get(m.colorIndex) ?? 0).toFixed(1)} g per unit)`
+                  : `Colour ${m.colorIndex + 1} (${m.gramsUsed.toFixed(1)} g per unit)`}
                 value={slotMaterials[m.colorIndex] ?? ''}
                 onChange={e => { setSlotMaterials(s => ({ ...s, [m.colorIndex]: e.target.value })); setImpact(null); }}
                 options={materialOptions(materials)}

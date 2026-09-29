@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { BomResolverService } from '../catalog-core/bom-resolver.service';
 import type { OptionRow, ProductConfig } from '../catalog-core/catalog-config';
 import type { CatalogRequestContext } from '../catalog-core/catalog-context';
@@ -80,41 +81,99 @@ export function parseCustomerLine(it: Record<string, unknown>, i: number): LineI
   };
 }
 
-type LockTx = { $queryRaw: (q: any) => Promise<unknown>; productVariant: { findMany: (a: any) => Promise<Array<{ id: string; productId: string }>> } };
+type LockTx = { $queryRaw: (q: any) => Promise<unknown> };
 
 /**
- * §3.9 "Line inserts vs deletes": FOR SHARE on every product and option row the
+ * §3.9 "Line inserts vs deletes": FOR SHARE on every option and product row the
  * lines name, before any line is resolved or written. A row that has vanished →
  * 400. Call as the first statements of the transaction; resolveLines then runs
  * on the locked rows (§3.1 rule 3).
+ *
+ * Lock order: the ProductVariant rows (sorted, one statement), then the Product
+ * rows, then — for S11 — the line itself (lockLineForSplit). O7 takes its FOR
+ * UPDATE locks in that same order (options, then the product), and J1, J5 and
+ * slicer imports lock options before their inserts touch the product row. With
+ * one global order a line writer and O7 wait for each other instead of
+ * deadlocking (Postgres 40P01 → a 500), so §3.1 rule 3's "writer first, or O7
+ * first" is what actually happens.
  */
 export async function lockLineRows(tx: LockTx, lines: ReadonlyArray<Pick<LineInput, 'productId' | 'sizeOptionId' | 'colourOptionId' | 'variantId'>>): Promise<void> {
   const optionIds = [...new Set(lines.flatMap((l) => [l.sizeOptionId, l.colourOptionId, l.variantId]).filter((x): x is string => !!x))].sort();
-  // A legacy customer body names only the option: its product comes from that row (§3.1 rule 13).
-  const optionOnly = lines.filter((l) => !l.productId && l.variantId).map((l) => l.variantId as string);
-  const owners = optionOnly.length
-    ? await tx.productVariant.findMany({ where: { id: { in: [...new Set(optionOnly)] } }, select: { id: true, productId: true } })
-    : [];
-  const productIds = [...new Set([...lines.map((l) => l.productId).filter((x): x is string => !!x), ...owners.map((o) => o.productId)])].sort();
+  const options = new Map((await lockOptions(tx, optionIds, 'SHARE')).map((o) => [o.id, o]));
+  // A legacy customer body names only the option: its product comes from that locked row (§3.1 rule 13).
+  const ownerOf = (l: Pick<LineInput, 'productId' | 'variantId'>) => l.productId ?? (l.variantId ? options.get(l.variantId)?.productId ?? null : null);
+  const productIds = [...new Set(lines.map(ownerOf).filter((x): x is string => !!x))].sort();
 
   const products = new Set<string>();
   for (const id of productIds) {
     const row = await lockProduct(tx, id, 'SHARE');
     if (row) products.add(row.id);
   }
-  const options = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
 
   lines.forEach((l, i) => {
     const prefix = `Line ${i + 1}: `;
     for (const id of [l.sizeOptionId, l.colourOptionId, l.variantId]) {
       if (id && !options.has(id)) throw new BadRequestException(`${prefix}that size or colour no longer exists`);
     }
-    if (l.productId && !products.has(l.productId)) throw new BadRequestException(`${prefix}product not found`);
-    if (!l.productId && l.variantId) {
-      const owner = owners.find((o) => o.id === l.variantId);
-      if (!owner || !products.has(owner.productId)) throw new BadRequestException(`${prefix}product not found`);
-    }
+    const owner = ownerOf(l);
+    if ((l.productId || l.variantId) && (!owner || !products.has(owner))) throw new BadRequestException(`${prefix}product not found`);
   });
+}
+
+// ------------------------------------------------------- document row locks
+
+type RawTx = { $queryRaw: (q: Prisma.Sql) => Promise<unknown> };
+const ROW_TABLES = { OrderItem: '"OrderItem"', QuoteItem: '"QuoteItem"', Quote: '"Quote"' } as const;
+
+/** `SELECT "id" FROM <table> WHERE id = $1 FOR UPDATE` (marker `lock:<Table>:UPDATE`, as product-locks.ts). */
+async function lockRowForUpdate(tx: RawTx, table: keyof typeof ROW_TABLES, id: string): Promise<boolean> {
+  const sql = Prisma.sql`/* lock:${Prisma.raw(`${table}:UPDATE`)} */ SELECT "id" FROM ${Prisma.raw(ROW_TABLES[table])} WHERE "id" = ANY(${[id]}::text[]) FOR UPDATE`;
+  return ((await tx.$queryRaw(sql)) as unknown[]).length > 0;
+}
+
+/**
+ * The quote row, FOR UPDATE: the first lock of quote S11 and of S7's conversion,
+ * so two splits of one quote, or a split and the conversion, run one after the
+ * other (the quote's per-document lock, as the plan lock is an order's). Read
+ * the quote and its lines after it. False when the quote doesn't exist.
+ */
+export function lockQuote(tx: RawTx, quoteId: string): Promise<boolean> {
+  return lockRowForUpdate(tx, 'Quote', quoteId);
+}
+
+/** The line columns an S11 split is computed from. */
+const SPLIT_KEYS = ['productId', 'variantId', 'sizeOptionId', 'colourOptionId', 'quantity'] as const;
+type SplitSource = { id: string; productId: string | null; variantId?: string | null; sizeOptionId: string | null; colourOptionId: string | null; quantity: number };
+
+export const LINE_CHANGED_MESSAGE = 'This line was changed by someone else — reload and try again';
+
+/**
+ * S11's row locks, in the global order of lockLineRows: FOR SHARE on every
+ * option the line and the split name, FOR SHARE on the product, then FOR UPDATE
+ * on the line itself, which is then re-read. The line's first read picks the
+ * rows to lock but is not locked (locking it before the options would invert
+ * the order against O7, which rewrites lines after its option locks), so a
+ * writer that changed the line's product, options or quantity in between → 409,
+ * and the split never adds up to anything but the locked line's quantity.
+ * Returns the re-read line and the option ids that were found and locked.
+ */
+export async function lockLineForSplit<T extends SplitSource>(
+  tx: RawTx,
+  table: 'OrderItem' | 'QuoteItem',
+  seen: T,
+  colours: ColourSplitInput['colours'],
+  reread: () => Promise<T | null>,
+): Promise<{ item: T; lockedOptions: Set<string> }> {
+  const optionIds = [...new Set([seen.variantId, seen.sizeOptionId, seen.colourOptionId, ...colours.map((c) => c.colourOptionId)].filter((x): x is string => !!x))].sort();
+  const lockedOptions = new Set((await lockOptions(tx, optionIds, 'SHARE')).map((o) => o.id));
+  for (const c of colours) {
+    if (c.colourOptionId && !lockedOptions.has(c.colourOptionId)) throw new BadRequestException('That colour no longer exists');
+  }
+  if (!seen.productId || !(await lockProduct(tx, seen.productId, 'SHARE'))) throw new BadRequestException("This line's product no longer exists");
+  await lockRowForUpdate(tx, table, seen.id);
+  const item = await reread();
+  if (!item || SPLIT_KEYS.some((k) => (item[k] ?? null) !== (seen[k] ?? null))) throw new ConflictException(LINE_CHANGED_MESSAGE);
+  return { item, lockedOptions };
 }
 
 /** tax_rate setting as a fraction; anything outside 0–100 counts as 0 (as createForCustomer did). */

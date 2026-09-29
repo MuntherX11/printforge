@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import type { PlanRow, Problem, SurplusPolicy } from '@printforge/types';
+import { PLANNABLE_ORDER_STATUSES, type PlanRow, type Problem, type SurplusPolicy } from '@printforge/types';
 import { createHash } from 'crypto';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from '../catalog-core/bom-resolver.service';
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
@@ -15,6 +14,7 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { ProductStockService, suggestFromStock } from '../stock-ledger/product-stock.service';
 import { creditUnits, materialLines, plateRows, singlePlateFilename } from './job-builder';
 import { parsePlanSubmit, parsePreview, type PlanRowInput } from './job-input';
+import { lockOrderPlan } from './job-transitions';
 
 /**
  * Order production planning (spec §4.4 J4/J5, §4.4.1 PlanRow) and the job
@@ -49,6 +49,21 @@ export interface PlanResult {
 }
 
 const NO_SLICED_DATA = (desc: string) => `"${desc}" has no sliced data — add its grams and minutes or a plate layout`;
+
+/**
+ * Orders production can be planned for (J4/J5): PLANNABLE_ORDER_STATUSES, the
+ * same list the order page shows Plan Production for. A cancelled order holds
+ * no allocation (§3.6 "Release on order cancellation"), and a finished one has
+ * nothing left to plan.
+ */
+function assertPlannable(status: string) {
+  if (!(PLANNABLE_ORDER_STATUSES as ReadonlyArray<string>).includes(status)) {
+    throw new ConflictException(`This order is ${String(status).toLowerCase().replace(/_/g, ' ')} — production can't be planned for it`);
+  }
+}
+
+/** One printed-stock balance: rows of different lines that resolve to it share it. */
+const bucketOf = (componentId: string, colourKey: string) => `${componentId}|${colourKey}`;
 
 function planComponent(component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy, plates?: Array<{ layoutId: string | null; plateCount: number }>): OptionPlan {
   const bom = { ...cacheBom, components: [component] };
@@ -88,6 +103,7 @@ export class JobPlanningService {
       include: { items: true, customer: { select: { id: true, name: true } } },
     });
     if (!order) throw new NotFoundException('Order not found');
+    assertPlannable(order.status);
 
     const ctx = new CatalogRequestContext();
     const warnings: Problem[] = [];
@@ -96,6 +112,11 @@ export class JobPlanningService {
     const platesByItem = await this.platesOfItems(items.map((i: any) => i.id));
     const reservedBySpool = await this.planner.reservedBySpool();
     const extraMaterials = new Map<string, { name: string }>();
+    // Stock not yet suggested to an earlier row, per bucket. Two lines can read
+    // one bucket (colours that give a part the same filament, a fixed part shared
+    // by every colour), so each row's suggestion is netted against the rows
+    // before it; the suggestions together then never take more than is on hand.
+    const unsuggested = new Map<string, number>();
 
     const out: RowPlan[] = [];
     for (const item of items as any[]) {
@@ -139,9 +160,12 @@ export class JobPlanningService {
         const suggestion = suggestFromStock({
           onHand: c.stockOnHand, remaining: p.remaining, isBaseColumn: isBase, stockConfirmedAt: c.stockConfirmedAt, description: c.description,
         });
+        const bucket = bucketOf(c.componentId, c.colourKey);
+        const left = unsuggested.get(bucket) ?? c.stockOnHand;
         const oldComponents = progress.jobsOnOldComponents.jobCount > 0;
-        const fromStock = oldComponents ? 0 : suggestion.fromStock;
+        const fromStock = oldComponents ? 0 : Math.max(0, Math.min(suggestion.fromStock, left));
         const toProduce = oldComponents ? 0 : p.remaining - fromStock;
+        unsuggested.set(bucket, left - fromStock);
 
         const rowWarnings: Problem[] = [...lineWarnings];
         if (suggestion.warning) rowWarnings.push(suggestion.warning);
@@ -280,7 +304,13 @@ export class JobPlanningService {
   async createFromPlan(orderId: string, body: unknown, userId?: string | null): Promise<PlanResult> {
     const input = parsePlanSubmit(body); // bounds before any lock (rule 7)
     return this.prisma.$transaction(async (tx: any) => {
-      await tx.$queryRaw(Prisma.sql`/* plan:advisory */ SELECT 1 AS "ok" FROM (SELECT pg_advisory_xact_lock(hashtext(${`plan:${orderId}`}))) AS "l"`);
+      await lockOrderPlan(tx, orderId);
+      // The status read after the lock: S9 cancels under the same lock, so a
+      // cancel is either committed and seen here (409), or waits for this plan
+      // and then returns what it allocates.
+      const current = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
+      if (!current) throw new NotFoundException('Order not found');
+      assertPlannable(current.status);
       // The option rows the lines resolve through, FOR SHARE (§3.1 rule 3): a
       // concurrent reclassification (O7) waits for this plan or finishes first.
       const lineOptions = await tx.orderItem.findMany({ where: { orderId }, select: { variantId: true, sizeOptionId: true, colourOptionId: true } });
@@ -348,6 +378,25 @@ export class JobPlanningService {
         spools.set(s.materialId, spool);
       }
       work.push({ rp, fromStock, toProduce, plates, policy, printerId: printerId ?? null, spools });
+    }
+
+    // Rule 2 across rows: rows of different lines can read one bucket, and
+    // what they take together must fit it (else the second allocation would
+    // fail its guarded decrement as a misleading "stock changed" 409).
+    const taken = new Map<string, { row: PlanRow; units: number; lines: number }>();
+    for (const w of work) {
+      if (w.fromStock <= 0) continue;
+      const k = bucketOf(w.rp.component.componentId, w.rp.row.colourKey);
+      const t = taken.get(k) ?? { row: w.rp.row, units: 0, lines: 0 };
+      t.units += w.fromStock;
+      t.lines += 1;
+      taken.set(k, t);
+    }
+    for (const { row, units, lines } of taken.values()) {
+      if (units > row.onHand) {
+        const colour = row.colourLabel ? ` in ${row.colourLabel}` : '';
+        throw new BadRequestException(`"${row.componentDescription}"${colour}: ${lines} lines take ${units} from printed stock — only ${row.onHand} in printed stock`);
+      }
     }
 
     // Writes.

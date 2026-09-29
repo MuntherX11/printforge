@@ -98,6 +98,25 @@ describe('S6 quote create (§3.9, §7.1 item 20)', () => {
   });
 });
 
+describe('Staff quote responses never carry the customer login secrets', () => {
+  const secrets = (v: unknown) => ['passwordHash', 'refreshToken'].filter((k) => allKeys(v).has(k));
+
+  it('S6, S8, quote update, S7, S11 and the quick-quote save return the customer without passwordHash or refreshToken', async () => {
+    const h = sardine();
+    const q = await quote(h, [{ productId: P, sizeOptionId: OPT.large, quantity: 25 }]);
+    expect(q.customer).toMatchObject({ id: CUSTOMER_ID, name: 'Ali', email: 'ali@example.com' });
+    expect(secrets(q)).toEqual([]);
+    const view: any = await h.quotes.findOne(q.id);
+    expect(view.customer.name).toBe('Ali');
+    expect(secrets(view)).toEqual([]);
+    expect(secrets(await h.quotes.update(q.id, { status: 'SENT' } as any))).toEqual([]);
+    expect(secrets(await h.quotes.changeLineColour(q.id, q.items[0].id, { colours: [{ colourOptionId: OPT.red, quantity: 25 }] }))).toEqual([]);
+    expect(secrets(await h.quotes.convertToOrder(q.id, { autoCreateJobs: false }))).toEqual([]);
+    const saved = await h.quotes.createFromAnalysis({ customerId: CUSTOMER_ID, description: 'Bracket', analysis: {}, costEstimate: { suggestedPrice: 3, totalCost: 1 } } as any);
+    expect(secrets(saved)).toEqual([]);
+  });
+});
+
 // ------------------------------------------------------------------- S10
 
 describe('S10 customer quote responses (§0.2, §7.1 item 20)', () => {
@@ -216,6 +235,36 @@ describe('S7 quote conversion (§3.9, §7.1 items 20 and 39)', () => {
     await expectStatus(h.quotes.convertToOrder(draft.id, {}), 400, 'Quote must be SENT or ACCEPTED to convert');
   });
 
+  it('an S11 split and a conversion at once: the conversion locks the quote, re-reads its lines and copies the split (Red 15 + Blue 10)', async () => {
+    const h = sardine();
+    const { q, items: [it] } = addQuote(h, [{
+      productId: P, sizeOptionId: OPT.large, quantity: 25, unitPrice: 2.5, totalPrice: 62.5, listUnitPrice: 2.8, priceSource: 'TIER',
+      tierMinQty: 25, description: 'Sardine tin — Large',
+    }]);
+    // The conversion reads the quote first (fail-fast checks); the split's transaction commits before the conversion's starts.
+    const converting = h.quotes.convertToOrder(q.id, { autoCreateJobs: false });
+    const splitting = h.quotes.changeLineColour(q.id, it.id, { colours: [{ colourOptionId: OPT.red, quantity: 15 }, { colourOptionId: OPT.blue, quantity: 10 }] });
+    const [out] = await Promise.all([converting, splitting]) as any[];
+    const lines = h.db.t('orderItem').filter((i: any) => i.orderId === out.id);
+    expect(lines.map((i: any) => [i.sizeOptionId, i.colourOptionId, i.quantity, i.totalPrice, i.description])).toEqual([
+      [OPT.large, OPT.red, 15, 37.5, 'Sardine tin — Large — Red'],
+      [OPT.large, OPT.blue, 10, 25, 'Sardine tin — Large — Blue'],
+    ]);
+    expect(out.total).toBe(62.5);
+  });
+
+  it('locks the quote row first (FOR UPDATE), then reads it, then the options and products of its lines', async () => {
+    const h = sardine();
+    const { q } = addQuote(h, [{ productId: P, sizeOptionId: OPT.large, colourOptionId: OPT.red, quantity: 2, unitPrice: 2.8, totalPrice: 5.6, description: 'Sardine tin — Large — Red' }]);
+    const read = jest.spyOn(h.db.quote, 'findUnique');
+    await h.quotes.convertToOrder(q.id, { autoCreateJobs: false });
+    expect(h.db.locks.map((l: any) => `${l.table}:${l.mode}`)).toEqual(['Quote:UPDATE', 'ProductVariant:SHARE', 'Product:SHARE']);
+    expect(h.db.locks[0].ids).toEqual([q.id]);
+    const lockAt = h.db.$queryRaw.mock.invocationCallOrder[h.db.$queryRaw.mock.calls.findIndex(([x]: any) => /lock:Quote:UPDATE/.test(x.sql))];
+    expect(read.mock.invocationCallOrder[0]).toBeLessThan(lockAt); // the fail-fast read
+    expect(lockAt).toBeLessThan(read.mock.invocationCallOrder[1]); // the read the order is built from
+  });
+
   it('a line whose product has vanished → 400 and nothing converted', async () => {
     const h = box();
     const { q } = addQuote(h, [{ productId: 'p-gone', quantity: 1, description: 'Old' }]);
@@ -283,5 +332,50 @@ describe('S11 quote line colour change (§3.9, §7.1 items 36 and 40)', () => {
     const { q: acc, items: [x] } = addQuote(h, [tierLine('Sardine tin — Large')], 'ACCEPTED');
     await expectStatus(h.quotes.changeLineColour(acc.id, x.id, { colours: [{ colourOptionId: null, quantity: 25 }] }), 409);
     await expectStatus(h.quotes.changeLineColour(q.id, x.id, { colours: [{ colourOptionId: null, quantity: 25 }] }), 404);
+  });
+
+  it('two splits of one line at once: the quote lock runs them one after the other → the second reads ×15 → 400; lines 15 + 10', async () => {
+    const h = sardine();
+    const { q, items: [it] } = addQuote(h, [tierLine('Sardine tin — Large')]);
+    const first = h.quotes.changeLineColour(q.id, it.id, split);
+    await expectStatus(h.quotes.changeLineColour(q.id, it.id, { colours: [{ colourOptionId: null, quantity: 20 }, { colourOptionId: OPT.red, quantity: 5 }] }), 400, 'The colours must add up to 15');
+    await expect(first).resolves.toMatchObject({ total: 62.5 });
+    await expectStatus(h.quotes.changeLineColour(q.id, it.id, split), 400, 'The colours must add up to 15'); // a retry
+    expect(quoteItems(h, q.id).map((i: any) => [i.colourOptionId, i.quantity])).toEqual([[OPT.red, 15], [OPT.blue, 10]]);
+  });
+
+  it('locks the quote, then the options, the product and the line (FOR UPDATE, re-read) — the order S2, S11 on orders and O7 use', async () => {
+    const h = sardine();
+    const { q, items: [it] } = addQuote(h, [tierLine('Sardine tin — Large')]);
+    const read = jest.spyOn(h.db.quoteItem, 'findUnique');
+    await h.quotes.changeLineColour(q.id, it.id, split);
+    expect(h.db.locks.map((l: any) => `${l.table}:${l.mode}`)).toEqual(['Quote:UPDATE', 'ProductVariant:SHARE', 'Product:SHARE', 'QuoteItem:UPDATE']);
+    expect(h.db.locks.map((l: any) => l.ids)).toEqual([[q.id], [OPT.blue, OPT.large, OPT.red], [P], [it.id]]);
+    const at = (re: RegExp) => h.db.$queryRaw.mock.invocationCallOrder[h.db.$queryRaw.mock.calls.findIndex(([x]: any) => re.test(x.sql))];
+    expect(at(/lock:Quote:UPDATE/)).toBeLessThan(read.mock.invocationCallOrder[0]);
+    expect(at(/lock:QuoteItem:UPDATE/)).toBeLessThan(read.mock.invocationCallOrder[1]);
+  });
+
+  it('a writer that changes the line while S11 waits for the line lock (O7 making Large a colour) → 409, nothing split', async () => {
+    const h = sardine();
+    const { q, items: [it] } = addQuote(h, [tierLine('Sardine tin — Large')]);
+    const inner = h.db.$queryRaw.getMockImplementation()!;
+    h.db.$queryRaw.mockImplementation(async (x: any) => {
+      if (/lock:QuoteItem:UPDATE/.test(x?.sql ?? '')) Object.assign(h.db.t('quoteItem').find((i: any) => i.id === it.id), { sizeOptionId: null, colourOptionId: OPT.large });
+      return inner(x);
+    });
+    await expectStatus(h.quotes.changeLineColour(q.id, it.id, split), 409, 'This line was changed by someone else — reload and try again');
+    expect(quoteItems(h, q.id)).toHaveLength(1);
+  });
+
+  it('a quote that already has an order → 409 even when its status was edited back to SENT; nothing written', async () => {
+    const h = sardine();
+    const { q, items: [it] } = addQuote(h, [tierLine('Sardine tin — Large')]);
+    await h.quotes.convertToOrder(q.id, { autoCreateJobs: false });
+    h.db.t('quote').find((x: any) => x.id === q.id).status = 'SENT';
+    const before = JSON.stringify(h.db.t('quoteItem'));
+    await expectStatus(h.quotes.changeLineColour(q.id, it.id, split), 409, 'This quote is already an order — change the colour on the order');
+    expect(JSON.stringify(h.db.t('quoteItem'))).toBe(before);
+    await expectStatus(h.quotes.changeLineColour('q-missing', it.id, split), 404);
   });
 });

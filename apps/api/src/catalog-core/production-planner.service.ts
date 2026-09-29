@@ -288,21 +288,27 @@ export class ProductionPlannerService {
     const needs = plan.filamentNeeds;
     const free = await this.freeFilament([...new Set(needs.map((n) => n.materialId))], { excludeOrderId: opts.excludeOrderId, ctx });
     const picks = pickSpools(needs, await this.spoolsFor(needs), { reservedBySpool: await this.reservedBySpool() });
+    // One filament can be split over several planned-identity lines (§3.6.1); "after
+    // open orders" is judged on all of them together, as S3 does (critic fix #31).
+    const gramsByMaterial = new Map<string, number>();
+    for (const n of needs) gramsByMaterial.set(n.materialId, (gramsByMaterial.get(n.materialId) ?? 0) + n.grams);
 
     const filament = needs.map((n, i) => {
       const f = free.materials.get(n.materialId) ?? { totalStock: 0, reserved: 0, free: 0 };
       const p = picks[i];
       const gramsNeeded = Math.round(n.grams * 10) / 10;
+      const materialGrams = gramsByMaterial.get(n.materialId) ?? n.grams;
       return {
         materialId: n.materialId,
         label: n.material.name,
         colorHex: n.material.colorHex,
         slicedMaterialId: n.slicedMaterialId,
         gramsNeeded,
+        materialGramsNeeded: Math.round(materialGrams * 10) / 10,
         totalStock: Math.round(f.totalStock),
         reserved: Math.round(f.reserved),
         free: Math.round(f.free),
-        hasEnough: f.free >= n.grams,
+        hasEnough: f.free >= materialGrams,
         suggestedSpool: p.spool
           ? { id: p.spool.id, pfid: p.spool.printforgeId ?? null, location: p.spool.location?.name ?? null, effectiveRemaining: Math.round(p.effectiveRemaining) }
           : null,

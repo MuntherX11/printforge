@@ -9,7 +9,8 @@ import { api } from '@/lib/api';
 import type { ApiKeepStandard, ApiOptionRow, ColourOptionDetail, ProductDetail, SizeOptionDetail } from '@/lib/types/api';
 import { KeepStandardStep, errorText } from './options-ui';
 import {
-  isLastActive, lastOfAxisText, needsKeepStandardOnCreate, standardFilaments, suggestedColourLabel, type OptionKind,
+  isLastActive, keepStepLabel, keepStepProblem, keepStepText, lastOfAxisText, needsKeepStandardOnActivate, needsKeepStandardOnCreate,
+  type OptionKind,
 } from './options-model';
 
 interface Props {
@@ -38,7 +39,7 @@ function formOf(product: ProductDetail, kind: OptionKind, option: Props['option'
     sku: option?.sku ?? '',
     isActive: option?.isActive ?? true,
     sortOrder: option ? String(option.sortOrder) : '',
-    keepLabel: kind === 'COLOUR' ? suggestedColourLabel(product) : product.baseOptionLabel ?? '',
+    keepLabel: keepStepLabel(product, kind),
     keepSell: true,
   };
 }
@@ -55,7 +56,10 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const word = kind === 'SIZE' ? 'size' : 'colour';
-  const keepStep = !option && needsKeepStandardOnCreate(product, kind);
+  // Adding the first active option of a kind, or re-activating one on an axis with none active (§3.1 rules 6 and 7).
+  const keepStep = option
+    ? form.isActive && needsKeepStandardOnActivate(product, kind, option)
+    : needsKeepStandardOnCreate(product, kind);
 
   useEffect(() => {
     if (open) {
@@ -79,10 +83,7 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
       const n = Number(form.sortOrder);
       if (!Number.isInteger(n) || n < 0 || n > 10000) return 'Sort order must be a whole number from 0 to 10000';
     }
-    if (keepStep) {
-      const l = form.keepLabel.trim();
-      if (l.length < 1 || l.length > 40) return `Enter a name (1 to 40 characters) for the ${kind === 'SIZE' ? 'current size' : 'as-sliced colour'}`;
-    }
+    if (keepStep) return keepStepProblem(kind, form.keepLabel);
     return null;
   }
 
@@ -93,6 +94,9 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
     setSaving(true);
     setError(null);
     const sortOrder = form.sortOrder.trim() === '' ? undefined : Number(form.sortOrder);
+    const keepStandard: ApiKeepStandard | undefined = keepStep
+      ? { label: form.keepLabel.trim(), sellInShop: form.keepSell }
+      : undefined;
     try {
       if (option) {
         await api.patch<ApiOptionRow>(`/products/${product.id}/variants/${option.id}`, {
@@ -100,12 +104,10 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
           sku: form.sku.trim() || null,
           isActive: form.isActive,
           ...(sortOrder !== undefined ? { sortOrder } : {}),
+          ...(keepStandard ? { keepStandard } : {}),
         });
         toast('success', `${form.name.trim()} saved`);
       } else {
-        const keepStandard: ApiKeepStandard | undefined = keepStep
-          ? { label: form.keepLabel.trim(), sellInShop: form.keepSell }
-          : undefined;
         const created = await api.post<ApiOptionRow>(`/products/${product.id}/variants`, {
           name: form.name.trim(),
           sku: form.sku.trim() || null,
@@ -128,7 +130,6 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
   }
 
   const deactivatingLast = !!option && option.isActive && !form.isActive && isLastActive(product, kind, option.id);
-  const filamentNames = standardFilaments(product).map(m => m.name).join(', ');
 
   return (
     <Dialog
@@ -160,24 +161,11 @@ export function OptionDialog({ product, open, kind, option, onClose, onSaved }: 
           <p className="text-sm text-amber-700 dark:text-amber-300">{lastOfAxisText(product, kind)}</p>
         )}
 
-        {keepStep && kind === 'COLOUR' && (
+        {keepStep && (
           <KeepStandardStep
-            intro={`Customers buy this today in ${filamentNames || 'the filaments it was sliced with'}. Keep selling that as a colour named:`}
+            {...keepStepText(product, kind, form.keepSell)}
             label={form.keepLabel}
             sellInShop={form.keepSell}
-            placeholder="e.g. Black"
-            note={form.keepSell ? undefined : 'Unticked: customers no longer see the as-sliced colour once colours exist. Staff can always order it.'}
-            onLabel={v => set('keepLabel', v)}
-            onSell={v => set('keepSell', v)}
-          />
-        )}
-        {keepStep && kind === 'SIZE' && (
-          <KeepStandardStep
-            intro="Customers buy this product today. Keep selling the current one as a size named:"
-            label={form.keepLabel}
-            sellInShop={form.keepSell}
-            placeholder="e.g. Regular"
-            note={form.keepSell ? undefined : 'Unticked: once sizes exist, customers only see the sizes you add. Staff can still order the current one.'}
             onLabel={v => set('keepLabel', v)}
             onSell={v => set('keepSell', v)}
           />

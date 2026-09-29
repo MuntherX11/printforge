@@ -74,6 +74,8 @@ export function fakeStockDb() {
         rows.set(k, v[0]);
         return ret(v[0]);
       }
+      case 'lockLine':
+        return [{ id: v[0] }];
     }
     throw new Error(`unknown statement ${name}`);
   };

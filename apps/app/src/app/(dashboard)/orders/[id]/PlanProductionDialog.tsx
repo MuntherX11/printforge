@@ -49,10 +49,40 @@ function values(row: PlanRow, e: RowEdit | undefined) {
   return { fromStock, toProduce };
 }
 
-function rowProblem(row: PlanRow, e: RowEdit | undefined): string | null {
+/** One printed-stock balance; rows of different lines can read the same one. */
+const bucketOf = (row: PlanRow) => `${row.componentId}|${row.colourKey}`;
+
+interface Bucket { taken: number; rows: number }
+
+/** What the rows take from each balance together (J5 checks the same sum). */
+function bucketsOf(rows: PlanRow[], edits: Record<string, RowEdit>): Map<string, Bucket> {
+  const out = new Map<string, Bucket>();
+  for (const r of rows) {
+    const b = out.get(bucketOf(r)) ?? { taken: 0, rows: 0 };
+    b.taken += values(r, edits[r.rowKey]).fromStock;
+    b.rows += 1;
+    out.set(bucketOf(r), b);
+  }
+  return out;
+}
+
+/**
+ * The most this row can take from stock: what is left to plan, and what the
+ * other rows of its balance leave of it (J5 refuses a larger sum with a 400).
+ */
+function stockCap(row: PlanRow, fromStock: number, buckets: Map<string, Bucket>): number {
+  const others = (buckets.get(bucketOf(row))?.taken ?? fromStock) - fromStock;
+  return Math.max(0, Math.min(row.remaining, row.onHand - others));
+}
+
+function rowProblem(row: PlanRow, e: RowEdit | undefined, buckets: Map<string, Bucket>): string | null {
   const { fromStock, toProduce } = values(row, e);
   if (fromStock > Math.min(row.onHand, row.remaining)) return `At most ${Math.min(row.onHand, row.remaining)} from stock`;
+  const shared = buckets.get(bucketOf(row));
+  if (fromStock > 0 && shared && shared.taken > row.onHand) return `Lines sharing this stock take ${shared.taken} — only ${row.onHand} on hand`;
   if (fromStock + toProduce > row.remaining) return `Only ${row.remaining} left to plan`;
+  // J5 can't plan plates without a layout (NO_USABLE_LAYOUT) and would refuse the whole plan.
+  if (toProduce > 0 && row.layouts.length === 0) return 'Nothing to print it from — set To Produce to 0 to plan the other rows';
   if (toProduce > 0 && e?.plates) return planProblem(e.plates, row.layouts, toProduce);
   return null;
 }
@@ -74,6 +104,8 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
 
   const edit = (rowKey: string, next: RowEdit) => setEdits(prev => ({ ...prev, [rowKey]: { ...prev[rowKey], ...next } }));
 
+  const buckets = useMemo(() => bucketsOf(rows, edits), [rows, edits]);
+
   const totals = useMemo(() => {
     let fromStock = 0;
     let jobs = 0;
@@ -82,10 +114,10 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
       const v = values(r, edits[r.rowKey]);
       fromStock += v.fromStock;
       if (v.toProduce > 0) jobs += 1;
-      if (rowProblem(r, edits[r.rowKey])) problems += 1;
+      if (rowProblem(r, edits[r.rowKey], buckets)) problems += 1;
     }
     return { fromStock, jobs, problems };
-  }, [rows, edits]);
+  }, [rows, edits, buckets]);
 
   const label = totals.fromStock > 0
     ? `Take ${totals.fromStock} from stock · create ${plural(totals.jobs, 'job')}`
@@ -153,7 +185,8 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
                   const e = edits[row.rowKey];
                   const { fromStock, toProduce } = values(row, e);
                   const done = row.remaining === 0;
-                  const problem = done ? null : rowProblem(row, e);
+                  const problem = done ? null : rowProblem(row, e, buckets);
+                  const sharedBy = (buckets.get(bucketOf(row))?.rows ?? 1) - 1;
                   const scale = row.toProduce > 0 ? toProduce / row.toProduce : 0;
                   return (
                     <TableRow key={row.rowKey} className={done || (toProduce === 0 && fromStock === 0) ? 'opacity-50' : ''}>
@@ -205,17 +238,26 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
                         </div>
                       </TableCell>
                       <TableCell className="font-mono align-top">{row.needed}</TableCell>
-                      <TableCell className="font-mono align-top">{row.onHand}</TableCell>
+                      <TableCell className="font-mono align-top">
+                        {row.onHand}
+                        {sharedBy > 0 && row.onHand > 0 && (
+                          <p className="font-sans text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">shared with {plural(sharedBy, 'line')}</p>
+                        )}
+                      </TableCell>
                       <TableCell className="align-top">
                         <input
                           type="number"
                           min="0"
-                          max={Math.min(row.onHand, row.remaining)}
+                          max={stockCap(row, fromStock, buckets)}
                           aria-label={`${row.componentDescription}: from stock`}
                           disabled={done || row.onHand === 0}
                           className={`${cell} w-16 text-center font-mono`}
                           value={fromStock}
-                          onChange={ev => edit(row.rowKey, { fromStock: Math.max(0, parseInt(ev.target.value, 10) || 0) })}
+                          onChange={ev => {
+                            const n = Math.max(0, parseInt(ev.target.value, 10) || 0);
+                            // To Produce follows From stock unless typed, so plates chosen for the old amount no longer fit it.
+                            edit(row.rowKey, e?.toProduce === undefined ? { fromStock: n, plates: undefined } : { fromStock: n });
+                          }}
                         />
                       </TableCell>
                       <TableCell className="align-top">

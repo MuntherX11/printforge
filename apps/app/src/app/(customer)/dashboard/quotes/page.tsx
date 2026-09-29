@@ -104,9 +104,12 @@ export default function CustomerQuotesPage() {
                     <span className="text-lg font-bold text-brand-600">{q.total?.toFixed(3)} OMR</span>
                     {(q.status === 'SENT' || q.status === 'DRAFT') && (
                       <div className="flex gap-2">
-                        <Button size="sm" onClick={() => handleAccept(q.id)}>
-                          <Check className="h-4 w-4 mr-1" /> Accept
-                        </Button>
+                        {/* A request you priced yourself is accepted once we review and send it. */}
+                        {(q.status === 'SENT' || q.source !== 'CUSTOMER') && (
+                          <Button size="sm" onClick={() => handleAccept(q.id)}>
+                            <Check className="h-4 w-4 mr-1" /> Accept
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" onClick={() => setShowReject(q.id)}>
                           <X className="h-4 w-4 mr-1" /> Reject
                         </Button>

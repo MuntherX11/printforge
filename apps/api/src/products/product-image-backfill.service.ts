@@ -13,6 +13,7 @@ import {
   sanitizeImageName,
   uploadDir,
 } from './product-images.service';
+import { lockProduct } from './product-locks';
 
 export const BF2_KEY = 'product-photos-v1';
 export const BF2_CUTOFF_SETTING = 'backfill:product-photos-v1:cutoff';
@@ -316,6 +317,11 @@ export class ProductImageBackfillService implements OnApplicationBootstrap {
    * then the other legacy photos by age, then photos added since. Reads the DB,
    * so a crash before this step is repaired on the next boot, and only touches
    * products that still have marker rows, so the owner's reordering survives.
+   *
+   * A product that already has a migrated photo in a real position was
+   * normalised on an earlier boot, and the owner may have ordered it since. A
+   * legacy photo that migrates later (its file was missing then) goes after the
+   * current photos instead, so it never takes over the cover.
    */
   async normalise(): Promise<void> {
     const pending = await this.prisma.productImage.findMany({
@@ -326,6 +332,8 @@ export class ProductImageBackfillService implements OnApplicationBootstrap {
     for (const { productId } of pending) {
       try {
         await this.prisma.$transaction(async (tx) => {
+          // Same row lock as G2/G3: no upload or reorder interleaves with this one.
+          if (!(await lockProduct(tx, productId, 'UPDATE'))) return;
           const imgs = await tx.productImage.findMany({
             where: { productId },
             select: { id: true, sortOrder: true, createdAt: true, legacyAttachmentId: true },
@@ -346,11 +354,11 @@ export class ProductImageBackfillService implements OnApplicationBootstrap {
           const cover = coverAtt ? legacy.find((i) => i.legacyAttachmentId === coverAtt.id) : undefined;
           const byAge = (x: { createdAt: Date; id: string }, y: { createdAt: Date; id: string }) =>
             new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime() || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
-          const ordered = [
-            ...(cover ? [cover] : []),
-            ...legacy.filter((i) => i !== cover).sort(byAge),
-            ...others.sort((x, y) => x.sortOrder - y.sortOrder || byAge(x, y)),
-          ];
+          const migrated = [...(cover ? [cover] : []), ...legacy.filter((i) => i !== cover).sort(byAge)];
+          const current = others.sort((x, y) => x.sortOrder - y.sortOrder || byAge(x, y));
+          // A non-marker legacy row means an earlier run already normalised this product.
+          const settled = others.some((i) => i.legacyAttachmentId);
+          const ordered = settled ? [...current, ...migrated] : [...migrated, ...current];
           for (let i = 0; i < ordered.length; i++) {
             if (ordered[i].sortOrder !== i) {
               await tx.productImage.update({ where: { id: ordered[i].id }, data: { sortOrder: i } });

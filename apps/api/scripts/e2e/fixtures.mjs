@@ -82,12 +82,12 @@ function exifTiff() {
   return t;
 }
 
-/** Structurally valid JPEG (SOF0 16×16) with an Exif APP1 carrying a GPS IFD. */
-export function makeGpsJpeg() {
+/** Structurally valid JPEG (SOF0 side×side) with an Exif APP1 carrying a GPS IFD. */
+function gpsJpeg(side) {
   const sof = Buffer.alloc(15);
   sof[0] = 8;
-  sof.writeUInt16BE(16, 1);
-  sof.writeUInt16BE(16, 3);
+  sof.writeUInt16BE(side, 1);
+  sof.writeUInt16BE(side, 3);
   sof[5] = 3;
   return Buffer.concat([
     Buffer.from([0xff, 0xd8]),
@@ -99,6 +99,15 @@ export function makeGpsJpeg() {
     Buffer.from([0x12, 0x34, 0x56, 0x78, 0x9a]),
     Buffer.from([0xff, 0xd9]),
   ]);
+}
+
+/**
+ * A phone-style 16×16 JPEG with GPS in three places: the primary's Exif, a
+ * secondary image appended after its EOI (MPF preview) with its own Exif, and a
+ * trailer (Samsung SEFT / motion photo).
+ */
+export function makeGpsJpeg() {
+  return Buffer.concat([gpsJpeg(16), gpsJpeg(8), Buffer.from(`Image_UTC_Data1700000000000 ${GPS_SECRET}`, 'latin1')]);
 }
 
 export const SVG_AS_PNG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');

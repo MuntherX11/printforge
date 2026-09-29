@@ -1,5 +1,18 @@
 import { ConflictException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+
+/**
+ * The per-order plan lock (spec §4.4 J5 rule 1): a transaction-scoped advisory
+ * lock on `plan:<orderId>`. J5 takes it first, and so do the two other writers
+ * of an order's printed-stock allocations, S9's cancel and S11's line colour
+ * change. Each of them therefore runs wholly before or after a J5 of the same
+ * order: a cancel returns what a J5 in flight allocated, a J5 after a cancel
+ * reads CANCELLED, and a J5 after an S11 split recomputes on the new lines.
+ * Taken before any other lock, so it adds no lock-order cycle.
+ */
+export async function lockOrderPlan(tx: { $queryRaw: (q: Prisma.Sql) => Promise<unknown> }, orderId: string): Promise<void> {
+  await tx.$queryRaw(Prisma.sql`/* plan:advisory */ SELECT 1 AS "ok" FROM (SELECT pg_advisory_xact_lock(hashtext(${`plan:${orderId}`}))) AS "l"`);
+}
 
 /**
  * S11's job cancellation (spec §3.9 "Changing a sold line's colour", WP6 for
