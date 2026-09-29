@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { useWebSocket, type PrinterStatusEvent } from '@/lib/use-websocket';
 import type { DashboardKPIs } from '@printforge/types';
@@ -14,6 +15,10 @@ import { useToast } from '@/components/ui/toast';
 
 function ActivePrintCard({ printerId, status, printerName }: { printerId: string; status: PrinterStatusEvent; printerName: string }) {
   const { toast } = useToast();
+  // POST /moonraker/control is ADMIN or OPERATOR, like the printer pages; the
+  // other roles see the live status without the buttons.
+  const { role } = useAuth();
+  const canControl = role === 'ADMIN' || role === 'OPERATOR';
   const [controlling, setControlling] = useState(false);
   const isPrinting = status.printStats?.state === 'printing';
   const isPaused = status.printStats?.state === 'paused';
@@ -46,7 +51,7 @@ function ActivePrintCard({ printerId, status, printerName }: { printerId: string
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {(isPrinting || isPaused) && (
+            {canControl && (isPrinting || isPaused) && (
               <>
                 {isPrinting && (
                   <Button variant="outline" size="sm" onClick={() => control('pause')} disabled={controlling}>
