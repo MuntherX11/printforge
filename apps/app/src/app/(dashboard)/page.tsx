@@ -202,26 +202,21 @@ export default function DashboardPage() {
 
       {/* KPI summary strip — ledger row, not hero cards */}
       <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
-        {stats.map((stat) => {
-          const content = (
-            <>
-              <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{stat.name}</dt>
-              <dd className={`text-xl font-semibold tabular-nums min-w-0 truncate ${stat.color}`}>{stat.value}</dd>
-            </>
-          );
-          return stat.href ? (
-            <div key={stat.name} className="min-w-0">
-              <Link
-                href={stat.href}
-                className="block h-full px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
-              >
-                <div className="flex flex-col gap-0.5">{content}</div>
-              </Link>
-            </div>
-          ) : (
-            <div key={stat.name} className="px-5 py-4 flex flex-col gap-0.5">{content}</div>
-          );
-        })}
+        {stats.map((stat) => (
+          // A linked tile keeps the dt/dd pairing: the link sits in the dd and
+          // its ::after stretches over the whole tile as the click target.
+          <div
+            key={stat.name}
+            className={`px-5 py-4 flex flex-col gap-0.5${stat.href ? ' relative hover:bg-gray-50 dark:hover:bg-gray-800/50 focus-within:ring-2 focus-within:ring-inset focus-within:ring-brand-500' : ''}`}
+          >
+            <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{stat.name}</dt>
+            <dd className={`text-xl font-semibold tabular-nums min-w-0 truncate ${stat.color}`}>
+              {stat.href ? (
+                <Link href={stat.href} className="after:absolute after:inset-0 focus-visible:outline-none">{stat.value}</Link>
+              ) : stat.value}
+            </dd>
+          </div>
+        ))}
       </dl>
 
       <div className="grid gap-6 lg:grid-cols-2">
