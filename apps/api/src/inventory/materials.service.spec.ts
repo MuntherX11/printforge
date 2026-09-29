@@ -134,6 +134,17 @@ describe('MaterialsService.create — duplicate brand + type + colour', () => {
     expect(db.t('material')).toHaveLength(1);
   });
 
+  it("eSUN / PLA / Red over a stored ' esun ' / PLA / 'RED' → 409 labelled with the incoming spelling", async () => {
+    const { db, svc } = guardSetup([{ ...RED, id: 'm-odd', name: 'esun pla red (old sheet)', brand: ' esun ', color: 'RED' }]);
+    const body = await conflictBody(svc.create({ name: 'eSUN PLA Red', type: MaterialType.PLA, brand: 'eSUN', color: 'Red', costPerGram: 0.01 }));
+    expect(body).toEqual({
+      message: 'eSUN · PLA · Red already exists as "esun pla red (old sheet)" — add a spool to it instead',
+      code: 'MATERIAL_DUPLICATE',
+      existing: { id: 'm-odd', name: 'esun pla red (old sheet)' },
+    });
+    expect(db.t('material')).toHaveLength(1);
+  });
+
   it('names the oldest of legacy duplicates', async () => {
     const { svc } = guardSetup([{ ...RED, id: 'm-new', name: 'Newer Red', createdAt: T(5) }, RED]);
     const body = await conflictBody(svc.create({ name: 'X', type: MaterialType.PLA, brand: 'eSUN', color: 'Red' }));
