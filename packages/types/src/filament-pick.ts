@@ -22,7 +22,8 @@ export interface SlotMaterialPick {
 /**
  * One component change. `fields` holds the changed P10 fields only;
  * `materialId` is a single-material filament change; `slots` is a multicolour
- * change and lists EVERY slot.
+ * change. P11 writes only the slots listed and keeps the rest: Edit component
+ * lists every slot of its form, a BOM chip pick lists just its own slot.
  */
 export interface ComponentWrite {
   fields: { description?: string; gramsUsed?: number; printMinutes?: number; quantity?: number };
@@ -108,8 +109,9 @@ export interface SlotFilamentState {
 /**
  * The write for picking `pickedId` for colour slot `colorIndex`, or null when
  * nothing would change (same filament, unknown slot, or no pick). A
- * multicolour pick lists every slot, sorted by colour, with only that one
- * replaced. Never mutates `state`.
+ * multicolour pick sends only the picked slot: P11 keeps the others as they
+ * are in the database, so a page loaded before another slot changed can't
+ * put that slot back. Never mutates `state`.
  */
 export function filamentPickWrite(state: SlotFilamentState, colorIndex: number, pickedId: string): ComponentWrite | null {
   if (!pickedId) return null;
@@ -119,10 +121,7 @@ export function filamentPickWrite(state: SlotFilamentState, colorIndex: number, 
   }
   const slot = state.slots.find((s) => s.colorIndex === colorIndex);
   if (!slot || slot.materialId === pickedId) return null;
-  const slots = [...state.slots]
-    .sort((a, b) => a.colorIndex - b.colorIndex)
-    .map((s) => ({ colorIndex: s.colorIndex, materialId: s.colorIndex === colorIndex ? pickedId : s.materialId }));
-  return { fields: {}, materialId: null, slots };
+  return { fields: {}, materialId: null, slots: [{ colorIndex, materialId: pickedId }] };
 }
 
 /**

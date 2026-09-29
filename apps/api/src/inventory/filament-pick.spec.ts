@@ -211,16 +211,24 @@ describe('filamentPickWrite', () => {
     expect(filamentPickWrite({ multi: false, materialId: null, slots: [] }, 0, 'm2')).toEqual({ fields: {}, materialId: 'm2', slots: null });
   });
 
-  it('multicolour: lists every slot sorted by colour, replacing only the picked one', () => {
+  it('multicolour: sends only the picked slot, so the other slots are left as the server has them', () => {
     expect(filamentPickWrite(multi, 1, 'm9')).toEqual({
       fields: {},
       materialId: null,
-      slots: [
-        { colorIndex: 0, materialId: 'm1' },
-        { colorIndex: 1, materialId: 'm9' },
-        { colorIndex: 2, materialId: 'm3' },
-      ],
+      slots: [{ colorIndex: 1, materialId: 'm9' }],
     });
+  });
+
+  it('multicolour: the request plan carries only the picked slot (dry run, then the write)', () => {
+    const w = filamentPickWrite(multi, 2, 'm9');
+    expect(w).not.toBeNull();
+    const base = '/products/p1/components/c1';
+    expect(componentDryRunRequests(base, w!)).toEqual([
+      { method: 'PUT', path: `${base}/materials?dryRun=1`, body: { slots: [{ colorIndex: 2, materialId: 'm9' }] } },
+    ]);
+    expect(componentWriteRequests(base, w!, false)).toEqual([
+      { method: 'PUT', path: `${base}/materials`, body: { slots: [{ colorIndex: 2, materialId: 'm9' }] } },
+    ]);
   });
 
   it('multicolour: null when the slot already uses it or the colour index is unknown', () => {
