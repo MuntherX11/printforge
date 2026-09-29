@@ -296,6 +296,38 @@ export function parsePartLine(raw: unknown): { partId: string; quantity: number 
   return { partId, quantity: q };
 }
 
+/** The cells one Excel BOM row supplies; a number cell that is blank or not a number is null. */
+export interface BomRowCells {
+  name: string | null;
+  sku: string | null;
+  description: string | null;
+  basePrice: number | null;
+  estimatedMinutes: number | null;
+  estimatedGrams: number | null;
+}
+
+export type BomRowInput = Omit<BomRowCells, 'name'> & { name: string };
+
+/**
+ * One row of POST /products/upload-bom (known exception C17: a SKU match still
+ * writes basePrice). The columns were picked by header but written unbounded,
+ * so a negative or Infinity basePrice repriced a product by SKU. Text follows
+ * parseProductCreate; a number outside its bound throws, and the upload reports
+ * it as that row's error.
+ */
+export function parseBomRow(cells: BomRowCells): BomRowInput {
+  const num = (v: number | null, field: string, range: { min: number; max: number }) =>
+    (v === null ? null : requiredNumber(v, field, range));
+  return {
+    name: name(cells.name, 'Product name', 200),
+    sku: cells.sku ? nullableText(cells.sku, 'sku', 64, false) : null,
+    description: cells.description ? nullableText(cells.description, 'description', 2000) : null,
+    basePrice: num(cells.basePrice, 'basePrice', { min: 0, max: 1_000_000 }),
+    estimatedMinutes: num(cells.estimatedMinutes, 'estimatedMinutes', MINUTES),
+    estimatedGrams: num(cells.estimatedGrams, 'estimatedGrams', { min: 0, max: GRAMS.max }),
+  };
+}
+
 // ------------------------------------------------------------------- options
 
 export interface KeepStandardInput { label: string; sellInShop: boolean }
