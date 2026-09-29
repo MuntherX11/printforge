@@ -26,6 +26,7 @@ const errorText = (err: unknown, fallback = 'Failed to load') => (err instanceof
 
 interface SpoolOption {
   id: string;
+  isActive: boolean;
   currentWeight: number;
   material: { type: string; color?: string | null; brand?: string | null };
 }
@@ -78,7 +79,7 @@ export default function NewJobPage() {
     if (mode === 'test') {
       setJobName('Test print');
       api.get<SpoolOption[]>('/spools')
-        .then((r) => setSpools((Array.isArray(r) ? r : []).filter((s) => s.currentWeight > 0)))
+        .then((r) => setSpools((Array.isArray(r) ? r : []).filter((s) => s.isActive && s.currentWeight > 0)))
         .catch((err: unknown) => toast('error', errorText(err, 'Failed to load spools')));
     }
   }, [mode]);
