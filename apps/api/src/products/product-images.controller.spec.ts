@@ -31,6 +31,8 @@ function fakeRes() {
       return this;
     },
     json(b: any) {
+      // Like express: only sets the type when none is set yet.
+      if (!this.headers['content-type']) this.headers['content-type'] = 'application/json';
       this.body = b;
       return this;
     },
@@ -161,6 +163,27 @@ describe('ProductImagesController', () => {
       sendImageFile(res, '/nowhere/x.png', 'image/png');
       expect(res.statusCode).toBe(404);
       expect(res.body).toEqual({ success: false, error: 'Image not found', statusCode: 404 });
+      expect(res.headers['content-type']).toBe('application/json');
+      expect(res.headers['content-disposition']).toBeUndefined();
+    });
+
+    it('with real express, a file missing on disk is a JSON 404, not a body labelled image/png', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const express = require('express');
+      const app = express();
+      app.get('/img', (_req: any, res: any) => sendImageFile(res, path.join(tmp, 'product-images', `${'f'.repeat(32)}.png`), 'image/png'));
+      const server = app.listen(0, '127.0.0.1');
+      await new Promise((r) => server.once('listening', r));
+      try {
+        const r = await fetch(`http://127.0.0.1:${server.address().port}/img`);
+        expect(r.status).toBe(404);
+        expect(r.headers.get('content-type')).toBe('application/json; charset=utf-8');
+        expect(r.headers.get('content-disposition')).toBeNull();
+        expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+        expect(await r.json()).toEqual({ success: false, error: 'Image not found', statusCode: 404 });
+      } finally {
+        await new Promise((r) => server.close(r));
+      }
     });
 
     it('sendImageFile refuses a mime outside the allowlist', () => {
