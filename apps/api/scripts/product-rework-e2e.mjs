@@ -10,7 +10,9 @@
  * customer, orders, quotes, jobs and an invoice, all named E2E-<timestamp> so
  * it can run repeatedly, and it sets the cost settings to the §3.8 values
  * (overhead 15 %, electricity 0.025, purge 5 g, tax 0) for the run, restoring
- * the previous values at the end. Never point it at production: a non-local
+ * the previous values at the end, also on Ctrl-C or SIGTERM (a hard kill or a
+ * second Ctrl-C skips it; the saved values are printed if the restore fails).
+ * Never point it at production: a non-local
  * --api needs --allow-remote (a staging copy only).
  *
  * --uploads-dir: the API's UPLOAD_DIR as seen from this machine (local stack),
@@ -81,6 +83,21 @@ async function main() {
   };
   console.log(`product-rework e2e against ${args.api} as ${ctx.ts}`);
 
+  // Restore the settings once, whichever comes first: the end of the run, or
+  // Ctrl-C / kill. An interrupted run must not leave the instance on the test
+  // costs and tax 0. A second Ctrl-C exits at once.
+  let restoring = null;
+  const restore = () =>
+    (restoring ??= restoreSettings(ctx).catch((e) => {
+      console.log(`WARNING: could not restore settings: ${e?.message ?? e}. Saved values: ${JSON.stringify(ctx.savedSettings)}`);
+    }));
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.once(signal, () => {
+      console.log(`\n${signal}: restoring the settings before exiting (Ctrl-C again to exit now)`);
+      restore().finally(() => process.exit(code));
+    });
+  }
+
   const steps = [...stepsCore, ...stepsProduction, ...stepsAccess, ...stepsOptions, ...stepsPerfAndConversion];
   let failed = null;
   const t0 = Date.now();
@@ -102,11 +119,7 @@ async function main() {
     failed = failed ?? { n: 0, title: 'setup', e };
     console.log(`FAIL setup: ${e?.stack ?? e}`);
   } finally {
-    try {
-      await restoreSettings(ctx);
-    } catch (e) {
-      console.log(`WARNING: could not restore settings: ${e?.message ?? e}. Saved values: ${JSON.stringify(ctx.savedSettings)}`);
-    }
+    await restore();
   }
 
   if (ctx.timings.length) {
