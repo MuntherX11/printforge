@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateSpoolDto, UpdateSpoolDto, AdjustSpoolWeightDto } from '@printforge/types';
-import { optionalNumber, requiredNumber } from '../common/utils/validate-number';
+import { allowedBody, optionalNumber, optionalText, requiredNumber } from '../common/utils/validate-number';
 
 /** Physical bounds for a filament spool, in grams. */
 const W = { min: 0, max: 100_000 };
@@ -9,6 +10,59 @@ import * as QRCode from 'qrcode';
 import JSZip from 'jszip';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PDFDocument = require('pdfkit');
+
+/** The only keys PATCH /spools/:id writes. */
+const SPOOL_PATCH_KEYS: readonly string[] = [
+  'currentWeight', 'initialWeight', 'spoolWeight', 'purchasePrice', 'isActive', 'locationId', 'lotNumber', 'purchaseDate',
+];
+
+/**
+ * The Prisma data for PATCH /spools/:id, built key by key from the allowlist.
+ * UpdateSpoolDto is an interface, so the global ValidationPipe never strips
+ * extra keys: passing the body through let `jobMaterials: { deleteMany: {} }`
+ * erase a spool's job history, `material: { update: … }` rename or reprice its
+ * filament (getting round the material bounds), and `printforgeId` or
+ * `materialId` change the spool's QR identity or cost basis. Any other key →
+ * 400. Weights are grams, purchasePrice OMR, all bounded; a negative
+ * currentWeight was once stored live (-50 g).
+ */
+export function spoolPatchData(raw: unknown): Prisma.SpoolUncheckedUpdateInput {
+  const body = allowedBody(raw, SPOOL_PATCH_KEYS);
+  const data: Prisma.SpoolUncheckedUpdateInput = {};
+
+  const currentWeight = optionalNumber(body.currentWeight, 'currentWeight', W);
+  if (currentWeight !== undefined) data.currentWeight = currentWeight;
+  const initialWeight = optionalNumber(body.initialWeight, 'initialWeight', { min: 1, max: W.max });
+  if (initialWeight !== undefined) data.initialWeight = initialWeight;
+  const spoolWeight = optionalNumber(body.spoolWeight, 'spoolWeight', { min: 0, max: 10_000 });
+  if (spoolWeight !== undefined) data.spoolWeight = spoolWeight;
+  const purchasePrice = optionalNumber(body.purchasePrice, 'purchasePrice', { min: 0, max: 100_000 });
+  if (purchasePrice !== undefined) data.purchasePrice = purchasePrice;
+
+  const { isActive, locationId } = body;
+  if (isActive !== undefined) {
+    if (typeof isActive !== 'boolean') throw new BadRequestException('"isActive" must be true or false');
+    data.isActive = isActive;
+  }
+  if (locationId !== undefined) {
+    if (locationId !== null && typeof locationId !== 'string') {
+      throw new BadRequestException('"locationId" must be a location id or null');
+    }
+    data.locationId = locationId?.trim() || null;
+  }
+  const lotNumber = optionalText(body.lotNumber, 'lotNumber', 100);
+  if (lotNumber !== undefined) data.lotNumber = lotNumber;
+  if (body.purchaseDate !== undefined) data.purchaseDate = optionalDate(body.purchaseDate, 'purchaseDate');
+  return data;
+}
+
+/** A date from an ISO string (null or '' clears it); anything unparseable → 400. */
+function optionalDate(raw: unknown, field: string): Date | null {
+  if (raw === null || raw === '') return null;
+  const date = typeof raw === 'string' ? new Date(raw) : null;
+  if (!date || !Number.isFinite(date.getTime())) throw new BadRequestException(`"${field}" must be a date`);
+  return date;
+}
 
 @Injectable()
 export class SpoolsService {
@@ -83,23 +137,12 @@ export class SpoolsService {
   }
 
   async update(id: string, dto: UpdateSpoolDto) {
-    await this.findOne(id);
-    // The DTO used to be passed straight through, so PATCH could write a
-    // NEGATIVE currentWeight (verified live: it stored -50 g). Bound the
-    // numeric fields and let everything else through untouched.
-    const d: any = { ...dto };
-    const bounded: Array<[string, { min: number; max: number }]> = [
-      ['currentWeight', W],
-      ['initialWeight', { min: 1, max: W.max }],
-      ['spoolWeight', { min: 0, max: 10_000 }],
-      ['purchasePrice', { min: 0, max: 100_000 }],
-    ];
-    for (const [field, range] of bounded) {
-      if (d[field] !== undefined) d[field] = optionalNumber(d[field], field, range);
-    }
+    const data = spoolPatchData(dto);
+    const spool = await this.prisma.spool.findUnique({ where: { id }, select: { id: true } });
+    if (!spool) throw new NotFoundException('Spool not found');
     return this.prisma.spool.update({
       where: { id },
-      data: d,
+      data,
       include: { material: true },
     });
   }
