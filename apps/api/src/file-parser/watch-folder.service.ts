@@ -206,12 +206,25 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
    * write. The body goes through parseWatchImport and the component, when a
    * material is chosen, through parseComponentCreate's bounds. The SKU must be
    * free and the material must exist. Product and component are written in one
-   * transaction, and the file is claimed first so a second click can't import
-   * it twice.
+   * transaction. The file is claimed before the first await, so of two
+   * imports of the same file only one gets past the pending check; if that
+   * one fails, it hands the file back to pending (unless it was dismissed
+   * meanwhile), and nothing else can.
    */
   async importAsProduct(id: string, body: unknown) {
     const imp = this.pendingImports.get(id);
     if (!imp || imp.status !== 'pending') return null;
+    imp.status = 'imported';
+    try {
+      return await this.createProductFrom(imp, body);
+    } catch (e) {
+      if (imp.status === 'imported') imp.status = 'pending';
+      throw e;
+    }
+  }
+
+  /** importAsProduct's work, once the file is claimed. */
+  private async createProductFrom(imp: PendingImport, body: unknown) {
     const params = parseWatchImport(body);
 
     const analysis = imp.analysis ?? {};
@@ -241,33 +254,27 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
       if (!material) throw new NotFoundException('Material not found');
     }
 
-    imp.status = 'imported';
-    try {
-      return await this.prisma.$transaction(async (tx: any) => {
-        const product = await tx.product.create({
-          data: { name: params.name, sku: params.sku, estimatedGrams: grams, estimatedMinutes: minutes },
-          select: { id: true },
-        });
-        if (component) {
-          await tx.productComponent.create({
-            data: {
-              productId: product.id,
-              variantId: null,
-              materialId: component.materialId,
-              description: component.description,
-              gramsUsed: component.gramsUsed,
-              printMinutes: component.printMinutes,
-              quantity: component.quantity,
-              sortOrder: 0,
-              stockConfirmedAt: new Date(),
-            },
-          });
-        }
-        return tx.product.findUnique({ where: { id: product.id }, include: { components: { include: { material: true } } } });
+    return this.prisma.$transaction(async (tx: any) => {
+      const product = await tx.product.create({
+        data: { name: params.name, sku: params.sku, estimatedGrams: grams, estimatedMinutes: minutes },
+        select: { id: true },
       });
-    } catch (e) {
-      imp.status = 'pending';
-      throw e;
-    }
+      if (component) {
+        await tx.productComponent.create({
+          data: {
+            productId: product.id,
+            variantId: null,
+            materialId: component.materialId,
+            description: component.description,
+            gramsUsed: component.gramsUsed,
+            printMinutes: component.printMinutes,
+            quantity: component.quantity,
+            sortOrder: 0,
+            stockConfirmedAt: new Date(),
+          },
+        });
+      }
+      return tx.product.findUnique({ where: { id: product.id }, include: { components: { include: { material: true } } } });
+    });
   }
 }

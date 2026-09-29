@@ -85,6 +85,40 @@ describe('POST /watch-folder/:id/import body', () => {
     expect(h.db.t('product')).toHaveLength(2);
   });
 
+  it('two imports of the same file at once make one product; the other finds it taken', async () => {
+    const h = setup();
+    const [a, b] = await Promise.all([
+      h.svc.importAsProduct(h.imp.id, { name: 'Bracket', sku: 'BR-1', materialId: 'mat-1' }),
+      h.svc.importAsProduct(h.imp.id, { name: 'Bracket again', sku: 'BR-2', materialId: 'mat-1' }),
+    ]);
+    expect([a, b].filter(Boolean)).toHaveLength(1);
+    expect(a).toMatchObject({ name: 'Bracket', sku: 'BR-1' });
+    expect(b).toBeNull();
+    expect(h.db.t('product')).toHaveLength(2);
+    expect(h.db.t('productComponent')).toHaveLength(1);
+    expect(h.imp.status).toBe('imported');
+  });
+
+  it('only the import that claimed the file hands it back when it fails, and a dismissal meanwhile stands', async () => {
+    const h = setup();
+    // The first import fails after its awaits (taken SKU); the second, sent meanwhile, finds the file taken.
+    const [first, second] = await Promise.all([
+      errorOf(h.svc.importAsProduct(h.imp.id, { name: 'Bracket', sku: 'BOX-1' })),
+      h.svc.importAsProduct(h.imp.id, { name: 'Bracket' }),
+    ]);
+    expect(first).toBeInstanceOf(ConflictException);
+    expect(second).toBeNull();
+    expect(h.imp.status).toBe('pending');
+    expect(h.db.t('product')).toHaveLength(1);
+
+    // Dismissed while a failing import is in flight: it stays dismissed.
+    const failing = errorOf(h.svc.importAsProduct(h.imp.id, { name: 'Bracket', sku: 'BOX-1' }));
+    expect(h.svc.dismiss(h.imp.id)).toBe(true);
+    expect(await failing).toBeInstanceOf(ConflictException);
+    expect(h.imp.status).toBe('dismissed');
+    expect(await h.svc.importAsProduct(h.imp.id, { name: 'Bracket' })).toBeNull();
+  });
+
   it('without a material the product is saved alone, as before', async () => {
     const h = setup({ estimatedGrams: 12, estimatedMinutes: 30 }, 'stl');
     const out: any = await h.svc.importAsProduct(h.imp.id, { name: 'Clip' });
