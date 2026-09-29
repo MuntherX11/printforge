@@ -8,11 +8,16 @@ import { Select } from '@/components/ui/select';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { FolderOpen, FileText, Box, Check, X, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 
 export default function WatchFolderPage() {
   const { toast } = useToast();
+  // Importing (it creates a product) and dismissing a file are ADMIN or
+  // OPERATOR on the API; other roles see the pending list read-only.
+  const { role } = useAuth();
+  const canWrite = role === 'ADMIN' || role === 'OPERATOR';
   const [imports, setImports] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,14 +149,16 @@ export default function WatchFolderPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => setShowImport(imp)}>
-                      <Check className="h-4 w-4 mr-1" /> Import
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleDismiss(imp.id)}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => setShowImport(imp)}>
+                        <Check className="h-4 w-4 mr-1" /> Import
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleDismiss(imp.id)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -159,7 +166,7 @@ export default function WatchFolderPage() {
         </div>
       )}
 
-      <Dialog open={!!showImport} onClose={() => setShowImport(null)} title="Import as Product">
+      <Dialog open={canWrite && !!showImport} onClose={() => setShowImport(null)} title="Import as Product">
         <form onSubmit={handleImport} className="space-y-4">
           <Input
             name="name"

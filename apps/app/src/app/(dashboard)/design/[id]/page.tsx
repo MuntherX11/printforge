@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loading } from '@/components/ui/loading';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import type { ApiDesignProject, ApiUser } from '@/lib/types/api';
 import { formatDate } from '@/lib/utils';
 import { Send, UserPlus, Upload, FileText } from 'lucide-react';
@@ -23,6 +24,12 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'error' 
 
 export default function DesignDetailPage() {
   const { id } = useParams();
+  // The API's rules (DESIGN_STAFF_WRITE_ROLES): posting in the chat, status
+  // changes, revisions and the fee are ADMIN or OPERATOR, assigning a designer
+  // is ADMIN. VIEWER and ACCOUNTING see the project read-only.
+  const { role } = useAuth();
+  const canWrite = role === 'ADMIN' || role === 'OPERATOR';
+  const canAssign = role === 'ADMIN';
   const [project, setProject] = useState<ApiDesignProject | null>(null);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,17 +162,19 @@ export default function DesignDetailPage() {
                 <div ref={chatEndRef} />
               </div>
 
-              <form onSubmit={handleSendMessage} className="flex gap-2">
-                <Textarea
-                  value={message}
-                  onChange={e => setMessage(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 min-h-[40px] max-h-32"
-                />
-                <Button type="submit" disabled={sending || !message.trim()}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </form>
+              {canWrite && (
+                <form onSubmit={handleSendMessage} className="flex gap-2">
+                  <Textarea
+                    value={message}
+                    onChange={e => setMessage(e.target.value)}
+                    placeholder="Type a message..."
+                    className="flex-1 min-h-[40px] max-h-32"
+                  />
+                  <Button type="submit" disabled={sending || !message.trim()}>
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </form>
+              )}
             </CardContent>
           </Card>
 
@@ -202,98 +211,116 @@ export default function DesignDetailPage() {
                 <span className="text-gray-500">Assigned to: </span>
                 <span className="font-medium">{project.assignedTo?.name || 'Unassigned'}</span>
               </div>
-              <Select
-                label="Assign Designer"
-                onChange={e => { if (e.target.value) handleAssign(e.target.value); }}
-                options={[
-                  { value: '', label: 'Select operator...' },
-                  ...users.filter(u => u.role === 'ADMIN' || u.role === 'OPERATOR')
-                    .map(u => ({ value: u.id, label: u.name })),
-                ]}
-              />
+              {canAssign && (
+                <Select
+                  label="Assign Designer"
+                  onChange={e => { if (e.target.value) handleAssign(e.target.value); }}
+                  options={[
+                    { value: '', label: 'Select operator...' },
+                    ...users.filter(u => u.role === 'ADMIN' || u.role === 'OPERATOR')
+                      .map(u => ({ value: u.id, label: u.name })),
+                  ]}
+                />
+              )}
             </CardContent>
           </Card>
 
           {/* Status Actions */}
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {project.status === 'ASSIGNED' && (
-                <Button className="w-full" size="sm" onClick={() => handleStatusChange('IN_PROGRESS')}>
-                  Start Working
-                </Button>
-              )}
-              {(project.status === 'IN_PROGRESS' || project.status === 'REVISION') && (
-                <Button className="w-full" size="sm" onClick={handleAddRevision}>
-                  <Upload className="h-4 w-4 mr-1" /> Upload Revision (Send to Review)
-                </Button>
-              )}
-              {project.status === 'APPROVED' && (
-                <Button className="w-full" size="sm" onClick={() => handleStatusChange('QUOTED')}>
-                  <FileText className="h-4 w-4 mr-1" /> Mark as Quoted
-                </Button>
-              )}
-              {project.status === 'QUOTED' && (
-                <Button className="w-full" size="sm" onClick={() => handleStatusChange('IN_PRODUCTION')}>
-                  Move to Production
-                </Button>
-              )}
-              {project.status === 'IN_PRODUCTION' && (
-                <Button className="w-full" size="sm" variant="secondary" onClick={() => handleStatusChange('COMPLETED')}>
-                  Mark Completed
-                </Button>
-              )}
-              {!['COMPLETED', 'CANCELLED'].includes(project.status) && (
-                <Button className="w-full" size="sm" variant="destructive" onClick={() => handleStatusChange('CANCELLED')}>
-                  Cancel Project
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+          {canWrite && (
+            <Card>
+              <CardHeader><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {project.status === 'ASSIGNED' && (
+                  <Button className="w-full" size="sm" onClick={() => handleStatusChange('IN_PROGRESS')}>
+                    Start Working
+                  </Button>
+                )}
+                {(project.status === 'IN_PROGRESS' || project.status === 'REVISION') && (
+                  <Button className="w-full" size="sm" onClick={handleAddRevision}>
+                    <Upload className="h-4 w-4 mr-1" /> Upload Revision (Send to Review)
+                  </Button>
+                )}
+                {project.status === 'APPROVED' && (
+                  <Button className="w-full" size="sm" onClick={() => handleStatusChange('QUOTED')}>
+                    <FileText className="h-4 w-4 mr-1" /> Mark as Quoted
+                  </Button>
+                )}
+                {project.status === 'QUOTED' && (
+                  <Button className="w-full" size="sm" onClick={() => handleStatusChange('IN_PRODUCTION')}>
+                    Move to Production
+                  </Button>
+                )}
+                {project.status === 'IN_PRODUCTION' && (
+                  <Button className="w-full" size="sm" variant="secondary" onClick={() => handleStatusChange('COMPLETED')}>
+                    Mark Completed
+                  </Button>
+                )}
+                {!['COMPLETED', 'CANCELLED'].includes(project.status) && (
+                  <Button className="w-full" size="sm" variant="destructive" onClick={() => handleStatusChange('CANCELLED')}>
+                    Cancel Project
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Pricing */}
           <Card>
             <CardHeader><CardTitle className="text-sm">Design Fee</CardTitle></CardHeader>
             <CardContent>
-              <form onSubmit={handleUpdateFee} className="space-y-3">
-                <Select
-                  label="Fee Type"
-                  name="feeType"
-                  defaultValue={project.designFeeType || 'FLAT'}
-                  options={[
-                    { value: 'FLAT', label: 'Flat Fee' },
-                    { value: 'HOURLY', label: 'Hourly Rate' },
-                  ]}
-                />
-                <Input
-                  label="Amount (OMR)"
-                  name="feeAmount"
-                  type="number"
-                  step="0.001"
-                  defaultValue={project.designFeeAmount || ''}
-                />
-                <Input
-                  label="Hours (if hourly)"
-                  name="feeHours"
-                  type="number"
-                  step="0.5"
-                  defaultValue={project.designFeeHours || ''}
-                />
-                <Input
-                  label="Estimated Delivery"
-                  name="delivery"
-                  type="date"
-                  defaultValue={project.estimatedDelivery?.split('T')[0] || ''}
-                />
-                {(project.totalDesignFee ?? 0) > 0 && (
-                  <div className="text-sm font-medium text-brand-600">
-                    Total Fee: {project.totalDesignFee?.toFixed(3)} OMR
-                  </div>
-                )}
-                <Button type="submit" size="sm" variant="outline" className="w-full">
-                  Update Fee & Delivery
-                </Button>
-              </form>
+              {canWrite ? (
+                <form onSubmit={handleUpdateFee} className="space-y-3">
+                  <Select
+                    label="Fee Type"
+                    name="feeType"
+                    defaultValue={project.designFeeType || 'FLAT'}
+                    options={[
+                      { value: 'FLAT', label: 'Flat Fee' },
+                      { value: 'HOURLY', label: 'Hourly Rate' },
+                    ]}
+                  />
+                  <Input
+                    label="Amount (OMR)"
+                    name="feeAmount"
+                    type="number"
+                    step="0.001"
+                    defaultValue={project.designFeeAmount || ''}
+                  />
+                  <Input
+                    label="Hours (if hourly)"
+                    name="feeHours"
+                    type="number"
+                    step="0.5"
+                    defaultValue={project.designFeeHours || ''}
+                  />
+                  <Input
+                    label="Estimated Delivery"
+                    name="delivery"
+                    type="date"
+                    defaultValue={project.estimatedDelivery?.split('T')[0] || ''}
+                  />
+                  {(project.totalDesignFee ?? 0) > 0 && (
+                    <div className="text-sm font-medium text-brand-600">
+                      Total Fee: {project.totalDesignFee?.toFixed(3)} OMR
+                    </div>
+                  )}
+                  <Button type="submit" size="sm" variant="outline" className="w-full">
+                    Update Fee & Delivery
+                  </Button>
+                </form>
+              ) : (
+                <dl className="space-y-1 text-sm">
+                  <div><dt className="inline text-gray-500">Fee type: </dt><dd className="inline">{project.designFeeType === 'HOURLY' ? 'Hourly Rate' : 'Flat Fee'}</dd></div>
+                  <div><dt className="inline text-gray-500">Amount: </dt><dd className="inline">{project.designFeeAmount != null ? `${project.designFeeAmount.toFixed(3)} OMR` : '—'}</dd></div>
+                  {project.designFeeType === 'HOURLY' && (
+                    <div><dt className="inline text-gray-500">Hours: </dt><dd className="inline">{project.designFeeHours ?? '—'}</dd></div>
+                  )}
+                  <div><dt className="inline text-gray-500">Estimated delivery: </dt><dd className="inline">{project.estimatedDelivery ? formatDate(project.estimatedDelivery) : '—'}</dd></div>
+                  {(project.totalDesignFee ?? 0) > 0 && (
+                    <div className="font-medium text-brand-600">Total Fee: {project.totalDesignFee?.toFixed(3)} OMR</div>
+                  )}
+                </dl>
+              )}
             </CardContent>
           </Card>
 

@@ -120,8 +120,11 @@ export default function QuoteDetailPage() {
           <Button variant="outline" onClick={() => window.open(`/api/quotes/${id}/pdf`, '_blank')}>
             Download PDF
           </Button>
-          <Select options={quoteStatuses} value={quote.status} onChange={e => updateStatus(e.target.value)} className="w-36" disabled={updating} />
-          {['ACCEPTED', 'SENT'].includes(quote.status) && !quote.order && (
+          {/* PATCH /quotes/:id and the conversion are ADMIN/OPERATOR; other roles see the status below, read-only. */}
+          {canEdit && (
+            <Select options={quoteStatuses} value={quote.status} onChange={e => updateStatus(e.target.value)} className="w-36" disabled={updating} />
+          )}
+          {canEdit && ['ACCEPTED', 'SENT'].includes(quote.status) && !quote.order && (
             <Button onClick={() => convertToOrder(true)} disabled={converting}>
               {converting ? 'Converting...' : 'Convert to Order + Create Jobs'}
             </Button>
