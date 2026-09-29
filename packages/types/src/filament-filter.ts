@@ -231,6 +231,16 @@ function findPfidHit(rows: readonly FilamentStockRow[], q: string): FilamentPfid
   return found === 1 ? hit : null;
 }
 
+/**
+ * The list's search rule as a predicate (same tokens as filterFilaments): every
+ * token must match colour, name, brand, type, an active spool's location, the
+ * colour hex ('#' optional) or a spool PF-ID prefix. '' matches every row.
+ */
+export function filamentQueryMatcher(q: string): (row: FilamentStockRow) => boolean {
+  const tokens = cleanQuery(q).toLowerCase().split(/\s+/).filter(Boolean).map(toToken);
+  return (row) => tokens.length === 0 || matchRow(row, tokens) !== null;
+}
+
 // ---------------------------------------------------------------- sort
 
 function cmpText(a: string, b: string): number {

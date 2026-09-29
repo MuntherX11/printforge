@@ -372,6 +372,9 @@ export * from './safe-next';
 // Edit Material's brand/colour state and "Other…" mode (pure).
 export * from './material-edit';
 
+// BOM filament picker: ranking, pick → write, request plans (pure).
+export * from './filament-pick';
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
