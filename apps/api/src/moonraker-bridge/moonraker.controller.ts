@@ -30,9 +30,12 @@ export class MoonrakerController {
   }
 
   /**
-   * Poll all printers now (manual trigger).
+   * Poll all printers now (manual trigger). ADMIN or OPERATOR, the roles that
+   * run the printers; no screen calls it, and a read-only role has no reason to.
    */
   @Post('poll')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   async pollAll() {
     const results = await this.moonraker.pollAllPrinters();
     return { polled: results.length, printers: results.map(r => ({
@@ -92,8 +95,12 @@ export class MoonrakerController {
 
   /**
    * Re-connect a Creality WebSocket printer immediately after its IP is updated.
+   * The printer page calls it after saving the printer's details; ADMIN or
+   * OPERATOR, like the other printer actions here.
    */
   @Post('reconnect/:printerId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
   async reconnectPrinter(@Param('printerId') printerId: string) {
     const printer = await this.prisma.printer.findUnique({ where: { id: printerId } });
     if (!printer) throw new NotFoundException('Printer not found');
