@@ -81,6 +81,8 @@ export function ChangeLineColourDialog({ open, onClose, kind, documentId, line, 
     if (rows.some(r => !Number.isInteger(r.quantity) || r.quantity < 1)) return 'Every colour needs a quantity of at least 1';
     if (new Set(rows.map(r => r.colourKey)).size !== rows.length) return 'Each colour can appear only once';
     if (total !== target) return `The colours must add up to ${target}`;
+    // The line as it is: saving it would still cancel its queued jobs and return its stock.
+    if (rows.length === 1 && rows[0].colourKey === (line?.colour?.id ?? STANDARD)) return 'Choose a different colour or split the line';
     return null;
   })();
 
@@ -117,7 +119,10 @@ export function ChangeLineColourDialog({ open, onClose, kind, documentId, line, 
   async function save() {
     setBusy(true); setError(null);
     try {
-      await api.put(url, body(true));
+      // Confirm only what the check listed: a job queued or stock allocated since
+      // then makes the server ask again ('Confirm the jobs and stock listed first').
+      const listed = !!preview && (preview.cancelledJobs.length > 0 || preview.stockReleased.length > 0);
+      await api.put(url, body(listed));
       onDone(rows.length > 1 ? `Line split into ${rows.length} colours` : 'Colour changed');
     } catch (err: unknown) {
       setError(errorText(err, 'Could not change the colour'));
