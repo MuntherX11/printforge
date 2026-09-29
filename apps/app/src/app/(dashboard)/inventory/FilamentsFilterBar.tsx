@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import type { RefObject } from 'react';
 import { Search, X } from 'lucide-react';
 import { Select } from '@/components/ui/select';
 import {
@@ -40,7 +40,10 @@ interface FilamentsFilterBarProps {
   loaded: boolean;
   onQuery: (q: string) => void;
   onChange: (patch: FilamentFilterPatch) => void;
+  /** Resets the filters; the page then puts focus back in the search box. */
   onClearFilters: () => void;
+  /** The search input, owned by the page so Clear filters can focus it. */
+  inputRef: RefObject<HTMLInputElement>;
   /** Enter in the search box. */
   onSubmit: () => void;
 }
@@ -48,9 +51,7 @@ interface FilamentsFilterBarProps {
 const plural = (n: number) => `${n.toLocaleString('en-US')} filament${n === 1 ? '' : 's'}`;
 
 /** Search, Type, Brand and Sort, then the stock chips and the count line. */
-export function FilamentsFilterBar({ state, result, loaded, onQuery, onChange, onClearFilters, onSubmit }: FilamentsFilterBarProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
+export function FilamentsFilterBar({ state, result, loaded, onQuery, onChange, onClearFilters, onSubmit, inputRef }: FilamentsFilterBarProps) {
   const typeValues = [...result.typesPresent];
   if (state.type && !typeValues.includes(state.type)) typeValues.push(state.type);
   const typeOptions = [

@@ -68,6 +68,7 @@ function FilamentsPage() {
   const [uploading, setUploading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scannedFields, setScannedFields] = useState<ScannedSpoolFields | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   /** Loads every filament; a newer request makes older responses stale. */
   const load = useCallback(() => {
@@ -151,11 +152,15 @@ function FilamentsPage() {
     writeUrl(next);
   }
 
-  /** Resets search, Type, Brand, stock and page; keeps the sort. */
+  /**
+   * Resets search, Type, Brand, stock and page; keeps the sort. Both Clear
+   * filters buttons disappear when clicked, so focus goes to the search box.
+   */
   function clearFilters() {
     const next = { ...DEFAULT_FILAMENT_LIST_STATE, sort: state.sort };
     setState(next);
     writeUrl(next);
+    searchRef.current?.focus();
   }
 
   /** Enter in the search box: open the PF-ID shortcut, or the only matching filament. */
@@ -254,6 +259,7 @@ function FilamentsPage() {
         onChange={update}
         onClearFilters={clearFilters}
         onSubmit={openSingleMatch}
+        inputRef={searchRef}
       />
 
       {result.pfidHit && (

@@ -133,7 +133,7 @@ export function FilamentsTable({ rows, spoolHits, onBeforeNavigate }: FilamentsT
                       {label}
                     </Link>
                     {m.color && m.name !== m.color && (
-                      <p className="text-xs text-gray-500">{m.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{m.name}</p>
                     )}
                     <p className="text-xs text-gray-500 dark:text-gray-400 md:hidden">
                       {[m.type, m.brand].filter(Boolean).join(' · ')}
