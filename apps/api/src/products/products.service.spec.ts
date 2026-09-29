@@ -6,7 +6,7 @@ import type { CellCost } from '@printforge/types';
 import { boxRow, BOX_ID } from '../catalog-core/__fixtures__/box-product';
 import { fixtureMaterial, M, OPT, PRODUCT_ID, sardineRow, SLOT } from '../catalog-core/__fixtures__/sardine-tin';
 import { colourCostWarnings } from '../catalog-core/pricing-core';
-import { addJob, addOrderLine, productsHarness, statusOf } from './__fixtures__/products-harness';
+import { addJob, addOrderLine, addQuoteLine, productsHarness, statusOf } from './__fixtures__/products-harness';
 
 const P = PRODUCT_ID;
 const colour = (id: string, name: string, assignments: Array<[string, string]>, extra: Record<string, unknown> = {}) => ({
@@ -394,6 +394,19 @@ describe('ProductsService (§7.1 items 13, 29, 42)', () => {
       expect(d.colourSlots.find((s) => s.id === SLOT.trim)!.links.map((l) => l.componentId).sort()).toEqual(['c2', 'c4', 'c7', 'c9']);
       expect(d.components[2].thumbnailUrl).toBeNull();
       expect(d.baseSellable).toBe(true);
+    });
+
+    it('ProductDetail: a size counts the rows O7 would move to the colour axis (its size, no colour)', async () => {
+      const row = sardineRow();
+      row.variants.push({ ...colour('v-old', 'Green', []), kind: 'SIZE', basePrice: 1.7 });
+      const h = productsHarness([row]);
+      addOrderLine(h.db, { productId: P, sizeOptionId: 'v-old', colourOptionId: null });
+      addQuoteLine(h.db, { productId: P, sizeOptionId: 'v-old', colourOptionId: null });
+      addJob(h.db, { productId: P, sizeOptionId: 'v-old', colourOptionId: null });
+      addOrderLine(h.db, { productId: P, sizeOptionId: OPT.large, colourOptionId: OPT.red });
+      const d = await h.products.findOne(P);
+      expect(d.sizes.find((s) => s.id === 'v-old')!.kindChange).toEqual({ allowed: true, blockers: [], rewrites: 3 });
+      expect(d.sizes.find((s) => s.id === OPT.large)!.kindChange.rewrites).toBe(0);
     });
   });
 });

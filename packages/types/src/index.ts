@@ -1060,7 +1060,8 @@ export interface SizeOptionDetail {
   components: ComponentDetail[];
   priceTiers: PriceTierRow[];
   setup: { complete: boolean; problems: Problem[] };
-  kindChange: { allowed: boolean; blockers: string[] };
+  /** rewrites = orders, quotes and jobs using it as their size with no colour, which O7 moves to the colour axis on SIZE→COLOUR. */
+  kindChange: { allowed: boolean; blockers: string[]; rewrites: number };
 }
 
 export interface ColourOptionDetail {

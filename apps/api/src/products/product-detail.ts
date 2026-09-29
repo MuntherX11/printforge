@@ -183,6 +183,8 @@ export function buildProductDetail(raw: any, config: ProductConfig, pc: PairCont
     const tiers = (rawVariants.get(s.id)?.priceTiers ?? []).map((t: any) => ({ id: t.id, minQty: t.minQty, unitPrice: t.unitPrice }));
     const bom = res.get(s.id, null);
     const refsWithColour = extras.optionRefs.filter((r) => r.sizeOptionId === s.id && r.colourOptionId).length;
+    // The rows O7 rewrites when this size becomes a colour (its size with no colour).
+    const rewrites = extras.optionRefs.filter((r) => r.sizeOptionId === s.id && !r.colourOptionId).length;
     const blockers = kindChangeBlockers(config, s, { ownComponents: own.length, ownTiers: tiers.length, refsWithColour, colourRefs: 0 });
     const notSetUp = own.length === 0 && tiers.length === 0;
     return {
@@ -194,7 +196,7 @@ export function buildProductDetail(raw: any, config: ProductConfig, pc: PairCont
       components: own.map(detailOf),
       priceTiers: tiers,
       setup: { complete: !!bom?.complete, problems: bom?.problems ?? [] },
-      kindChange: { allowed: blockers.length === 0, blockers },
+      kindChange: { allowed: blockers.length === 0, blockers, rewrites },
     };
   });
 

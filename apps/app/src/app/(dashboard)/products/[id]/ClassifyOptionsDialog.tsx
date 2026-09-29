@@ -34,12 +34,13 @@ function rowsOf(p: ProductDetail): Row[] {
   return [
     ...orderedSizes(p).map(s => ({
       id: s.id, name: s.name, current: 'SIZE' as OptionKind, isActive: s.isActive,
-      allowed: s.kindChange.allowed, blockers: s.kindChange.blockers, rewrites: 0,
+      allowed: s.kindChange.allowed, blockers: s.kindChange.blockers, rewrites: s.kindChange.rewrites,
       suggestColour: s.notSetUp && s.likelyColour,
     })),
     ...orderedColours(p).map(c => ({
       id: c.id, name: c.name, current: 'COLOUR' as OptionKind, isActive: c.isActive,
-      allowed: c.kindChange.allowed, blockers: c.kindChange.blockers, rewrites: c.kindChange.rewrites,
+      // Only SIZE→COLOUR moves rows (O7); a colour becoming a size rewrites nothing.
+      allowed: c.kindChange.allowed, blockers: c.kindChange.blockers, rewrites: 0,
       suggestColour: false,
     })),
   ];
