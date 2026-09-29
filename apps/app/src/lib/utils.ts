@@ -5,6 +5,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * A CSS colour for a filament hex. The API stores `Material.colorHex` bare
+ * ("C4402A", no "#"), which is not valid CSS on its own; 3MF tool colours
+ * arrive as "#C4402A". Both give "#C4402A". Anything that is not a 3/4/6/8
+ * digit hex colour gives null, so callers draw an empty (hollow) swatch.
+ */
+export function cssHex(hex: string | null | undefined): string | null {
+  const m = /^#?((?:[0-9a-f]{3}){1,2}|(?:[0-9a-f]{4}){1,2})$/i.exec((hex ?? '').trim());
+  return m ? `#${m[1]}` : null;
+}
+
 export function formatCurrency(amount: number, currency = 'OMR'): string {
   return `${currency} ${amount.toFixed(3)}`;
 }

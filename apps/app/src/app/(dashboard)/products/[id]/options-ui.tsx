@@ -1,13 +1,17 @@
 'use client';
 
 /** Small presentational pieces shared by the Sizes & colours section (spec §5.2 C). */
-import { cn } from '@/lib/utils';
+import { cn, cssHex } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import type { ApiOpenLineImpact } from '@/lib/types/api';
 
-/** A filament colour dot; hollow when there is no colour ("as sliced"). */
+/**
+ * A filament colour dot; hollow when there is no colour ("as sliced"). `hex`
+ * may be a stored bare "RRGGBB" or a "#RRGGBB" value.
+ */
 export function Swatch({ hex, title, hollow }: { hex?: string | null; title: string; hollow?: boolean }) {
-  const empty = hollow || !hex;
+  const colour = cssHex(hex);
+  const empty = hollow || !colour;
   return (
     <span
       title={title}
@@ -17,7 +21,7 @@ export function Swatch({ hex, title, hollow }: { hex?: string | null; title: str
         'inline-block h-3.5 w-3.5 flex-shrink-0 rounded-full border',
         empty ? 'border-gray-400 bg-transparent dark:border-gray-500' : 'border-black/10 dark:border-white/20',
       )}
-      style={empty ? undefined : { backgroundColor: hex ?? undefined }}
+      style={empty ? undefined : { backgroundColor: colour }}
     />
   );
 }

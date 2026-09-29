@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { ArrowLeft, Clock, Package, RefreshCw } from 'lucide-react';
 import { formatTime } from '@/lib/format';
+import { cssHex } from '@/lib/utils';
 import type { CatalogProductDetail } from '@/lib/types/api';
 
 type Size = CatalogProductDetail['sizes'][number];
@@ -17,6 +18,10 @@ type Colour = CatalogProductDetail['colours'][number];
 /** Colours offered on a size (spec §3.1 rule 8, P4 `sizeOptionIds`). */
 const coloursOn = (p: CatalogProductDetail, sizeId: string | null): Colour[] =>
   p.colours.filter(c => c.sizeOptionIds.includes(sizeId));
+
+/** P4 swatches are the filaments' stored colorHex (bare "RRGGBB"); only real hex colours are drawn. */
+const swatchColours = (swatches: string[]): string[] =>
+  swatches.map(cssHex).filter((h): h is string => h !== null);
 
 export default function CustomerProductDetailPage() {
   const params = useParams();
@@ -215,9 +220,9 @@ export default function CustomerProductDetailPage() {
                   onClick={() => { setSelectedColour(colour); setColourNote(null); }}
                   className={`${chip(selectedColour?.colourOptionId === colour.colourOptionId)} inline-flex items-center gap-2`}
                 >
-                  {colour.swatches.length > 0 && (
+                  {swatchColours(colour.swatches).length > 0 && (
                     <span className="flex -space-x-1" aria-hidden="true">
-                      {colour.swatches.map((hex, i) => (
+                      {swatchColours(colour.swatches).map((hex, i) => (
                         <span key={`${hex}-${i}`} className="h-3.5 w-3.5 rounded-full border border-white dark:border-gray-900" style={{ backgroundColor: hex }} />
                       ))}
                     </span>
