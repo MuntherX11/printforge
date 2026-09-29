@@ -19,6 +19,7 @@ export interface FilamentPickerProps {
   currentMaterialId: string | null;
   /** The row being saved: it shows "Saving…". */
   savingId: string | null;
+  /** A save is running: the options ignore clicks (they keep the focus). */
   disabled: boolean;
   inputRef?: React.RefObject<HTMLInputElement>;
   onPick: (row: FilamentStockRow) => void;
@@ -36,6 +37,7 @@ function typeLabel(type: string): string {
  */
 export function FilamentPicker(props: FilamentPickerProps) {
   const { rows, loading, error, preferType, currentMaterialId, savingId, disabled, onPick } = props;
+  const busy = disabled || savingId !== null;
   const [q, setQ] = useState('');
   const ownInput = useRef<HTMLInputElement>(null);
   const inputRef = props.inputRef ?? ownInput;
@@ -122,16 +124,17 @@ export function FilamentPicker(props: FilamentPickerProps) {
         <ul ref={listRef} aria-label="Filaments" className="max-h-[50vh] divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
           {choices.map(({ row, inStock, current }, i) => (
             <li key={row.id}>
+              {/* aria-disabled, not disabled: a disabled button drops the focus, so a failed save would strand the keyboard. */}
               <button
                 type="button"
                 data-filament
                 aria-current={current ? 'true' : undefined}
-                disabled={disabled || savingId !== null}
-                onClick={() => onPick(row)}
+                aria-disabled={busy || undefined}
+                onClick={() => { if (!busy) onPick(row); }}
                 onKeyDown={(e) => onOptionKey(e, i)}
                 className={cn(
                   'flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800',
-                  'disabled:cursor-not-allowed disabled:opacity-60',
+                  'aria-disabled:cursor-not-allowed aria-disabled:opacity-60',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500',
                   current && 'bg-brand-50/60 dark:bg-brand-900/20',
                 )}

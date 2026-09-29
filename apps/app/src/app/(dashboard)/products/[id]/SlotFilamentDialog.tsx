@@ -11,7 +11,7 @@ import type { FilamentStock } from '@/components/filaments/useFilamentStock';
 import { formatGrams } from '@/lib/product-format';
 import type { ComponentDetail, FilamentStockRow, Problem, ProductDetail } from '@/lib/types/api';
 import { ImpactList } from './options-ui';
-import { isMultiColour, slotPartLabel } from './options-model';
+import { isMultiColour, orderedSizes, slotPartLabel } from './options-model';
 import { slotViews } from './bom-model';
 import { useComponentWrite } from './useComponentWrite';
 
@@ -30,6 +30,20 @@ interface Props {
 const PICK_FAILED = 'Couldn\'t change the filament';
 
 /**
+ * Which sizes the pick changes. A standard component also prints every size
+ * that has no components of its own (they fall back to the standard BOM).
+ */
+function scopeNote(product: ProductDetail, c: ComponentDetail, scopeLabel: string): string | null {
+  if (product.sizes.length === 0) return null;
+  const standard = product.components.some(x => x.id === c.id);
+  const sharing = standard ? orderedSizes(product).filter(s => s.components.length === 0).map(s => s.name) : [];
+  if (sharing.length === 0) return `Changes ${scopeLabel} only.`;
+  const one = sharing.length === 1;
+  const names = one ? sharing[0] : `${sharing.slice(0, -1).join(', ')} and ${sharing[sharing.length - 1]}`;
+  return `Changes ${scopeLabel}, and ${names}, which ${one ? 'has' : 'have'} no components of ${one ? 'its' : 'their'} own.`;
+}
+
+/**
  * Pick the filament of one colour slot straight from its BOM chip (P10 for a
  * single-material part, P11 for a multicolour one), with the same dry run,
  * open-line impact and `Save anyway` as Edit component. Only the component's
@@ -41,6 +55,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
   const [picked, setPicked] = useState<FilamentStockRow | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     writer.reset();
@@ -55,11 +70,18 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
     return () => clearTimeout(t);
   }, [writer.impact]);
 
+  // A failed Save anyway: the button was disabled while saving and lost the focus; give it back.
+  useEffect(() => {
+    if (!writer.error || !writer.impact) return;
+    const t = setTimeout(() => saveRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [writer.error, writer.impact]);
+
   const slot = c ? slotViews(product, c).find(s => s.colorIndex === colorIndex) : undefined;
   if (!c || !slot) return null;
   const part = slotPartLabel(c, c.description, colorIndex);
   const note = [
-    product.sizes.length > 0 ? `Changes ${scopeLabel} only.` : null,
+    scopeNote(product, c, scopeLabel),
     product.colours.length > 0 ? 'Colour options keep their own filaments.' : null,
   ].filter(Boolean).join(' ');
 
@@ -89,7 +111,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
   }
 
   function back() {
-    writer.clearImpact();
+    writer.reset();
     setPicked(null);
     setTimeout(() => searchRef.current?.focus(), 0);
   }
@@ -126,7 +148,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
             <ImpactList impact={writer.impact} />
             <div className="flex justify-end gap-3">
               <Button ref={backRef} type="button" variant="outline" onClick={back} disabled={writer.saving}>Back</Button>
-              <Button type="button" onClick={() => void confirmAnyway()} disabled={writer.saving}>{writer.saving ? 'Saving…' : 'Save anyway'}</Button>
+              <Button ref={saveRef} type="button" onClick={() => void confirmAnyway()} disabled={writer.saving}>{writer.saving ? 'Saving…' : 'Save anyway'}</Button>
             </div>
           </>
         )}
