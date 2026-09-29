@@ -1,5 +1,5 @@
 import { fixtureMaterial, M, OPT, PRODUCT_ID, sardineRow, SLOT } from '../catalog-core/__fixtures__/sardine-tin';
-import { linkAfter } from './product-components.service';
+import { linkAfter, rescaleSlotGrams } from './product-components.service';
 import { addOrderLine, productsHarness, statusOf } from './__fixtures__/products-harness';
 
 const P = PRODUCT_ID;
@@ -33,6 +33,38 @@ describe('ProductComponentsService', () => {
     const out: any = await h.components.update(P, 'c1', { materialId: M.grey, confirm: true });
     expect(out.warnings.map((w: any) => w.code)).toContain('OPEN_LINES_AFFECTED');
     expect(comp(h, 'c1').materialId).toBe(M.grey);
+  });
+
+  it('rescaleSlotGrams: proportional to the current colours, equal split at 0, colours sum to the new total', () => {
+    expect(rescaleSlotGrams([{ colorIndex: 0, gramsUsed: 9.4 }, { colorIndex: 1, gramsUsed: 2 }], 20)).toEqual([
+      { colorIndex: 0, gramsUsed: 16.491 }, { colorIndex: 1, gramsUsed: 3.509 },
+    ]);
+    expect(rescaleSlotGrams([{ colorIndex: 0, gramsUsed: 0 }, { colorIndex: 1, gramsUsed: 0 }], 3)).toEqual([
+      { colorIndex: 0, gramsUsed: 1.5 }, { colorIndex: 1, gramsUsed: 1.5 },
+    ]);
+    const thirds = rescaleSlotGrams([{ colorIndex: 0, gramsUsed: 1 }, { colorIndex: 1, gramsUsed: 1 }, { colorIndex: 2, gramsUsed: 1 }], 10);
+    expect(thirds.reduce((s, x) => s + x.gramsUsed, 0)).toBeCloseTo(10, 9);
+    expect(rescaleSlotGrams([], 5)).toEqual([]);
+  });
+
+  it('P10 gramsUsed on a multicolour part rescales its colours, so the resolver, cost and price follow it', async () => {
+    const h = productsHarness([sardineRow()]);
+    const pair = { sizeOptionId: null, colourOptionId: null };
+    const lidGrams = async () => (await h.resolver.resolve(P, pair)).components.find((c) => c.componentId === 'c2')!.gramsPerUnit;
+    expect(await lidGrams()).toBeCloseTo(6, 9);
+    const spy = jest.spyOn(h.pricing, 'recalcPricing');
+    const out: any = await h.components.update(P, 'c2', { gramsUsed: 12 });
+    const slots = h.db.t('componentMaterial').filter((m: any) => m.componentId === 'c2').sort((a: any, b: any) => a.colorIndex - b.colorIndex);
+    expect(slots.map((m: any) => m.gramsUsed)).toEqual([10.4, 1.6]);
+    expect(comp(h, 'c2').gramsUsed).toBe(12);
+    expect(out.materials.map((m: any) => m.gramsUsed)).toEqual([10.4, 1.6]);
+    expect(await lidGrams()).toBeCloseTo(12, 9);
+    expect(spy).toHaveBeenCalledTimes(1);
+    // A single-material part keeps its colour rows untouched.
+    const before = JSON.stringify(h.db.t('componentMaterial'));
+    await h.components.update(P, 'c1', { gramsUsed: 40 });
+    expect(JSON.stringify(h.db.t('componentMaterial'))).toBe(before);
+    expect(comp(h, 'c1').gramsUsed).toBe(40);
   });
 
   it('P10 on the alias route resolves the product from the component', async () => {
