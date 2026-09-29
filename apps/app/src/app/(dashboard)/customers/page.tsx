@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
 import { Pagination } from '@/components/ui/pagination';
@@ -25,6 +26,9 @@ export default function CustomersPage() {
   const [rejecting, setRejecting] = useState(false);
   const [page, setPage] = useState(1);
   const { toast } = useToast();
+  // POST /customers is ADMIN, OPERATOR or ACCOUNTING; VIEWER is read-only.
+  const { role } = useAuth();
+  const canWrite = role === 'ADMIN' || role === 'OPERATOR' || role === 'ACCOUNTING';
 
   // TODO: migrate to useApi once pagination is stable (uses Promise.all + page param)
   function loadData(p = page) {
@@ -75,9 +79,11 @@ export default function CustomersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Customers</h1>
-        <Link href="/customers/new">
-          <Button><Plus className="h-4 w-4 mr-2" /> Add Customer</Button>
-        </Link>
+        {canWrite && (
+          <Link href="/customers/new">
+            <Button><Plus className="h-4 w-4 mr-2" /> Add Customer</Button>
+          </Link>
+        )}
       </div>
 
       {pending.length > 0 && (
@@ -132,8 +138,8 @@ export default function CustomersPage() {
             <EmptyState
               icon={<Users className="h-12 w-12" />}
               title="No customers yet"
-              description="Add your first customer to get started"
-              action={<Link href="/customers/new"><Button size="sm">Add Customer</Button></Link>}
+              description={canWrite ? 'Add your first customer to get started' : 'Customers appear here once they are added'}
+              action={canWrite ? <Link href="/customers/new"><Button size="sm">Add Customer</Button></Link> : undefined}
             />
           ) : (
             <Table>

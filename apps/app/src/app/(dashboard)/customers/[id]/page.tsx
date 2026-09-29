@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Loading } from '@/components/ui/loading';
 import { Dialog } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import type { ApiCustomer } from '@/lib/types/api';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
@@ -23,6 +24,9 @@ export default function CustomerDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  // PATCH /customers/:id is ADMIN, OPERATOR or ACCOUNTING; VIEWER is read-only.
+  const { role } = useAuth();
+  const canWrite = role === 'ADMIN' || role === 'OPERATOR' || role === 'ACCOUNTING';
   const [customer, setCustomer] = useState<ApiCustomer | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -100,9 +104,11 @@ export default function CustomerDetailPage() {
               <Mail className="h-4 w-4 mr-2" /> Email
             </Button>
           )}
-          <Button variant="outline" onClick={() => setEditing(!editing)}>
-            {editing ? 'Cancel' : 'Edit'}
-          </Button>
+          {canWrite && (
+            <Button variant="outline" onClick={() => setEditing(!editing)}>
+              {editing ? 'Cancel' : 'Edit'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -110,7 +116,7 @@ export default function CustomerDetailPage() {
         <Card>
           <CardHeader><CardTitle>Details</CardTitle></CardHeader>
           <CardContent>
-            {editing ? (
+            {editing && canWrite ? (
               <form onSubmit={handleSave} className="space-y-4">
                 <Input name="name" label="Name" defaultValue={customer.name} required />
                 <Input name="email" label="Email" defaultValue={customer.email || ''} />
