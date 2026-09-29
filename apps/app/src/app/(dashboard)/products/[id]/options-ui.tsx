@@ -3,10 +3,16 @@
 /** Small presentational pieces shared by the Sizes & colours section (spec §5.2 C). */
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { Swatch as UiSwatch, swatchHex } from '@/components/ui/swatch';
 import type { ApiOpenLineImpact } from '@/lib/types/api';
 
-/** A filament colour dot; moved to components/ui/swatch so the Filaments pages share it. */
-export { Swatch } from '@/components/ui/swatch';
+/**
+ * A filament colour dot (components/ui/swatch). The API sends colorHex bare
+ * ('91202B'), so normalise it here for every product-page dot.
+ */
+export function Swatch(props: React.ComponentProps<typeof UiSwatch>) {
+  return <UiSwatch {...props} hex={swatchHex(props.hex)} />;
+}
 
 /** Accessible on/off switch in the style of Settings → Addons. */
 export function Toggle({ checked, label, disabled, onChange }: {
