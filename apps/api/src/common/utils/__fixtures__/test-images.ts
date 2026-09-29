@@ -12,6 +12,9 @@ function seg(marker: number, payload: Buffer): Buffer {
   return Buffer.concat([head, payload]);
 }
 
+/** One JPEG marker segment: FF, marker, big-endian length (payload + 2), payload. */
+export const jpegSegment = seg;
+
 /** Little-endian TIFF with IFD0 = [Orientation?, GPS IFD pointer], GPS IFD holding an ASCII "GPS…" value. */
 function exifTiff(orientation?: number): Buffer {
   const secret = Buffer.from('GPSSECRET-23.58N-58.40E\0', 'latin1');

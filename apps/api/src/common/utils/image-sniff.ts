@@ -7,8 +7,9 @@
  *
  * `stripImageMetadata` removes EXIF (including GPS), XMP, IPTC and text chunks
  * without re-encoding (no `sharp`), because phone photos carry the location of
- * this home-based farm. A JPEG keeps a minimal Orientation-only EXIF block so
- * portrait photos stay upright.
+ * this home-based farm. A JPEG also loses everything after its first EOI
+ * (secondary images, motion-photo and SEFT trailers), and keeps a minimal
+ * Orientation-only EXIF block so portrait photos stay upright.
  */
 
 export type ImageExt = 'jpg' | 'png' | 'webp';
@@ -180,37 +181,83 @@ export function stripImageMetadata(buf: Buffer, sniff: ImageSniff): Buffer | nul
   return out;
 }
 
+const EOI = Buffer.from([0xff, 0xd9]);
+
+/**
+ * JPEG strip (§3.11). Walks every segment of the primary image, not only the
+ * ones before the first SOS: a progressive file has DHT/DQT/SOS (and sometimes
+ * metadata) between its scans. Dropped wherever they appear:
+ * - APP1 (Exif, XMP, extended XMP), APP13 (Photoshop/IPTC) and COM;
+ * - APP2 `MPF\0`: the Multi-Picture index of the secondary images cut below;
+ * - APP11 JUMBF boxes (C2PA manifests): they can carry Exif assertions with the
+ *   location and capture time, and this strip breaks their signature anyway.
+ * Everything else (APP0, APP2 ICC, APP14, tables, scans) is copied byte-for-byte.
+ *
+ * The image ends at its first EOI and nothing after it is kept. Phones append
+ * data there: MPF secondary images (camera previews, gain maps) with their own
+ * Exif GPS, Samsung SEFT trailers with the capture time, motion-photo MP4s.
+ * Once scan data has started, bytes that don't parse as a segment end the image
+ * the same way (an EOI is added), so an appended file is cut even when the
+ * primary lacks its EOI. A file truncated inside its scan data is kept as is.
+ */
 function stripJpeg(buf: Buffer): Buffer | null {
   const parts: Buffer[] = [buf.subarray(0, 2)];
   let orientation: number | null = null;
   let orientationAt = -1; // index in `parts` where the dropped Exif block was
+  let scanned = false; // true once the first scan's data has been copied
+  // Before the first scan a malformed header means "can't be processed" (the
+  // caller returns null); after it, the image ends at the last good segment:
+  // an EOI is added and whatever follows is not kept.
+  const cut = (): boolean => {
+    if (scanned) parts.push(EOI);
+    return scanned;
+  };
   let o = 2;
   while (o < buf.length) {
-    if (buf[o] !== 0xff) return null;
+    if (buf[o] !== 0xff) {
+      if (cut()) break;
+      return null;
+    }
     const segStart = o;
     while (o < buf.length && buf[o] === 0xff) o++;
-    if (o >= buf.length) return null;
+    if (o >= buf.length) {
+      if (cut()) break;
+      return null;
+    }
     const marker = buf[o++];
+    if (marker === 0xd9) {
+      parts.push(buf.subarray(segStart, o)); // EOI: everything after it is dropped
+      break;
+    }
+    if (marker === 0xd8 && scanned) {
+      parts.push(EOI); // SOI of an appended image
+      break;
+    }
     if (isStandalone(marker)) {
       parts.push(buf.subarray(segStart, o));
       continue;
     }
-    if (marker === 0xd9) {
-      parts.push(buf.subarray(segStart));
-      break;
+    if (o + 2 > buf.length) {
+      if (cut()) break;
+      return null;
     }
-    if (o + 2 > buf.length) return null;
     const len = buf.readUInt16BE(o);
-    if (len < 2 || o + len > buf.length) return null;
-    if (marker === 0xda) {
-      // Start of scan: entropy-coded data follows; copy the rest verbatim.
-      parts.push(buf.subarray(segStart));
-      break;
+    if (len < 2 || o + len > buf.length) {
+      if (cut()) break;
+      return null;
     }
     const payload = buf.subarray(o + 2, o + len);
     const end = o + len;
+    if (marker === 0xda) {
+      // Start of scan: the header, then the entropy-coded data up to the next marker.
+      const dataEnd = entropyDataEnd(buf, end);
+      parts.push(buf.subarray(segStart, dataEnd));
+      scanned = true;
+      o = dataEnd;
+      continue;
+    }
     if (marker === 0xe1) {
-      if (payload.toString('latin1', 0, 6) === 'Exif\0\0') {
+      if (!scanned && payload.toString('latin1', 0, 6) === 'Exif\0\0') {
         const orient = readExifOrientation(payload.subarray(6));
         if (orient !== null && orientation === null) {
           orientation = orient;
@@ -220,8 +267,8 @@ function stripJpeg(buf: Buffer): Buffer | null {
       o = end; // drop every APP1 (Exif, XMP, extended XMP)
       continue;
     }
-    if (marker === 0xed || marker === 0xfe) {
-      o = end; // APP13 (Photoshop/IPTC) and COM
+    if (marker === 0xed || marker === 0xfe || isMpfIndex(marker, payload) || isJumbf(marker, payload)) {
+      o = end; // APP13 (Photoshop/IPTC), COM, APP2 MPF index, APP11 JUMBF/C2PA
       continue;
     }
     parts.push(buf.subarray(segStart, end));
@@ -231,6 +278,42 @@ function stripJpeg(buf: Buffer): Buffer | null {
     parts.splice(orientationAt, 0, minimalOrientationApp1(orientation));
   }
   return Buffer.concat(parts);
+}
+
+/**
+ * Offset of the marker that ends the entropy-coded data starting at `from`, or
+ * `buf.length` when the data runs to the end of the file. Inside the data,
+ * 0xFF00 (a stuffed 0xFF) and RST0–7 are data; extra 0xFF bytes are fill.
+ */
+function entropyDataEnd(buf: Buffer, from: number): number {
+  let i = from;
+  for (;;) {
+    i = buf.indexOf(0xff, i);
+    if (i < 0) return buf.length;
+    let j = i + 1;
+    while (j < buf.length && buf[j] === 0xff) j++;
+    if (j >= buf.length) return buf.length;
+    const b = buf[j];
+    if (b === 0x00 || (b >= 0xd0 && b <= 0xd7)) {
+      i = j + 1;
+      continue;
+    }
+    return i;
+  }
+}
+
+/** APP2 holding a CIPA Multi-Picture Format index (`MPF\0`), not an ICC profile. */
+function isMpfIndex(marker: number, payload: Buffer): boolean {
+  return marker === 0xe2 && payload.toString('latin1', 0, 4) === 'MPF\0';
+}
+
+/**
+ * APP11 carrying a JUMBF box (ISO 19566-5: common identifier `JP`, box
+ * instance, packet sequence, then a box header of type `jumb`). This is how
+ * C2PA embeds its manifests in a JPEG. Other APP11 uses (JPEG XT) are kept.
+ */
+function isJumbf(marker: number, payload: Buffer): boolean {
+  return marker === 0xeb && payload.toString('latin1', 0, 2) === 'JP' && payload.toString('latin1', 12, 16) === 'jumb';
 }
 
 /** Orientation (tag 0x0112) from IFD0 of a TIFF block, or null. */
