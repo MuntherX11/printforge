@@ -1,10 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { CreateExpenseDto } from '@printforge/types';
-import { requiredNumber } from '../common/utils/validate-number';
 import { round3 } from '../catalog-core/cost-engine';
 import { AccountsService } from './accounts.service';
-import { EXPENSE_AMOUNT, parseExpenseCategory, parseExpensePatch } from './expense-input';
+import { parseExpenseCategory, parseExpenseCreate, parseExpensePatch } from './expense-input';
 
 @Injectable()
 export class ExpensesService {
@@ -28,10 +26,14 @@ export class ExpensesService {
     });
   }
 
-  async create(dto: CreateExpenseDto & { accountId?: string }) {
-    const amount = requiredNumber(dto.amount, 'amount', EXPENSE_AMOUNT);
-    const date = new Date(dto.date);
-    if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
+  /**
+   * POST /accounting/expenses (ADMIN/OPERATOR). The body is parsed by
+   * parseExpenseCreate, with PATCH's rules (description at most 500
+   * characters, notes 2000, amount 0..1e8).
+   */
+  async create(body: unknown) {
+    const dto = parseExpenseCreate(body);
+    const { amount, date } = dto;
 
     // Money going out reduces an account, so the balance reflects both
     // directions. accountId is optional — an expense can still be recorded
@@ -45,7 +47,7 @@ export class ExpensesService {
           date,
           recurring: dto.recurring,
           notes: dto.notes,
-          accountId: dto.accountId || null,
+          accountId: dto.accountId,
         },
         include: { category: true },
       });

@@ -201,6 +201,61 @@ describe('POST /accounting/categories allowlist', () => {
   });
 });
 
+/**
+ * POST /accounting/expenses took CreateExpenseDto (an interface), so
+ * description, notes, recurring and categoryId were written with no type or
+ * length check, although PATCH caps description at 500 and notes at 2000.
+ */
+describe('POST /accounting/expenses allowlist', () => {
+  const snapshot = (db: FakeCatalogDb) => JSON.stringify([db.t('expense'), db.t('account'), db.t('accountTransaction')]);
+  const valid = { categoryId: 'cat-1', description: 'PLA restock', amount: 50, date: '2026-09-01' };
+
+  it.each<[Record<string, unknown>, string]>([
+    [{ ...valid, transactions: { create: [{ accountId: 'acc-bank', amount: 1e6 }] } }, 'property transactions should not exist'],
+    [{ ...valid, category: { connect: { id: 'cat-2' } } }, 'property category should not exist'],
+    [{ ...valid, account: { update: { balance: 0 } } }, 'property account should not exist'],
+    [{ ...valid, id: 'exp-1' }, 'property id should not exist'],
+    [{ ...valid, categoryId: undefined }, 'Category is required'],
+    [{ ...valid, categoryId: { connect: { id: 'cat-1' } } }, '"categoryId" must be an id'],
+    [{ ...valid, description: undefined }, 'Description is required'],
+    [{ ...valid, description: '   ' }, 'Description is required'],
+    [{ ...valid, description: { set: 'x' } }, '"description" must be text'],
+    [{ ...valid, amount: undefined }, '"amount" must be a number'],
+    [{ ...valid, amount: -5 }, '"amount" must be between 0 and 100000000'],
+    [{ ...valid, date: undefined }, 'Date is required'],
+    [{ ...valid, date: 'someday' }, 'Invalid date'],
+    [{ ...valid, recurring: 'yes' }, '"recurring" must be true or false'],
+    [{ ...valid, notes: ['a'] }, '"notes" must be text'],
+    [{ ...valid, accountId: 7 }, '"accountId" must be an id'],
+  ])('%j → 400 %s, nothing written', async (body, message) => {
+    const h = setup();
+    const before = snapshot(h.db);
+    expect(await badRequestOf(h.svc.create(body))).toBe(message);
+    expect(snapshot(h.db)).toBe(before);
+  });
+
+  it('what the Expenses screen sends still saves, with description and notes capped like PATCH', async () => {
+    const h = setup();
+    const out: any = await h.svc.create({ ...valid, description: ' PLA restock ', notes: ' 3 spools ' });
+    expect(out).toMatchObject({ categoryId: 'cat-1', description: 'PLA restock', amount: 50, notes: '3 spools', accountId: null, category: { name: 'Filament' } });
+    expect(out.date).toEqual(new Date('2026-09-01'));
+    expect(h.db.t('accountTransaction')).toHaveLength(0);
+
+    const long: any = await h.svc.create({ ...valid, description: 'd'.repeat(900), notes: 'n'.repeat(3000), recurring: true, accountId: 'acc-bank' });
+    expect(long.description).toHaveLength(500);
+    expect(long.notes).toHaveLength(2000);
+    expect(long.recurring).toBe(true);
+    expect(balance(h.db, 'acc-bank')).toBe(950);
+    expectLedgerAgrees(h.db, 'acc-bank', 1000);
+  });
+
+  it('stays ADMIN/OPERATOR', () => {
+    const reflector = new Reflector();
+    expect(reflector.get(GUARDS_METADATA, ExpensesController.prototype.createExpense)).toEqual([RolesGuard]);
+    expect(reflector.get(ROLES_KEY, ExpensesController.prototype.createExpense)).toEqual(['ADMIN', 'OPERATOR']);
+  });
+});
+
 describe('DELETE /accounting/expenses/:id reverses its ledger', () => {
   it('refunds the account with an ADJUSTMENT, so the balance and its transactions still agree', async () => {
     const h = setup();

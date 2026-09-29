@@ -74,3 +74,36 @@ export function parseExpensePatch(raw: unknown): ExpensePatchInput {
   if (b.accountId !== undefined) out.accountId = b.accountId === null || b.accountId === '' ? null : id(b.accountId, 'accountId');
   return out;
 }
+
+export interface ExpenseCreateInput {
+  categoryId: string;
+  description: string;
+  amount: number;
+  date: Date;
+  recurring?: boolean;
+  notes: string | null;
+  accountId: string | null;
+}
+
+/**
+ * POST /accounting/expenses. CreateExpenseDto is an interface too, and
+ * create() wrote description, notes, recurring and categoryId with no type or
+ * length check. Same keys and rules as parseExpensePatch; categoryId,
+ * description, amount and date are required.
+ */
+export function parseExpenseCreate(raw: unknown): ExpenseCreateInput {
+  const p = parseExpensePatch(raw);
+  if (!p.categoryId) throw new BadRequestException('Category is required');
+  if (!p.description) throw new BadRequestException('Description is required');
+  if (p.amount === undefined) throw new BadRequestException('"amount" must be a number');
+  if (!p.date) throw new BadRequestException('Date is required');
+  return {
+    categoryId: p.categoryId,
+    description: p.description,
+    amount: p.amount,
+    date: p.date,
+    recurring: p.recurring,
+    notes: p.notes ?? null,
+    accountId: p.accountId ?? null,
+  };
+}
