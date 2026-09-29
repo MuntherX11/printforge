@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { identityFields, initialIdentity, otherModeFor, type EditIdentity } from '@printforge/types';
 import { FilamentBrandColour, toMaterialType, type Swatch } from '@/components/filament-swatch-picker';
 import { api } from '@/lib/api';
@@ -45,6 +45,9 @@ export function EditMaterialIdentity({ material }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const typeRef = useRef(type);
   typeRef.current = type;
+  const typeId = useId();
+  /** False while the catalogue loads: the picker shows empty selects until then. */
+  const [ready, setReady] = useState(false);
 
   function onPicker(next: PickerChange) {
     if (initialising.current) return;
@@ -87,6 +90,7 @@ export function EditMaterialIdentity({ material }: Props) {
       .then((r) => r?.results ?? [])
       .catch((): Swatch[] => [])
       .then((swatches) => {
+        if (live) setReady(true);
         if (!live || dirtyRef.current) return; // closed, or the user got there first
         const mode = otherModeFor({
           swatches,
@@ -104,12 +108,13 @@ export function EditMaterialIdentity({ material }: Props) {
   }, []);
 
   const fields = identityFields(v);
+  const stored = [material.brand, material.color].filter(Boolean).join(' · ');
 
   return (
     <>
       <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
-        <select name="type" value={type} onChange={(e) => setType(e.target.value)} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        <label htmlFor={typeId} className="text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
+        <select id={typeId} name="type" value={type} onChange={(e) => setType(e.target.value)} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
           {MATERIAL_TYPES.map(t => (
             <option key={t} value={t}>{t}</option>
           ))}
@@ -117,6 +122,9 @@ export function EditMaterialIdentity({ material }: Props) {
       </div>
       <div ref={box} className="space-y-4">
         <FilamentBrandColour materialType={type} brand={v.brand} colour={v.colour} hex={v.hex} onChange={onPicker} />
+        {!ready && stored && (
+          <p className="text-xs text-gray-500 dark:text-gray-400" aria-live="polite">Loading colours… (currently {stored})</p>
+        )}
         {fields && (
           <>
             <input type="hidden" name="brand" value={fields.brand} />
