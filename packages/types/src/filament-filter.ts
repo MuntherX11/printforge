@@ -302,6 +302,19 @@ function findPfidHit(rows: readonly FilamentStockRow[], q: string): FilamentPfid
   return found === 1 ? hit : null;
 }
 
+/**
+ * The list's search rule as a predicate (same terms as filterFilaments): every
+ * term must match colour, name, brand, type, an active spool's location, the
+ * colour hex ('#' optional) or a spool PF-ID prefix. `rows` are the rows being
+ * searched, so a multi-word shelf name ('shelf b') is read as one place the
+ * same way the Filaments list reads it. '' matches every row.
+ */
+export function filamentQueryMatcher(q: string, rows: readonly FilamentStockRow[] = []): (row: FilamentStockRow) => boolean {
+  const allPlaces = [...new Set(rows.flatMap(activePlaces))];
+  const terms = toTerms(cleanQuery(q).toLowerCase().split(/\s+/).filter(Boolean), allPlaces);
+  return (row) => terms.length === 0 || matchRow(row, terms) !== null;
+}
+
 // ---------------------------------------------------------------- sort
 
 function cmpText(a: string, b: string): number {

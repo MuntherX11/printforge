@@ -1,10 +1,11 @@
 'use client';
 
 import { ArrowDown, ArrowUp, Download, Package } from 'lucide-react';
+import { filamentInStock } from '@printforge/types';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
-import type { ComponentDetail, MaterialLite, ProductDetail } from '@/lib/types/api';
+import type { ComponentDetail, FilamentStockRow, MaterialLite, ProductDetail } from '@/lib/types/api';
 import { LinkButton, Swatch } from './options-ui';
 import { componentGrams, slotViews, type LinkState } from './bom-model';
 import { ComponentStockCell } from './ComponentStockCell';
@@ -24,6 +25,10 @@ interface Props {
   onLayouts: () => void;
   onEditLinks: (focus: ColourLinksFocus) => void;
   onReload: () => void;
+  /** Grams in stock per filament id (GET /materials/stock); null hides the note. */
+  stock: ReadonlyMap<string, FilamentStockRow> | null;
+  /** Opens the filament picker for one colour slot. */
+  onPickFilament: (colorIndex: number) => void;
 }
 
 function LinkTag({ link, canEdit, onClick, part }: { link: LinkState; canEdit: boolean; onClick: () => void; part: string }) {
@@ -78,11 +83,32 @@ export function ComponentRow(props: Props) {
         <div className="space-y-1">
           {slots.map(s => {
             const part = multi ? `${c.description} colour ${s.colorIndex + 1}` : c.description;
-            return (
-              <div key={s.colorIndex} className="flex flex-wrap items-center gap-1.5 text-sm">
+            const name = s.material?.name ?? 'No filament';
+            const stockRow = s.material ? props.stock?.get(s.material.id) : undefined;
+            const chip = (
+              <>
                 <Swatch hex={s.material?.colorHex} title={s.material?.name ?? 'No filament'} />
                 <span className="text-gray-800 dark:text-gray-200">{s.material?.name ?? 'No filament'}</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">{formatGrams(s.grams)}</span>
+              </>
+            );
+            return (
+              <div key={s.colorIndex} className="flex flex-wrap items-center gap-1.5 text-sm">
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => props.onPickFilament(s.colorIndex)}
+                    title={`Change filament — ${part}`}
+                    aria-label={`Filament of ${part}: ${name}, ${formatGrams(s.grams)} per unit. Change filament`}
+                    aria-haspopup="dialog"
+                    className="-mx-1 -my-0.5 inline-flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-gray-700/60"
+                  >
+                    {chip}
+                  </button>
+                ) : chip}
+                {canEdit && stockRow && (filamentInStock(stockRow)
+                  ? <span className="text-xs text-gray-500 dark:text-gray-400">· {formatGrams(stockRow.totalStock)} in stock</span>
+                  : <span className="text-xs font-medium text-amber-700 dark:text-amber-300">· Out of stock</span>)}
                 {hasSlots && (
                   <LinkTag
                     link={s.link}
