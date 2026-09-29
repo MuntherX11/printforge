@@ -1,9 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
-import { CreateDesignProjectDto, UpdateDesignProjectDto, AddDesignCommentDto } from '@printforge/types';
+import { UpdateDesignProjectDto } from '@printforge/types';
 import { generateNumber } from '../common/utils/number-generator';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
+import { parseDesignComment, parseDesignFeedback, parseDesignRequest } from './design-input';
+
+/**
+ * Staff roles that may write in a design project: post in its chat, upload
+ * files, add revisions and change it. They are the roles the Design Center
+ * sidebar shows. VIEWER and ACCOUNTING can read a project but not post in the
+ * customer's chat.
+ */
+export const DESIGN_STAFF_WRITE_ROLES = ['ADMIN', 'OPERATOR'] as const;
 
 @Injectable()
 export class DesignService {
@@ -28,7 +37,9 @@ export class DesignService {
 
   // ============ PROJECTS ============
 
-  async create(dto: CreateDesignProjectDto, customerId: string) {
+  /** POST /design-projects/customer/create; the body is parsed by parseDesignRequest. */
+  async create(body: unknown, customerId: string) {
+    const dto = parseDesignRequest(body);
     let projectNumber: string | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -45,8 +56,8 @@ export class DesignService {
         projectNumber,
         customerId,
         title: dto.title,
-        brief: dto.brief || null,
-        budget: dto.budget || null,
+        brief: dto.brief,
+        budget: dto.budget,
         status: 'REQUESTED',
       },
       include: { customer: { select: { id: true, name: true, email: true } } },
@@ -170,11 +181,25 @@ export class DesignService {
 
   // ============ COMMENTS (Chat) ============
 
-  async addComment(projectId: string, dto: AddDesignCommentDto, author: { id: string; name: string; isCustomer: boolean }) {
+  /**
+   * POST /design-projects/:id/comments, for the project's customer and for
+   * ADMIN/OPERATOR staff (checked by the controller). The body is parsed by
+   * parseDesignComment, and every attachment id must be one of this project's
+   * attachments.
+   */
+  async addComment(projectId: string, body: unknown, author: { id: string; name: string; isCustomer: boolean }) {
+    const dto = parseDesignComment(body);
     if (author.isCustomer) {
       await this.verifyAccess(projectId, author.id, 'customer');
     }
     await this.findOne(projectId);
+    if (dto.attachmentIds.length) {
+      const found = await this.prisma.attachment.findMany({
+        where: { id: { in: dto.attachmentIds }, designProjectId: projectId },
+        select: { id: true },
+      });
+      if (found.length !== dto.attachmentIds.length) throw new BadRequestException('Attachment not found on this project');
+    }
 
     return this.prisma.designComment.create({
       data: {
@@ -183,7 +208,7 @@ export class DesignService {
         authorName: author.name,
         isCustomer: author.isCustomer,
         content: dto.content,
-        attachmentIds: dto.attachmentIds || [],
+        attachmentIds: dto.attachmentIds,
       },
     });
   }
@@ -248,7 +273,9 @@ export class DesignService {
     });
   }
 
-  async customerRequestChanges(projectId: string, customerId: string, feedback: string) {
+  /** The body is parsed by parseDesignFeedback (`{ feedback }`, required, bounded). */
+  async customerRequestChanges(projectId: string, customerId: string, body: unknown) {
+    const feedback = parseDesignFeedback(body);
     const project = await this.findOne(projectId);
     if (project.customerId !== customerId) throw new NotFoundException('Project not found');
     if (project.status !== 'REVIEW') {
