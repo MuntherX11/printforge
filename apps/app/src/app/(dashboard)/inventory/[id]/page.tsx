@@ -23,6 +23,7 @@ const SpoolLabelScanner = dynamic(
 );
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/toast';
+import { EditMaterialIdentity } from './EditMaterialIdentity';
 
 export default function MaterialDetailPage() {
   const formatCurrency = useFormatCurrency();
@@ -107,8 +108,9 @@ export default function MaterialDetailPage() {
       await api.patch(`/materials/${id}`, {
         name: form.get('name') as string,
         type: form.get('type') as string,
-        color: form.get('color') as string || null,
-        brand: form.get('brand') as string || null,
+        // Brand, colour and hex go only when the user changed them (see
+        // EditMaterialIdentity); the server stores '' as null.
+        ...(form.has('color') ? { brand: form.get('brand') as string, color: form.get('color') as string, colorHex: form.get('colorHex') as string } : {}),
         spoolPrice: parseFloat(form.get('spoolPrice') as string),
         spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
         density: parseFloat(form.get('density') as string) || 1.24,
@@ -546,16 +548,7 @@ export default function MaterialDetailPage() {
       <Dialog open={showEditMaterial} onClose={() => setShowEditMaterial(false)} title="Edit Material">
         <form onSubmit={handleEditMaterial} className="space-y-4">
           <Input name="name" label="Name" defaultValue={material.name} required />
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
-            <select name="type" defaultValue={material.type} className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
-              {['PLA', 'PETG', 'ABS', 'TPU', 'ASA', 'NYLON', 'RESIN', 'OTHER'].map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <Input name="color" label="Color" defaultValue={material.color || ''} />
-          <Input name="brand" label="Brand" defaultValue={material.brand || ''} />
+          <EditMaterialIdentity material={material} />
           <div className="grid grid-cols-2 gap-4">
             <Input
               name="spoolPrice"
