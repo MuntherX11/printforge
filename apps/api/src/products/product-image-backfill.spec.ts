@@ -304,6 +304,49 @@ describe('ProductImageBackfillService (BF-2)', () => {
     expect(now).toEqual(wanted);
   });
 
+  it("a legacy photo migrating on a later boot goes after the owner's order, even when it is the imageUrl cover", async () => {
+    const a = await legacy({});
+    const b = await legacy({});
+    const late = await legacy({ content: null }); // its file is missing on the first boot
+    prisma.product.rows[0].imageUrl = late.storagePath;
+    await svc.run();
+    expect(marked(late.id)).toBe(false);
+    const img = (att: { id: string }) => prisma.productImage.rows.find((i) => i.legacyAttachmentId === att.id)!;
+    // The owner puts b first.
+    img(b).sortOrder = 0;
+    img(a).sortOrder = 1;
+    // The file turns up; the next boot migrates it.
+    fs.writeFileSync(path.join(tmp, late.storagePath), makeJpeg({ width: 30, height: 20 }));
+    prisma.locks.length = 0;
+    expect((await svc.run()).created).toBe(1);
+    const order = [...prisma.productImage.rows].sort((x, y) => x.sortOrder - y.sortOrder);
+    expect(order.map((i) => [i.legacyAttachmentId, i.sortOrder])).toEqual([[b.id, 0], [a.id, 1], [late.id, 2]]);
+    expect(prisma.locks).toEqual([{ table: 'Product', mode: 'UPDATE', ids: ['p1'] }]);
+  });
+
+  it('the first migration still puts the legacy cover before photos uploaded before it ran', async () => {
+    const a = await legacy({});
+    const b = await legacy({});
+    prisma.product.rows[0].imageUrl = b.storagePath;
+    const uploaded = await prisma.productImage.create({
+      data: { productId: 'p1', storageKey: `${'9'.repeat(32)}.png`, mimeType: 'image/png', sizeBytes: 1, width: 1, height: 1, originalName: 'new', sortOrder: 0 },
+    });
+    await svc.run();
+    const order = [...prisma.productImage.rows].sort((x, y) => x.sortOrder - y.sortOrder);
+    expect(order.map((i) => i.legacyAttachmentId ?? i.id)).toEqual([b.id, a.id, uploaded.id]);
+  });
+
+  it('strips what a phone appends after the JPEG EOI (secondary image with GPS, trailer)', async () => {
+    const primary = makeJpeg({ width: 30, height: 20 });
+    await legacy({
+      content: Buffer.concat([primary, makeJpeg({ width: 8, height: 6, exif: true }), Buffer.from('Image_UTC_Data +23.5880+058.3829', 'latin1')]),
+    });
+    expect((await svc.run()).created).toBe(1);
+    const stored = fs.readFileSync(imagePathForKey(prisma.productImage.rows[0].storageKey)!);
+    for (const s of ['GPS', 'Exif\0\0', 'Image_UTC_Data', '+23.5880']) expect(has(stored, s)).toBe(false);
+    expect(stored.equals(primary)).toBe(true);
+  });
+
   it('continues past a batch of 50 (keyset pagination) without re-reading marked rows', async () => {
     for (let i = 0; i < 55; i++) await legacy({ content: Buffer.from('not an image') });
     const counts = await svc.run();
