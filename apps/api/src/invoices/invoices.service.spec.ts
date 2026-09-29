@@ -153,7 +153,10 @@ describe('PATCH /invoices/:id', () => {
     async (status) => {
       const h = await ledgerHarness();
       await h.invoices.update(h.inv.id, { status: 'PAID' });
-      expect(await badRequestOf(h.invoices.update(h.inv.id, { status }))).toMatch(/^A paid invoice can't be changed/);
+      // It doesn't send the admin to an account adjustment, which would leave the invoice and order paidAmount wrong.
+      expect(await badRequestOf(h.invoices.update(h.inv.id, { status }))).toBe(
+        "A paid invoice can't be changed: its payment is already recorded on the invoice, the order and the accounts, and undoing a payment isn't supported yet.",
+      );
       expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'PAID' }))).toBe('Invoice is already marked as paid');
       const s = h.state();
       expect(s.invoice.status).toBe('PAID');

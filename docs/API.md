@@ -313,8 +313,9 @@ Query: `?status=PENDING&page=1&limit=20`
 ### PATCH /invoices/:id
 **Roles:** ADMIN
 ```json
-{ "status": "PAID", "paidAmount": 50.000, "paidAt": "2026-03-30" }
+{ "status": "PAID", "paidAt": "2026-03-30" }
 ```
+Only `status` and `paidAt` are accepted; any other key (including `paidAmount`) is a 400. Marking an invoice PAID always sets `paidAmount` to the invoice total, and `paidAt` (default: now) is accepted only with `status: "PAID"`. PAID and CANCELLED invoices can't be changed.
 
 ### GET /invoices/:id/pdf
 Downloads invoice as PDF. Includes company logo, payment details, and notes.
@@ -411,10 +412,12 @@ Files detected in the watch folder awaiting import.
 All imports (pending, imported, dismissed).
 
 ### POST /watch-folder/:id/dismiss
+**Roles:** ADMIN, OPERATOR
 Remove from pending list.
 
 ### POST /watch-folder/:id/import
-Import as a new product with auto-generated BOM.
+**Roles:** ADMIN, OPERATOR
+Import as a new product with auto-generated BOM. Only `name`, `sku` and `materialId` are accepted.
 ```json
 {
   "name": "Imported Model",
@@ -431,7 +434,12 @@ Import as a new product with auto-generated BOM.
 Live status from Moonraker API. Returns temperatures, progress, print state.
 
 ### POST /moonraker/poll
+**Roles:** ADMIN, OPERATOR
 Manually trigger a poll of all Moonraker printers.
+
+### POST /moonraker/reconnect/:printerId
+**Roles:** ADMIN, OPERATOR
+Reconnect a Creality printer's LAN WebSocket.
 
 ### POST /moonraker/gcode/:printerId
 Send raw G-code command.
@@ -485,4 +493,5 @@ Returns unread count.
 ## Low Stock
 
 ### POST /low-stock/check
+**Roles:** ADMIN, OPERATOR
 Manually trigger low-stock check. Returns `{ checked, alerts }`.

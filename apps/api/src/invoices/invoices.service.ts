@@ -113,8 +113,10 @@ export class InvoicesService {
       throw new BadRequestException('Invoice is already marked as paid');
     }
     if (existing.status === 'PAID' && (dto.status !== undefined || dto.paidAt !== undefined)) {
+      // An account adjustment would fix only Account.balance, not the invoice's
+      // or the order's paidAmount, so the message doesn't suggest one.
       throw new BadRequestException(
-        "A paid invoice can't be changed: its payment is already in the accounts. Correct the account with an adjustment instead.",
+        "A paid invoice can't be changed: its payment is already recorded on the invoice, the order and the accounts, and undoing a payment isn't supported yet.",
       );
     }
 
