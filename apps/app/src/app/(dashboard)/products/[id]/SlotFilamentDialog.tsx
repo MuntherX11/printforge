@@ -82,14 +82,13 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
   const part = slotPartLabel(c, c.description, colorIndex);
   // Colour first, the name only when it differs (as the Filaments list and the picker).
   const now = filamentLabel(slot.material);
-  const next = filamentLabel(picked);
   const note = [
     scopeNote(product, c, scopeLabel),
     product.colours.length > 0 ? 'Colour options keep their own filaments.' : null,
   ].filter(Boolean).join(' ');
 
   function finish(warnings: Problem[], row: FilamentStockRow) {
-    const m = writeResultMessage(warnings, `Saved "${part}" — ${filamentLabel(row).text}`);
+    const m = writeResultMessage(warnings, `Saved "${part}" — ${row.name}`);
     toast(m.tone, m.text);
     onSaved();
     onClose();
@@ -145,9 +144,8 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
         {writer.impact && picked && (
           <>
             <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={next.primary} />
-              <span className="font-medium">{next.primary}</span>
-              {next.secondary && <span className="text-xs text-gray-500 dark:text-gray-400">· {next.secondary}</span>}
+              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={picked.color || picked.name} />
+              <span className="font-medium">{picked.name}</span>
             </p>
             <ImpactList impact={writer.impact} />
             <div className="flex justify-end gap-3">

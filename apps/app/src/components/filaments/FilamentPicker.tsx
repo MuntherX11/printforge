@@ -142,7 +142,8 @@ export function FilamentPicker(props: FilamentPickerProps) {
                   current && 'bg-brand-50/60 dark:bg-brand-900/20',
                 )}
               >
-                <Swatch hex={swatchHex(row.colorHex)} title={label.primary} />
+                {/* Decorative: the primary text beside it says the colour, so a screen reader hears it once. */}
+                <Swatch hex={swatchHex(row.colorHex)} title={label.primary} decorative />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-gray-900 dark:text-gray-100">{label.primary}</span>
                   <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
