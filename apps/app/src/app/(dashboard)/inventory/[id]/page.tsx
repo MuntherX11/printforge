@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { Swatch, swatchHex } from '@/components/ui/swatch';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
 import type { ApiMaterialDetail, ApiLocation, ApiSpool } from '@/lib/types/api';
 import type { ScannedFields } from '@/components/spool-label-scanner';
 import { formatDate } from '@/lib/utils';
@@ -24,6 +24,7 @@ const SpoolLabelScanner = dynamic(
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/toast';
 import { EditMaterialIdentity } from './EditMaterialIdentity';
+import { DeleteSpoolDialog } from './DeleteSpoolDialog';
 
 export default function MaterialDetailPage() {
   const formatCurrency = useFormatCurrency();
@@ -46,9 +47,6 @@ export default function MaterialDetailPage() {
   const [showDeleteMaterial, setShowDeleteMaterial] = useState(false);
   const [deletingMaterial, setDeletingMaterial] = useState(false);
   const [showDeleteSpool, setShowDeleteSpool] = useState<string | null>(null);
-  const [deletingSpool, setDeletingSpool] = useState<string | null>(null);
-  // The server refused the delete (409): its text, and whether Deactivate is the way out.
-  const [deleteSpoolBlock, setDeleteSpoolBlock] = useState<{ message: string; canDeactivate: boolean } | null>(null);
   const [showDeactivateSpool, setShowDeactivateSpool] = useState<string | null>(null);
   const [deactivatingSpool, setDeactivatingSpool] = useState<string | null>(null);
 
@@ -158,33 +156,6 @@ export default function MaterialDetailPage() {
       return false;
     } finally {
       setDeactivatingSpool(null);
-    }
-  }
-
-  function closeDeleteSpool() {
-    setShowDeleteSpool(null);
-    setDeleteSpoolBlock(null);
-  }
-
-  async function handleDeleteSpool(spoolId: string) {
-    setDeletingSpool(spoolId);
-    try {
-      await api.delete(`/spools/${spoolId}`);
-      setShowDeleteSpool(null);
-      load();
-    } catch (err: unknown) {
-      // A spool with job history (or on an active job) is kept: show why in
-      // the dialog and, for an active spool with history, offer Deactivate.
-      if (err instanceof ApiError && err.status === 409) {
-        setDeleteSpoolBlock({
-          message: err.message,
-          canDeactivate: err.code === 'SPOOL_HAS_HISTORY' && !!material?.spools?.find((s) => s.id === spoolId)?.isActive,
-        });
-      } else {
-        toast('error', (err as Error).message);
-      }
-    } finally {
-      setDeletingSpool(null);
     }
   }
 
@@ -446,7 +417,7 @@ export default function MaterialDetailPage() {
                         )}
                         {user?.role === 'ADMIN' && (
                           <button
-                            onClick={() => { setDeleteSpoolBlock(null); setShowDeleteSpool(s.id); }}
+                            onClick={() => setShowDeleteSpool(s.id)}
                             className="p-1 text-gray-400 hover:text-red-600"
                             title="Delete spool permanently"
                           >
@@ -630,29 +601,14 @@ export default function MaterialDetailPage() {
         </div>
       </Dialog>
 
-      <Dialog open={!!showDeleteSpool} onClose={closeDeleteSpool} title="Delete Spool">
-        <div className="space-y-4 pt-2">
-          <p className="text-sm text-gray-500">
-            {deleteSpoolBlock ? deleteSpoolBlock.message : 'Permanently delete this spool? This cannot be undone.'}
-          </p>
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="outline" onClick={closeDeleteSpool}>Cancel</Button>
-            {!deleteSpoolBlock ? (
-              <Button variant="destructive" onClick={() => showDeleteSpool && handleDeleteSpool(showDeleteSpool)} disabled={!!deletingSpool}>
-                {deletingSpool ? 'Deleting...' : 'Delete Spool'}
-              </Button>
-            ) : deleteSpoolBlock.canDeactivate && (
-              <Button
-                variant="destructive"
-                onClick={async () => { if (showDeleteSpool && await handleDeactivateSpool(showDeleteSpool)) closeDeleteSpool(); }}
-                disabled={!!deactivatingSpool}
-              >
-                {deactivatingSpool ? 'Deactivating...' : 'Deactivate Spool'}
-              </Button>
-            )}
-          </div>
-        </div>
-      </Dialog>
+      <DeleteSpoolDialog
+        spoolId={showDeleteSpool}
+        isActive={!!material?.spools?.find((s) => s.id === showDeleteSpool)?.isActive}
+        deactivating={!!deactivatingSpool}
+        onClose={() => setShowDeleteSpool(null)}
+        onDeleted={load}
+        onDeactivate={handleDeactivateSpool}
+      />
 
       <Dialog open={!!showDeactivateSpool} onClose={() => setShowDeactivateSpool(null)} title="Deactivate Spool">
         <div className="space-y-4 pt-2">
