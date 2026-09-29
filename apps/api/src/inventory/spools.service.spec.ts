@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { UpdateSpoolDto } from '@printforge/types';
 import type { PrismaService } from '../common/prisma/prisma.service';
+import type { RedisCacheService } from '../common/redis/redis-cache.service';
 import { fakeCatalogDb, type FakeCatalogDb } from '../products/__fixtures__/fake-catalog-db';
 import { addJobRow, addSpool } from '../production/__fixtures__/production-harness';
 import { SpoolsService } from './spools.service';
@@ -217,5 +218,19 @@ describe('SpoolsService.update allowlist', () => {
   it('an unknown id → 404 "Spool not found"', async () => {
     const { svc } = setup();
     await expect(svc.update('sp-nope', { isActive: false })).rejects.toThrow(new NotFoundException('Spool not found'));
+  });
+});
+
+describe('spool writes clear the 60 s dashboard KPI cache', () => {
+  it('after a successful update or delete; not after a refused one', async () => {
+    const { db, spoolId } = setup();
+    const invalidate = jest.fn(async (_key: string) => undefined);
+    const svc = new SpoolsService(db as unknown as PrismaService, { invalidate } as unknown as RedisCacheService);
+    await svc.update(spoolId, { isActive: false });
+    expect(invalidate.mock.calls).toEqual([['dashboard:kpis']]);
+    await expect(svc.update(spoolId, { jobMaterials: { deleteMany: {} } } as unknown as UpdateSpoolDto)).rejects.toBeInstanceOf(BadRequestException);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    await svc.remove(spoolId);
+    expect(invalidate).toHaveBeenCalledTimes(2);
   });
 });

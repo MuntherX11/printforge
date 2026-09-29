@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { colourKeyHasMaterial } from '../stock-ledger/colour-key';
 import {
   CreateMaterialDto, UpdateMaterialDto, BulkMaterialUploadRow, MaterialType, FilamentStockRow, FilamentStockSpool,
@@ -47,7 +48,13 @@ function resolveCostPerGram(
 
 @Injectable()
 export class MaterialsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, @Optional() private cache?: RedisCacheService) {}
+
+  /** A filament write clears the 60 s dashboard KPI cache, so its Low Stock tile matches this list. */
+  private stockChanged<T>(result: T): T {
+    this.cache?.invalidate('dashboard:kpis').catch(() => {});
+    return result;
+  }
 
   /**
    * Validate the numeric/text fields shared by create and update.
@@ -97,13 +104,13 @@ export class MaterialsService {
       costPerGram: resolveCostPerGram(spoolPrice, spoolWeightGrams, costPerGram),
     };
     const identity: FilamentIdentity = { type: fields.type, brand: fields.brand ?? null, color: fields.color ?? null };
-    if (filamentIdentityKey(identity) === null) return this.prisma.material.create({ data });
-    return this.prisma.$transaction(async (tx) => {
+    if (filamentIdentityKey(identity) === null) return this.stockChanged(await this.prisma.material.create({ data }));
+    return this.stockChanged(await this.prisma.$transaction(async (tx) => {
       await lockMaterialIdentity(tx);
       const dup = await findDuplicateMaterial(tx, identity);
       if (dup) throw duplicateMaterialConflict(dup, identity, 'create');
       return tx.material.create({ data });
-    }, MATERIAL_TX);
+    }, MATERIAL_TX));
   }
 
   /**
@@ -262,14 +269,14 @@ export class MaterialsService {
     };
     const nextKey = filamentIdentityKey(next);
     if (nextKey === null || nextKey === filamentIdentityKey(current)) {
-      return this.prisma.material.update({ where: { id }, data: updateData });
+      return this.stockChanged(await this.prisma.material.update({ where: { id }, data: updateData }));
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.stockChanged(await this.prisma.$transaction(async (tx) => {
       await lockMaterialIdentity(tx);
       const dup = await findDuplicateMaterial(tx, next, id);
       if (dup) throw duplicateMaterialConflict(dup, next, 'update');
       return tx.material.update({ where: { id }, data: updateData });
-    }, MATERIAL_TX);
+    }, MATERIAL_TX));
   }
 
   async bulkImport(rows: BulkMaterialUploadRow[]) {
@@ -406,7 +413,7 @@ export class MaterialsService {
       }
     }
 
-    return results;
+    return results.created > 0 ? this.stockChanged(results) : results;
   }
 
   /**
@@ -440,7 +447,7 @@ export class MaterialsService {
       }
       await tx.material.delete({ where: { id } });
       return { deleted: true };
-    }, { timeout: 30_000, maxWait: 10_000 });
+    }, { timeout: 30_000, maxWait: 10_000 }).then((out: { deleted: boolean }) => this.stockChanged(out));
   }
 
   async getLowStock() {

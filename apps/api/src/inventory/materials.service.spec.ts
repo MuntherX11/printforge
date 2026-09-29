@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { MaterialType, type BulkMaterialUploadRow } from '@printforge/types';
 import { fixtureMaterial, M, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
 import type { PrismaService } from '../common/prisma/prisma.service';
+import type { RedisCacheService } from '../common/redis/redis-cache.service';
 import { fakeCatalogDb, seedProduct } from '../products/__fixtures__/fake-catalog-db';
 import * as identity from './material-identity';
 import { MATERIAL_BUSY_MESSAGE } from './material-identity';
@@ -289,3 +290,17 @@ describe('a busy identity lock is a 409 MATERIAL_BUSY on every guarded path, nev
   });
 });
 
+
+describe('filament writes clear the 60 s dashboard KPI cache', () => {
+  it('after a create, an update and a delete; not after a refused duplicate', async () => {
+    const { db } = guardSetup([RED]);
+    const invalidate = jest.fn(async (_key: string) => undefined);
+    const svc = new MaterialsService(db as unknown as PrismaService, { invalidate } as unknown as RedisCacheService);
+    await conflictBody(svc.create({ name: 'X', type: MaterialType.PLA, brand: 'eSUN', color: 'Red' }));
+    expect(invalidate).not.toHaveBeenCalled();
+    const blue = await svc.create({ name: 'eSUN PLA Blue', type: MaterialType.PLA, brand: 'eSUN', color: 'Blue' });
+    await svc.update(blue.id, { reorderPoint: 800 });
+    await svc.remove(blue.id);
+    expect(invalidate.mock.calls).toEqual([['dashboard:kpis'], ['dashboard:kpis'], ['dashboard:kpis']]);
+  });
+});

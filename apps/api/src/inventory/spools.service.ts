@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { CreateSpoolDto, UpdateSpoolDto, AdjustSpoolWeightDto } from '@printforge/types';
 import { allowedBody, optionalNumber, optionalText, requiredNumber } from '../common/utils/validate-number';
 
@@ -85,7 +86,17 @@ function optionalDate(raw: unknown, field: string): Date | null {
 
 @Injectable()
 export class SpoolsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, @Optional() private cache?: RedisCacheService) {}
+
+  /**
+   * The dashboard KPIs (Low Stock tile included) are cached for 60 s; a spool
+   * write clears them so the tile matches the live Filaments list, as
+   * orders.service does after an order write.
+   */
+  private stockChanged<T>(result: T): T {
+    this.cache?.invalidate('dashboard:kpis').catch(() => {});
+    return result;
+  }
 
   private async generatePrintforgeId(): Promise<string> {
     const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0, 1, O, I
@@ -114,7 +125,7 @@ export class SpoolsService {
 
     const printforgeId = await this.generatePrintforgeId();
 
-    return this.prisma.spool.create({
+    return this.stockChanged(await this.prisma.spool.create({
       data: {
         printforgeId,
         materialId: dto.materialId,
@@ -127,7 +138,7 @@ export class SpoolsService {
         locationId: dto.locationId || undefined,
       },
       include: { material: true, location: true },
-    });
+    }));
   }
 
   async findAll(materialId?: string) {
@@ -159,11 +170,11 @@ export class SpoolsService {
     const data = spoolPatchData(dto);
     const spool = await this.prisma.spool.findUnique({ where: { id }, select: { id: true } });
     if (!spool) throw new NotFoundException('Spool not found');
-    return this.prisma.spool.update({
+    return this.stockChanged(await this.prisma.spool.update({
       where: { id },
       data,
       include: { material: true },
-    });
+    }));
   }
 
   async adjustWeight(id: string, dto: AdjustSpoolWeightDto) {
@@ -175,11 +186,11 @@ export class SpoolsService {
 
     if (newWeight < 0) throw new BadRequestException('Weight cannot be negative');
 
-    return this.prisma.spool.update({
+    return this.stockChanged(await this.prisma.spool.update({
       where: { id },
       data: { currentWeight: newWeight },
       include: { material: true },
-    });
+    }));
   }
 
   /**
@@ -193,7 +204,7 @@ export class SpoolsService {
    * the same moment is either seen here or fails its foreign key after.
    */
   async remove(id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const out = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ id: string; printforgeId: string | null; isActive: boolean }>>(
         Prisma.sql`/* lock:Spool:UPDATE */ SELECT "id", "printforgeId", "isActive" FROM "Spool" WHERE "id" = ANY(${[id]}::text[]) FOR UPDATE`,
       );
@@ -217,6 +228,7 @@ export class SpoolsService {
       await tx.spool.delete({ where: { id } });
       return { deleted: true };
     }, REMOVE_TX);
+    return this.stockChanged(out);
   }
 
   async deductWeight(id: string, grams: number) {
