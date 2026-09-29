@@ -88,7 +88,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
   ].filter(Boolean).join(' ');
 
   function finish(warnings: Problem[], row: FilamentStockRow) {
-    const m = writeResultMessage(warnings, `Saved "${part}" — ${row.name}`);
+    const m = writeResultMessage(warnings, `Saved "${part}" — ${filamentLabel(row).text}`);
     toast(m.tone, m.text);
     onSaved();
     onClose();
@@ -144,8 +144,8 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
         {writer.impact && picked && (
           <>
             <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={picked.color || picked.name} />
-              <span className="font-medium">{picked.name}</span>
+              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={filamentLabel(picked).primary} />
+              <span className="font-medium">{filamentLabel(picked).text}</span>
             </p>
             <ImpactList impact={writer.impact} />
             <div className="flex justify-end gap-3">
