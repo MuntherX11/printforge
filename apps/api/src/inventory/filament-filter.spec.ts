@@ -1,5 +1,4 @@
 import {
-  DEFAULT_FILAMENT_LIST_STATE,
   FILAMENTS_PER_PAGE,
   MaterialType,
   NO_BRAND,
@@ -9,83 +8,22 @@ import {
   normText,
   parseFilamentListState,
   serializeFilamentListState,
-  type FilamentListState,
-  type FilamentStockRow,
   type MaterialTypeValue,
-  type FilamentStockSpool,
 } from '@printforge/types';
+import {
+  catalog,
+  esunFire,
+  esunRed,
+  ids,
+  row,
+  spool,
+  state,
+} from './__fixtures__/filament-rows';
 
-// ---------------------------------------------------------------- fixtures
-
-let spoolSeq = 0;
-function spool(printforgeId: string | null, extra: Partial<FilamentStockSpool> = {}): FilamentStockSpool {
-  spoolSeq += 1;
-  return {
-    id: `s-${spoolSeq}`,
-    printforgeId,
-    currentWeight: 640,
-    isActive: true,
-    locationName: null,
-    ...extra,
-  };
-}
-
-function row(id: string, extra: Partial<FilamentStockRow> = {}): FilamentStockRow {
-  return {
-    id,
-    name: `Filament ${id}`,
-    type: MaterialType.PLA,
-    color: null,
-    colorHex: null,
-    brand: null,
-    costPerGram: 0.02,
-    spoolPrice: 20,
-    spoolWeightGrams: 1000,
-    reorderPoint: 500,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    totalStock: 1000,
-    activeSpools: 1,
-    stockStatus: 'ok',
-    spools: [],
-    ...extra,
-  };
-}
-
-const state = (patch: Partial<FilamentListState> = {}): FilamentListState => ({ ...DEFAULT_FILAMENT_LIST_STATE, ...patch });
-
-/** Ids of every matched row, in order, across all pages. */
-function ids(rows: FilamentStockRow[], patch: Partial<FilamentListState> = {}): string[] {
-  const all: string[] = [];
-  const first = filterFilaments(rows, state(patch));
-  for (let p = 1; p <= first.totalPages; p++) {
-    all.push(...filterFilaments(rows, state({ ...patch, page: p })).pageRows.map((r) => r.id));
-  }
-  return all;
-}
+// Location and colour-hex search: filament-filter-places.spec.ts.
 
 /** URLSearchParams-like reader over a query string. */
 const params = (qs: string) => new URLSearchParams(qs);
-
-const esunRed = row('esun-red', { name: 'eSun PLA Red', color: 'Red', brand: 'eSun', colorHex: '91202B' });
-const esunFire = row('esun-fire', { name: 'eSun PLA Fire Engine Red', color: 'Fire Engine Red', brand: 'eSun', colorHex: 'C8102E' });
-const esunPetgRed = row('esun-petg-red', { name: 'eSUN PETG Red', type: MaterialType.PETG, color: 'Red', brand: 'eSUN' });
-const polyBlack = row('poly-black', {
-  name: 'Polymaker PLA Black',
-  color: 'Black',
-  brand: 'Polymaker',
-  spools: [
-    spool('PF-A7X2', { locationName: 'Shelf B', currentWeight: 640 }),
-    spool('PF-OLD9', { isActive: false, locationName: 'Attic' }),
-  ],
-});
-const bambuWhite = row('bambu-white', {
-  name: 'Bambu Lab PLA White',
-  color: 'White',
-  brand: 'Bambu Lab',
-  spools: [spool('PF-RED4', { locationName: 'Rack 1' })],
-});
-const noBrandGrey = row('nobrand-grey', { name: 'Generic Grey', color: 'Grey', brand: null });
-const catalog = [esunRed, esunFire, esunPetgRed, polyBlack, bambuWhite, noBrandGrey];
 
 // ---------------------------------------------------------------- normText
 
@@ -170,28 +108,18 @@ describe('filterFilaments PF-ID rule', () => {
     expect(ids([legacy], { q: 'blue' })).toEqual(['legacy']);
   });
 
+  it.each(['pf', 'PF-', ' pf- '])("a lone '%s' (a PF-ID being typed) keeps every row and adds no spool hints", (q) => {
+    const r = filterFilaments(catalog, state({ q }));
+    expect(r.matchedCount).toBe(catalog.length);
+    expect(r.counts.all).toBe(catalog.length);
+    expect(r.spoolHits).toEqual({});
+    expect(ids(catalog, { q: 'pf- black' })).toEqual(['poly-black']);
+  });
+
   it('spoolHits only lists rows that matched', () => {
     const r = filterFilaments(catalog, state({ q: 'a7x2', type: 'PETG' }));
     expect(r.matchedCount).toBe(0);
     expect(r.spoolHits).toEqual({});
-  });
-});
-
-describe('filterFilaments location and hex', () => {
-  it("matches a location only through ACTIVE spools: the inactive spool in the 'Attic' does not match", () => {
-    expect(ids(catalog, { q: 'attic' })).toEqual([]);
-    expect(ids(catalog, { q: 'shelf b' })).toEqual(['poly-black']);
-    const inactiveOnly = row('inactive-b', { color: 'Green', spools: [spool('PF-GRN2', { isActive: false, locationName: 'Shelf B' })] });
-    expect(ids([inactiveOnly, polyBlack], { q: 'shelf b' })).toEqual(['poly-black']);
-  });
-
-  it.each(['#91202B', '91202b', '#91202b'])('%s matches the row whose colorHex is 91202B', (q) => {
-    expect(ids(catalog, { q })).toEqual(['esun-red']);
-  });
-
-  it('a colorHex stored with a leading # still matches', () => {
-    const hashed = row('hashed', { colorHex: '#00FF00' });
-    expect(ids([hashed], { q: '00ff00' })).toEqual(['hashed']);
   });
 });
 

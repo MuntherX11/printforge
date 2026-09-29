@@ -177,6 +177,17 @@ interface Token {
   pfCode: string | null;
 }
 
+/**
+ * One search term. A 'word' is a single word. A 'place' is a run of two or
+ * more words that together are part of an active spool's location name
+ * ('shelf b'), so its words are never matched one by one against locations:
+ * otherwise 'shelf' hits every shelf and 'b' hits Black, ABS and Bambu.
+ */
+type Term = { kind: 'word'; token: Token } | { kind: 'place'; phrase: string; tokens: Token[] };
+
+/** A word that only starts a PF-ID, typed before its code. */
+const PF_PREFIX_ONLY = /^pf-?$/;
+
 function toToken(text: string): Token {
   const bare = text.replace(/^#/, '');
   const code = text.replace(/^pf-?/, '');
@@ -187,29 +198,89 @@ function toToken(text: string): Token {
   };
 }
 
+/** Lowercase, space-collapsed names of the row's ACTIVE spools' locations. */
+function activePlaces(row: FilamentStockRow): string[] {
+  const places: string[] = [];
+  for (const s of row.spools) {
+    const place = s.isActive ? normText(s.locationName) : '';
+    if (place && !places.includes(place)) places.push(place);
+  }
+  return places;
+}
+
+/**
+ * Splits the query words into terms, left to right: the longest run of two or
+ * more words that is part of some active location name becomes one 'place'
+ * term, every other word is a 'word' term. A lone 'pf' or 'pf-' is dropped, so
+ * the list does not empty while a PF-ID is being typed.
+ */
+function toTerms(words: readonly string[], places: readonly string[]): Term[] {
+  const terms: Term[] = [];
+  let i = 0;
+  while (i < words.length) {
+    let end = -1;
+    for (let j = words.length; j > i + 1 && end === -1; j--) {
+      const phrase = words.slice(i, j).join(' ');
+      if (places.some((p) => p.includes(phrase))) end = j;
+    }
+    if (end === -1) {
+      if (!PF_PREFIX_ONLY.test(words[i])) terms.push({ kind: 'word', token: toToken(words[i]) });
+      i += 1;
+    } else {
+      terms.push({ kind: 'place', phrase: words.slice(i, end).join(' '), tokens: words.slice(i, end).map(toToken) });
+      i = end;
+    }
+  }
+  return terms;
+}
+
 /** A spool's PF-ID code, lowercase and without 'PF-' ('' when it has none). */
 function spoolCode(spool: FilamentStockSpool): string {
   return (spool.printforgeId ?? '').toLowerCase().replace(/^pf-/, '');
 }
 
-/** Whether every token matches the row (AND), and the spools matched by PF-ID. */
-function matchRow(row: FilamentStockRow, tokens: Token[]): FilamentStockSpool[] | null {
-  const fields = [row.color, row.name, row.brand, row.type].map((v) => (v ?? '').toLowerCase());
-  for (const s of row.spools) {
-    if (s.isActive && s.locationName) fields.push(s.locationName.toLowerCase());
-  }
+/**
+ * Whether every term matches the row (AND), and the spools matched by PF-ID.
+ * A word matches the colour, name, brand, type, an active spool's location,
+ * the colour hex or a PF-ID. A place matches when an active spool's location
+ * contains the whole phrase, or when each of its words matches the row's own
+ * fields (everything above except locations).
+ */
+function matchRow(row: FilamentStockRow, terms: readonly Term[]): FilamentStockSpool[] | null {
+  const own = [row.color, row.name, row.brand, row.type].map((v) => (v ?? '').toLowerCase());
+  const places = activePlaces(row);
   const hex = (row.colorHex ?? '').replace(/^#/, '').toLowerCase();
+
+  /** The PF-ID hits of a matching token (possibly none), or null when it does not match. */
+  const matchToken = (token: Token, withPlaces: boolean): FilamentStockSpool[] | null => {
+    const pfCode = token.pfCode;
+    const pf = pfCode === null ? [] : row.spools.filter((s) => spoolCode(s).startsWith(pfCode));
+    const ok = pf.length > 0
+      || own.some((f) => f.includes(token.text))
+      || (withPlaces && places.some((p) => p.includes(token.text)))
+      || (token.hex !== null && hex === token.hex);
+    return ok ? pf : null;
+  };
+
   const hits: FilamentStockSpool[] = [];
-  for (const token of tokens) {
-    let ok = fields.some((f) => f.includes(token.text)) || (token.hex !== null && hex === token.hex);
-    if (token.pfCode !== null) {
-      for (const s of row.spools) {
-        if (!spoolCode(s).startsWith(token.pfCode)) continue;
-        ok = true;
-        if (!hits.includes(s)) hits.push(s);
-      }
+  const addHits = (found: FilamentStockSpool[]) => {
+    for (const s of found) if (!hits.includes(s)) hits.push(s);
+  };
+  for (const term of terms) {
+    if (term.kind === 'word') {
+      const found = matchToken(term.token, true);
+      if (found === null) return null;
+      addHits(found);
+      continue;
     }
-    if (!ok) return null;
+    if (places.some((p) => p.includes(term.phrase))) continue;
+    const found: FilamentStockSpool[] = [];
+    for (const token of term.tokens) {
+      const t = matchToken(token, false);
+      if (t === null) return null;
+      found.push(...t);
+    }
+    addHits(found);
   }
   return hits;
 }
@@ -301,7 +372,8 @@ export function filterFilaments(rows: readonly FilamentStockRow[], state: Filame
   else if (state.brand) brand = byKey.get(normText(state.brand)) ?? '';
   const brandKey = normText(brand);
 
-  const tokens = cleanQuery(state.q).toLowerCase().split(/\s+/).filter(Boolean).map(toToken);
+  const allPlaces = [...new Set(rows.flatMap(activePlaces))];
+  const terms = toTerms(cleanQuery(state.q).toLowerCase().split(/\s+/).filter(Boolean), allPlaces);
   const hitsById = new Map<string, FilamentStockSpool[]>();
   const counts: FilamentStockCounts = { all: 0, low: 0, out: 0 };
   const matched: FilamentStockRow[] = [];
@@ -309,7 +381,7 @@ export function filterFilaments(rows: readonly FilamentStockRow[], state: Filame
   for (const row of rows) {
     if (state.type && row.type !== state.type) continue;
     if (brand === NO_BRAND ? normText(row.brand) !== '' : brand !== '' && normText(row.brand) !== brandKey) continue;
-    const hits = tokens.length ? matchRow(row, tokens) : [];
+    const hits = terms.length ? matchRow(row, terms) : [];
     if (hits === null) continue;
 
     counts.all += 1;
