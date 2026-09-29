@@ -436,10 +436,21 @@ export interface CreateSpoolDto {
   locationId?: string;
 }
 
+/**
+ * PATCH /spools/:id. These are the only keys the API accepts; any other key
+ * is refused with 400. Numbers are grams (purchasePrice is OMR); a null
+ * locationId, lotNumber or purchaseDate clears it.
+ */
 export interface UpdateSpoolDto {
   currentWeight?: number;
+  initialWeight?: number;
+  spoolWeight?: number;
+  purchasePrice?: number;
   isActive?: boolean;
   locationId?: string | null;
+  lotNumber?: string | null;
+  /** ISO date. */
+  purchaseDate?: string | null;
 }
 
 export interface BulkMaterialUploadRow {
