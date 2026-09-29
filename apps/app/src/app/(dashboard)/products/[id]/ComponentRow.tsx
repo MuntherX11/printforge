@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
 import type { ComponentDetail, MaterialLite, ProductDetail } from '@/lib/types/api';
 import { LinkButton, Swatch } from './options-ui';
-import { slotViews, type LinkState } from './bom-model';
+import { componentGrams, slotViews, type LinkState } from './bom-model';
 import { ComponentStockCell } from './ComponentStockCell';
 import type { ColourLinksFocus } from './ColourLinksDialog';
 
@@ -47,6 +47,7 @@ export function ComponentRow(props: Props) {
   const hasSlots = product.colourSlots.length > 0;
   const multi = slots.length > 1;
   const activeLayouts = c.plateLayouts;
+  const grams = componentGrams(c);
 
   return (
     <TableRow>
@@ -96,14 +97,14 @@ export function ComponentRow(props: Props) {
         </div>
       </TableCell>
       <TableCell className="whitespace-nowrap">
-        <span className="tabular-nums">{formatGrams(c.gramsUsed)} · {formatMinutes(c.printMinutes)}</span>
+        <span className="tabular-nums">{formatGrams(grams)} · {formatMinutes(c.printMinutes)}</span>
         {c.perUnitEstimatedFrom && (
           <p className="text-xs text-gray-500 dark:text-gray-400">est. from ×{c.perUnitEstimatedFrom.unitsPerPlate} plate</p>
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">{c.quantity}</TableCell>
       <TableCell className="whitespace-nowrap tabular-nums">
-        {formatGrams(c.gramsUsed * c.quantity)} · {formatMinutes(c.printMinutes * c.quantity)}
+        {formatGrams(grams * c.quantity)} · {formatMinutes(c.printMinutes * c.quantity)}
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap items-center gap-1">
