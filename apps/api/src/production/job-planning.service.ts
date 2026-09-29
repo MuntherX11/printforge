@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PlanRow, Problem, SurplusPolicy } from '@printforge/types';
+import { PLANNABLE_ORDER_STATUSES, type PlanRow, type Problem, type SurplusPolicy } from '@printforge/types';
 import { createHash } from 'crypto';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from '../catalog-core/bom-resolver.service';
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
@@ -51,14 +51,13 @@ export interface PlanResult {
 const NO_SLICED_DATA = (desc: string) => `"${desc}" has no sliced data — add its grams and minutes or a plate layout`;
 
 /**
- * Orders production can be planned for (J4/J5). A cancelled order holds no
- * allocation (§3.6 "Release on order cancellation"), and a finished one has
+ * Orders production can be planned for (J4/J5): PLANNABLE_ORDER_STATUSES, the
+ * same list the order page shows Plan Production for. A cancelled order holds
+ * no allocation (§3.6 "Release on order cancellation"), and a finished one has
  * nothing left to plan.
  */
-const PLANNABLE_STATUSES = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION'];
-
 function assertPlannable(status: string) {
-  if (!PLANNABLE_STATUSES.includes(status)) {
+  if (!(PLANNABLE_ORDER_STATUSES as ReadonlyArray<string>).includes(status)) {
     throw new ConflictException(`This order is ${String(status).toLowerCase().replace(/_/g, ' ')} — production can't be planned for it`);
   }
 }

@@ -68,6 +68,15 @@ export enum OrderStatus {
   CANCELLED = 'CANCELLED',
 }
 
+/**
+ * Orders production can be planned for (J4/J5, spec §4.4). IN_PRODUCTION is
+ * one of them: J5 moves a CONFIRMED order there on its first job, and the order
+ * is planned again after a line colour change (§3.6.1) or for lines a partial
+ * plan left open. A cancelled order holds no allocation and a finished one has
+ * nothing left to plan.
+ */
+export const PLANNABLE_ORDER_STATUSES: ReadonlyArray<`${OrderStatus}`> = ['PENDING', 'CONFIRMED', 'IN_PRODUCTION'];
+
 export enum InvoiceStatus {
   DRAFT = 'DRAFT',
   ISSUED = 'ISSUED',

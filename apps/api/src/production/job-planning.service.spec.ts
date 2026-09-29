@@ -1,3 +1,4 @@
+import { OrderStatus, PLANNABLE_ORDER_STATUSES } from '@printforge/types';
 import { BOX_ID, boxRow } from '../catalog-core/__fixtures__/box-product';
 import { M, OPT, PRODUCT_ID, fixtureComponent, fixtureMaterial, key, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
 import { addJobRow, addOrder, addSpool, expectStatus, productionHarness, type ProductionHarness } from './__fixtures__/production-harness';
@@ -330,6 +331,33 @@ describe('J4/J5 and the order status (§3.6 "Release on order cancellation")', (
       await expectStatus(h.planning.planWithSuggestions(order.id), 409, message);
       nothingWritten(h);
     }
+  });
+
+  it('PLANNABLE_ORDER_STATUSES (the order page shows Plan Production for these) is exactly what J4 plans', async () => {
+    expect([...PLANNABLE_ORDER_STATUSES]).toEqual(['PENDING', 'CONFIRMED', 'IN_PRODUCTION']);
+    for (const status of Object.values(OrderStatus)) {
+      const h = box({ stock: 2 });
+      const { order } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }], status);
+      const preview = h.planning.previewPlan(order.id);
+      if ((PLANNABLE_ORDER_STATUSES as readonly string[]).includes(status)) await expect(preview).resolves.toBeTruthy();
+      else await expectStatus(preview, 409);
+    }
+  });
+
+  it('re-planning after J5 moved the order to IN_PRODUCTION (§3.6.1 "Staff re-plan"): the open units get their job, the status stays', async () => {
+    const h = box({ stock: 2 });
+    const { order, items } = addOrder(h.db, [{ productId: BOX_ID, quantity: 5 }]);
+    const first: any = await h.planning.previewPlan(order.id);
+    await h.planning.createFromPlan(order.id, { planVersion: first.planVersion });
+    expect(h.db.t('order')[0].status).toBe('IN_PRODUCTION');
+
+    h.db.t('orderItem').find((i: any) => i.id === items[0].id).quantity = 9; // 4 more units open on the line
+    const again: any = await h.planning.previewPlan(order.id);
+    expect(again.rows[0]).toMatchObject({ alreadyPlanned: 3, allocatedFromStock: 2, remaining: 4, fromStock: 0, toProduce: 4 });
+    const res = await h.planning.createFromPlan(order.id, { planVersion: again.planVersion });
+    expect(res.jobsCreated).toBe(1);
+    expect(jobsOf(h, order.id).map((j: any) => j.quantityToProduce)).toEqual([3, 4]);
+    expect(h.db.t('order')[0].status).toBe('IN_PRODUCTION');
   });
 
   it('a cancel between J4 and J5 (the Plan dialog still open): J5 → 409, no job, no PLAN_ALLOCATE, the stock stays on hand', async () => {
