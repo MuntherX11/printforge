@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast';
+import { useFilamentStock } from '@/components/filaments/useFilamentStock';
 import { api } from '@/lib/api';
 import { formatGrams, formatMinutes } from '@/lib/product-format';
 import type { ProductDetail } from '@/lib/types/api';
@@ -18,6 +19,7 @@ import { PlateLayoutsDialog } from './PlateLayoutsDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ColourLinksDialog, type ColourLinksFocus } from './ColourLinksDialog';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
+import { SlotFilamentDialog } from './SlotFilamentDialog';
 import { useSlicerImport } from './useSlicerImport';
 import { errorText } from './options-ui';
 import { reorder } from './options-model';
@@ -36,7 +38,8 @@ type BomDialog =
   | { kind: 'edit'; componentId: string }
   | { kind: 'layouts'; componentId: string }
   | { kind: 'remove'; componentId: string }
-  | { kind: 'links'; focus: ColourLinksFocus };
+  | { kind: 'links'; focus: ColourLinksFocus }
+  | { kind: 'filament'; componentId: string; colorIndex: number };
 
 function ImportButtons({ busy, onThreeMf, onGcode }: { busy: string | null; onThreeMf: (f: File) => void; onGcode: (f: File[]) => void }) {
   const cls = 'inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 px-3 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800';
@@ -70,6 +73,9 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
   const materials = useMemo(() => materialIndex(product), [product]);
   const totals = perProductTotals(components);
   const importer = useSlicerImport(product.id, sizeOptionId, () => void reload());
+  // Editors only (VIEWER never fetches it); refetched after every product reload.
+  const stock = useFilamentStock(canEdit && components.length > 0, product);
+  const stockById = useMemo(() => new Map((stock.rows ?? []).map(r => [r.id, r] as const)), [stock.rows]);
   const find = (id: string) => components.find(c => c.id === id) ?? null;
   const target = dialog && 'componentId' in dialog ? find(dialog.componentId) : null;
 
@@ -176,6 +182,8 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
                     onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
                     onEditLinks={focus => setDialog({ kind: 'links', focus })}
                     onReload={() => void reload()}
+                    stock={canEdit ? stockById : null}
+                    onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
                   />
                 ))}
                 <TableRow>
@@ -210,6 +218,9 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
             onClose={() => setDialog(null)} onSaved={() => void reload()} />
           <ThreeMfImportWizard productId={product.id} state={importer.wizard} sizeOptionId={sizeOptionId} targetLabel={label}
             targetComponents={components} onClose={importer.closeWizard} onImported={() => void reload()} />
+          <SlotFilamentDialog product={product} component={dialog?.kind === 'filament' ? target : null}
+            colorIndex={dialog?.kind === 'filament' ? dialog.colorIndex : 0} open={dialog?.kind === 'filament'}
+            scopeLabel={label} stock={stock} onClose={() => setDialog(null)} onSaved={() => void reload()} />
         </>
       )}
       <PlateLayoutsDialog product={product} component={dialog?.kind === 'layouts' ? target : null} open={dialog?.kind === 'layouts'}
