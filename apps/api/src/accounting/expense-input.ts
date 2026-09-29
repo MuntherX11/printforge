@@ -27,6 +27,24 @@ export interface ExpensePatchInput {
   accountId?: string | null;
 }
 
+/**
+ * POST /accounting/categories. CreateExpenseCategoryDto is an interface too,
+ * and createCategory passed the body to prisma.expenseCategory.create as-is:
+ * a nested `expenses: { create }` wrote expenses of any amount (skipping the
+ * bound above) with `transactions: { create }` ledger rows that never moved
+ * Account.balance, `account: { create | connect }` made or linked accounts,
+ * and `expenses: { connect }` moved existing expenses into the new category.
+ * Only name and description are accepted; any other key → 400.
+ */
+export const EXPENSE_CATEGORY_KEYS = ['name', 'description'] as const;
+
+export function parseExpenseCategory(raw: unknown): { name: string; description: string | null } {
+  const b = allowedBody(raw, EXPENSE_CATEGORY_KEYS);
+  const name = optionalText(b.name, 'name', 100);
+  if (!name) throw new BadRequestException('Name is required');
+  return { name, description: optionalText(b.description, 'description', 500) ?? null };
+}
+
 function id(raw: unknown, field: string): string {
   if (typeof raw !== 'string' || !raw.trim() || raw.trim().length > 64) throw new BadRequestException(`"${field}" must be an id`);
   return raw.trim();

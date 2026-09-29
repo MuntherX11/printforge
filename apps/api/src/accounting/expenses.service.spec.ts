@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator';
@@ -145,5 +145,91 @@ describe('PATCH /accounting/expenses/:id allowlist', () => {
     const reflector = new Reflector();
     expect(reflector.get(GUARDS_METADATA, ExpensesController.prototype.updateExpense)).toEqual([RolesGuard]);
     expect(reflector.get(ROLES_KEY, ExpensesController.prototype.updateExpense)).toEqual(['ADMIN']);
+  });
+});
+
+/**
+ * POST /accounting/categories used to pass its body to Prisma, so nested
+ * writes could add expenses and ledger rows that never moved a balance.
+ */
+describe('POST /accounting/categories allowlist', () => {
+  const snapshot = (db: FakeCatalogDb) =>
+    JSON.stringify([db.t('expense'), db.t('account'), db.t('accountTransaction'), db.t('expenseCategory')]);
+
+  it.each<[string, Record<string, unknown>]>([
+    ['expenses create with a ledger row', { expenses: { create: [{ description: 'x', amount: 1e12, date: new Date(), transactions: { create: [{ accountId: 'acc-bank', amount: 1e6, balanceAfter: 0, type: 'ADJUSTMENT', description: 'x' }] } }] } }],
+    ['expenses connect', { expenses: { connect: [{ id: 'exp-1' }] } }],
+    ['id', { id: 'cat-1' }],
+    ['createdAt', { createdAt: '2020-01-01' }],
+  ])('%s → 400, nothing written', async (_label, extra) => {
+    const h = setup();
+    await expenseOn(h, 50, 'acc-bank');
+    const before = snapshot(h.db);
+    expect(await badRequestOf(h.svc.createCategory({ name: 'Tools', ...extra }))).toBe(`property ${Object.keys(extra)[0]} should not exist`);
+    expect(snapshot(h.db)).toBe(before);
+  });
+
+  it.each<[unknown, string]>([
+    [{}, 'Name is required'],
+    [{ name: '   ' }, 'Name is required'],
+    [{ name: { set: 'x' } }, '"name" must be text'],
+    [{ name: 'Tools', description: 5 }, '"description" must be text'],
+    ['Tools', 'Request body must be a JSON object'],
+  ])('%j → 400 %s', async (body, message) => {
+    const h = setup();
+    expect(await badRequestOf(h.svc.createCategory(body))).toBe(message);
+    expect(h.db.t('expenseCategory')).toHaveLength(2);
+  });
+
+  it('what the Expenses screen sends still saves: name, and description or nothing', async () => {
+    const h = setup();
+    expect(await h.svc.createCategory({ name: ' Tools ', description: ' Pliers, nozzles ' })).toMatchObject({ name: 'Tools', description: 'Pliers, nozzles' });
+    expect(await h.svc.createCategory({ name: 'Postage' })).toMatchObject({ name: 'Postage', description: null });
+    expect(h.db.t('expenseCategory')).toHaveLength(4);
+  });
+
+  it('a name that is taken → 409, not a Prisma 500', async () => {
+    const h = setup();
+    await expect(h.svc.createCategory({ name: 'Rent' })).rejects.toBeInstanceOf(ConflictException);
+    expect(h.db.t('expenseCategory')).toHaveLength(2);
+  });
+
+  it('stays ADMIN-only', () => {
+    const reflector = new Reflector();
+    expect(reflector.get(GUARDS_METADATA, ExpensesController.prototype.createCategory)).toEqual([RolesGuard]);
+    expect(reflector.get(ROLES_KEY, ExpensesController.prototype.createCategory)).toEqual(['ADMIN']);
+  });
+});
+
+describe('DELETE /accounting/expenses/:id reverses its ledger', () => {
+  it('refunds the account with an ADJUSTMENT, so the balance and its transactions still agree', async () => {
+    const h = setup();
+    const keep = await expenseOn(h, 30, 'acc-bank');
+    const gone = await expenseOn(h, 50, 'acc-bank');
+    await h.svc.update(gone.id, { amount: 80 });
+    expect(balance(h.db, 'acc-bank')).toBe(890);
+
+    await h.svc.remove(gone.id);
+    expect(h.db.t('expense').map((e: any) => e.id)).toEqual([keep.id]);
+    expect(balance(h.db, 'acc-bank')).toBe(970);
+    expectLedgerAgrees(h.db, 'acc-bank', 1000);
+    const last = ledger(h.db, 'acc-bank').at(-1);
+    expect(last).toMatchObject({ amount: 80, type: 'ADJUSTMENT', description: 'Expense deleted: Filament — PLA restock', expenseId: null });
+    // The kept expense's entry is untouched.
+    expect(h.db.t('accountTransaction').filter((t: any) => t.expenseId === keep.id).map((t: any) => t.amount)).toEqual([-30]);
+  });
+
+  it('an expense with no account is deleted with nothing posted', async () => {
+    const h = setup();
+    const exp = await expenseOn(h, 25);
+    await h.svc.remove(exp.id);
+    expect(h.db.t('expense')).toHaveLength(0);
+    expect(h.db.t('accountTransaction')).toHaveLength(0);
+  });
+
+  it('an unknown id → 404 and nothing is posted', async () => {
+    const h = setup();
+    await expect(h.svc.remove('exp-nope')).rejects.toBeInstanceOf(NotFoundException);
+    expect(h.db.t('accountTransaction')).toHaveLength(0);
   });
 });

@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
-import { CreateExpenseDto, CreateExpenseCategoryDto } from '@printforge/types';
+import { CreateExpenseDto } from '@printforge/types';
 
 @Controller('accounting')
 @UseGuards(JwtAuthGuard)
@@ -17,11 +17,12 @@ export class ExpensesController {
     return this.expensesService.getCategories();
   }
 
+  /** The body is parsed by expense-input.ts; any key but name and description → 400. */
   @Post('categories')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  createCategory(@Body() dto: CreateExpenseCategoryDto) {
-    return this.expensesService.createCategory(dto);
+  createCategory(@Body() body: unknown) {
+    return this.expensesService.createCategory(body);
   }
 
   @Post('expenses')
