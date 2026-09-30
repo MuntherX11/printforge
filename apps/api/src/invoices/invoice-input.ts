@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { UNPAY_REASON_MAX } from '@printforge/types';
 import { allowedBody } from '../common/utils/validate-number';
 
 export const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'PAID', 'OVERDUE', 'CANCELLED'] as const;
@@ -14,7 +15,8 @@ export type InvoiceStatusValue = (typeof INVOICE_STATUSES)[number];
  * is now set only by marking the invoice PAID (to its total), so it is not
  * accepted here. `status` must be an InvoiceStatus and `paidAt` a date (the
  * payment date, only together with status PAID). Any other key → 400.
- * InvoicesService.update checks the move itself: PAID and CANCELLED are final.
+ * InvoicesService.update checks the move itself: CANCELLED is final, and a
+ * PAID invoice leaves PAID only through POST /invoices/:id/unpay.
  */
 export const INVOICE_PATCH_KEYS = ['status', 'paidAt'] as const;
 
@@ -43,4 +45,30 @@ export function parseInvoicePatch(raw: unknown, now: Date = new Date()): Invoice
     out.paidAt = date;
   }
   return out;
+}
+
+/** The signed-in staff member, as JwtStrategy puts it on the request (@CurrentUser()). */
+export interface InvoiceActor {
+  id: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * Allowlist parser for POST /invoices/:id/unpay: `reason` only, required,
+ * text, trimmed and at most UNPAY_REASON_MAX characters (refused, never cut
+ * short). Any other key → 400.
+ */
+export const INVOICE_UNPAY_KEYS = ['reason'] as const;
+
+export function parseInvoiceUnpay(raw: unknown): { reason: string } {
+  const b = allowedBody(raw, INVOICE_UNPAY_KEYS);
+  if (b.reason === undefined || b.reason === null) throw new BadRequestException('Give a reason for undoing this payment');
+  if (typeof b.reason !== 'string') throw new BadRequestException('"reason" must be text');
+  const reason = b.reason.trim();
+  if (!reason) throw new BadRequestException('Give a reason for undoing this payment');
+  if (reason.length > UNPAY_REASON_MAX) {
+    throw new BadRequestException(`"reason" must be ${UNPAY_REASON_MAX} characters or fewer`);
+  }
+  return { reason };
 }

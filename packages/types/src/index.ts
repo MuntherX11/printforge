@@ -900,6 +900,8 @@ export interface UpdateInvoiceDto {
   paidAmount?: number;
   paidAt?: string;
 }
+// Undo payment: the unpay body and result, and the list's last-undo note.
+export * from './invoice-payments';
 
 // ============ EXPENSES ============
 

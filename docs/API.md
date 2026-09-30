@@ -311,11 +311,14 @@ Query: `?status=PENDING&page=1&limit=20`
 ### GET /invoices/:id
 
 ### PATCH /invoices/:id
-**Roles:** ADMIN
+**Roles:** ADMIN, ACCOUNTING (ACCOUNTING may only send `status: "PAID"`; anything else is a 403)
 ```json
 { "status": "PAID", "paidAt": "2026-03-30" }
 ```
-Only `status` and `paidAt` are accepted; any other key (including `paidAmount`) is a 400. Marking an invoice PAID always sets `paidAmount` to the invoice total, and `paidAt` (default: now) is accepted only with `status: "PAID"`. PAID and CANCELLED invoices can't be changed.
+Only `status` and `paidAt` are accepted; any other key (including `paidAmount`) is a 400. Marking an invoice PAID always sets `paidAmount` to the invoice total, and `paidAt` (default: now) is accepted only with `status: "PAID"`. CANCELLED invoices can't be changed, and a PAID invoice leaves PAID only through `POST /invoices/:id/unpay`.
+
+### POST /invoices/:id/unpay
+**Roles:** ADMIN, ACCOUNTING. Body `{ "reason": "…" }` (required, at most 200 characters). Moves a PAID invoice back to ISSUED in one transaction: clears `paidAmount`/`paidAt`, takes the amount off the order's `paidAmount`, posts an `ADJUSTMENT` reversing the invoice's ledger entries in the account they sit in (history is never edited) and writes an `Invoice.payment_undone` audit row. Returns `{ invoice, reversed: { amount, orderPaidAmount, entries } }`. 400 when the invoice isn't PAID or the reason is missing or too long; 409 `PAYMENT_MISMATCH`, `ORDER_PAID_TOO_LOW` or `LEDGER_MISMATCH` when older figures don't add up (nothing is changed).
 
 ### GET /invoices/:id/pdf
 Downloads invoice as PDF. Includes company logo, payment details, and notes.

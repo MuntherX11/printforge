@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import PDFDocument from 'pdfkit';
@@ -12,6 +12,8 @@ import { InvoicesService } from './invoices.service';
 import { PdfService } from './pdf.service';
 
 const CUSTOMER_ID = 'cust-1';
+const ADMIN = { id: 'user-admin', name: 'Admin', role: 'ADMIN' };
+const ACCOUNTING = { id: 'user-acc', name: 'Aisha', role: 'ACCOUNTING' };
 const secrets = (v: unknown) => ['passwordHash', 'refreshToken'].filter((k) => allKeys(v).has(k));
 
 function harness() {
@@ -47,7 +49,7 @@ describe('Staff invoice responses never carry the customer login secrets', () =>
     expect(view.order.customer.email).toBe('ali@example.com');
     expect(secrets(view)).toEqual([]);
 
-    const paid: any = await h.invoices.update(created.id, { status: 'PAID' } as any);
+    const paid: any = await h.invoices.update(created.id, { status: 'PAID' } as any, ADMIN);
     expect(paid.status).toBe('PAID');
     expect(secrets(paid)).toEqual([]);
     // The deposit still names the customer.
@@ -112,7 +114,7 @@ describe('PATCH /invoices/:id', () => {
     const h = await ledgerHarness();
     const before = JSON.stringify(h.state());
     const key = Object.keys(extra)[0];
-    expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'OVERDUE', ...extra }))).toBe(`property ${key} should not exist`);
+    expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'OVERDUE', ...extra }, ADMIN))).toBe(`property ${key} should not exist`);
     expect(JSON.stringify(h.state())).toBe(before);
   });
 
@@ -124,14 +126,14 @@ describe('PATCH /invoices/:id', () => {
     [{ paidAt: '2026-09-01' }, '"paidAt" can only be sent with status PAID'],
   ])('%j → 400 %s, nothing posted', async (body, message) => {
     const h = await ledgerHarness();
-    expect(await badRequestOf(h.invoices.update(h.inv.id, body))).toBe(message);
+    expect(await badRequestOf(h.invoices.update(h.inv.id, body, ADMIN))).toBe(message);
     expect(h.state()).toMatchObject({ invoice: { status: 'ISSUED' }, order: { paidAmount: 0 }, balance: 100, payments: [] });
     expect(h.state().invoice.paidAmount ?? 0).toBe(0);
   });
 
   it("the Accounting screen's Mark paid still credits the order and the default account once", async () => {
     const h = await ledgerHarness();
-    const out: any = await h.invoices.update(h.inv.id, { status: 'PAID' });
+    const out: any = await h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN);
     expect(out).toMatchObject({ status: 'PAID', paidAmount: 10.5 });
     expect(out.order.customer.name).toBe('Ali');
     const s = h.state();
@@ -142,7 +144,7 @@ describe('PATCH /invoices/:id', () => {
 
   it('a payment date is kept on the invoice and dates the deposit', async () => {
     const h = await ledgerHarness();
-    await h.invoices.update(h.inv.id, { status: 'PAID', paidAt: '2026-09-20T10:00:00Z' });
+    await h.invoices.update(h.inv.id, { status: 'PAID', paidAt: '2026-09-20T10:00:00Z' }, ADMIN);
     const s = h.state();
     expect(new Date(s.invoice.paidAt).toISOString()).toBe('2026-09-20T10:00:00.000Z');
     expect(new Date(s.payments[0].occurredAt).toISOString()).toBe('2026-09-20T10:00:00.000Z');
@@ -152,12 +154,12 @@ describe('PATCH /invoices/:id', () => {
     'PAID → %s → 400: the payment is not reversed or posted a second time',
     async (status) => {
       const h = await ledgerHarness();
-      await h.invoices.update(h.inv.id, { status: 'PAID' });
-      // It doesn't send the admin to an account adjustment, which would leave the invoice and order paidAmount wrong.
-      expect(await badRequestOf(h.invoices.update(h.inv.id, { status }))).toBe(
-        "A paid invoice can't be changed: its payment is already recorded on the invoice, the order and the accounts, and undoing a payment isn't supported yet.",
+      await h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN);
+      // It sends the admin to Undo payment, not to an account adjustment, which would leave the invoice and order paidAmount wrong.
+      expect(await badRequestOf(h.invoices.update(h.inv.id, { status }, ADMIN))).toBe(
+        "A paid invoice can't be changed here: use Undo payment to move it back to Issued first.",
       );
-      expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'PAID' }))).toBe('Invoice is already marked as paid');
+      expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN))).toBe('Invoice is already marked as paid');
       const s = h.state();
       expect(s.invoice.status).toBe('PAID');
       expect(s.order.paidAmount).toBe(10.5);
@@ -168,25 +170,48 @@ describe('PATCH /invoices/:id', () => {
 
   it('unpaid moves still work, and a cancelled invoice stays cancelled', async () => {
     const h = await ledgerHarness();
-    expect(((await h.invoices.update(h.inv.id, { status: 'OVERDUE' })) as any).status).toBe('OVERDUE');
-    expect(((await h.invoices.update(h.inv.id, { status: 'CANCELLED' })) as any).status).toBe('CANCELLED');
-    expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'PAID' }))).toBe('Cannot modify a cancelled invoice');
+    expect(((await h.invoices.update(h.inv.id, { status: 'OVERDUE' }, ADMIN)) as any).status).toBe('OVERDUE');
+    expect(((await h.invoices.update(h.inv.id, { status: 'CANCELLED' }, ADMIN)) as any).status).toBe('CANCELLED');
+    expect(await badRequestOf(h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN))).toBe('Cannot modify a cancelled invoice');
     expect(h.state()).toMatchObject({ order: { paidAmount: 0 }, balance: 100, payments: [] });
   });
 
   it('a second Mark paid racing the first → 409 and nothing posted twice', async () => {
     const h = await ledgerHarness();
     const stale = await h.invoices.findOne(h.inv.id);
-    await h.invoices.update(h.inv.id, { status: 'PAID' });
+    await h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN);
     jest.spyOn(h.invoices, 'findOne').mockResolvedValueOnce(stale as any);
-    await expect(h.invoices.update(h.inv.id, { status: 'PAID' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(h.invoices.update(h.inv.id, { status: 'PAID' }, ADMIN)).rejects.toBeInstanceOf(ConflictException);
     expect(h.state()).toMatchObject({ order: { paidAmount: 10.5 }, balance: 110.5 });
     expect(h.state().payments).toHaveLength(1);
   });
 
-  it('stays ADMIN-only', () => {
+  it('is ADMIN and ACCOUNTING (the service limits ACCOUNTING to marking paid)', () => {
     const reflector = new Reflector();
     expect(reflector.get(GUARDS_METADATA, InvoicesController.prototype.update)).toEqual([RolesGuard]);
-    expect(reflector.get(ROLES_KEY, InvoicesController.prototype.update)).toEqual(['ADMIN']);
+    expect(reflector.get(ROLES_KEY, InvoicesController.prototype.update)).toEqual(['ADMIN', 'ACCOUNTING']);
   });
+
+  it('ACCOUNTING marks paid: the order and the default account are credited once, the same as for ADMIN', async () => {
+    const h = await ledgerHarness();
+    const out = await h.invoices.update(h.inv.id, { status: 'PAID', paidAt: '2026-09-20T10:00:00Z' }, ACCOUNTING);
+    expect(out).toMatchObject({ status: 'PAID', paidAmount: 10.5 });
+    const s = h.state();
+    expect(s.order.paidAmount).toBe(10.5);
+    expect(s.balance).toBe(110.5);
+    expect(s.payments).toEqual([expect.objectContaining({ amount: 10.5, type: 'INVOICE_PAYMENT' })]);
+    expect(new Date(s.invoice.paidAt).toISOString()).toBe('2026-09-20T10:00:00.000Z');
+  });
+
+  it.each<[Record<string, unknown>]>([[{ status: 'CANCELLED' }], [{ status: 'OVERDUE' }], [{}]])(
+    'ACCOUNTING %j → 403 and nothing changes',
+    async (body) => {
+      const h = await ledgerHarness();
+      const before = JSON.stringify(h.state());
+      const err = await h.invoices.update(h.inv.id, body, ACCOUNTING).then(() => null, (e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.message).toBe('Accounting can mark an invoice paid; other changes to an invoice need an admin.');
+      expect(JSON.stringify(h.state())).toBe(before);
+    },
+  );
 });

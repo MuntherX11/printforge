@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Res, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Res, Query, UseGuards, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 import { InvoicesService } from './invoices.service';
 import { PdfService } from './pdf.service';
@@ -7,8 +7,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { StaffGuard } from '../auth/guards/staff.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateInvoiceDto } from '@printforge/types';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import type { InvoiceActor } from './invoice-input';
 
 @Controller('invoices')
 @UseGuards(JwtAuthGuard)
@@ -38,12 +40,25 @@ export class InvoicesController {
     return this.invoicesService.findOne(id);
   }
 
-  /** The body is parsed by invoice-input.ts (status, paidAt); paidAmount is set only by marking PAID. */
+  /**
+   * The body is parsed by invoice-input.ts (status, paidAt); paidAmount is set
+   * only by marking PAID. ACCOUNTING may only mark PAID (the service says 403
+   * to anything else).
+   */
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
-  update(@Param('id') id: string, @Body() body: unknown) {
-    return this.invoicesService.update(id, body);
+  @Roles('ADMIN', 'ACCOUNTING')
+  update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: InvoiceActor) {
+    return this.invoicesService.update(id, body, user);
+  }
+
+  /** Undo payment: PAID back to ISSUED, reversing the order credit and the ledger entries. Writes its own audit row. */
+  @Post(':id/unpay')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'ACCOUNTING')
+  unpay(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: InvoiceActor) {
+    return this.invoicesService.unpay(id, body, user);
   }
 
   @Get(':id/pdf')

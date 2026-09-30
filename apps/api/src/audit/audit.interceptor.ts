@@ -4,6 +4,9 @@ import { AuditService } from './audit.service';
 
 const AUDIT_METHODS = ['POST', 'PATCH', 'PUT', 'DELETE'];
 
+/** Routes whose service writes its own audit row inside its transaction (with the amounts): a generic row would duplicate it. */
+const SELF_AUDITED = /\/invoices\/[^/]+\/unpay$/;
+
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
   constructor(private auditService: AuditService) {}
@@ -18,6 +21,7 @@ export class AuditInterceptor implements NestInterceptor {
 
     const user = request.user;
     if (!user) return next.handle();
+    if (SELF_AUDITED.test(String(request.url).split('?')[0])) return next.handle();
 
     const path = request.route?.path || request.url;
     const entityType = this.extractEntityType(path);
