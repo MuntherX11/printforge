@@ -48,7 +48,10 @@ describe('ProductImagesService', () => {
       expect(out[0].url).toBe(`/api/products/p1/images/${out[0].id}`);
       for (const row of prisma.productImage.rows) {
         expect(row.storageKey).toMatch(STORAGE_KEY_RE);
-        expect(row.storageKey).not.toContain('a.jpg');
+        // The client's name is not reused: the stem is 32 random hex chars. (Not a
+        // substring check — a random stem ending in "a" followed by ".jpg" contains "a.jpg".)
+        expect(path.basename(row.storageKey, path.extname(row.storageKey))).toMatch(/^[0-9a-f]{32}$/);
+        expect(row.storageKey).not.toBe('a.jpg');
         expect(row.uploadedById).toBe('u1');
       }
       expect(photoFiles().sort()).toEqual(prisma.productImage.rows.map((r) => r.storageKey).sort());
