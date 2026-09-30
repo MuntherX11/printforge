@@ -65,8 +65,8 @@ export class OrdersController {
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
-  update(@Param('id') id: string, @Body() body: unknown) {
-    return this.ordersService.update(id, body);
+  update(@Param('id') id: string, @Body() body: unknown, @Req() req: { user?: { id?: string } }) {
+    return this.ordersService.update(id, body, req?.user?.id ?? null);
   }
 
   /** S11: split a product line into same-size colour lines (`?dryRun=1` lists jobs and stock first). */

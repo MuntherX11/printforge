@@ -1,6 +1,9 @@
 import { BOX_ID, boxRow } from '../catalog-core/__fixtures__/box-product';
 import { MoonrakerService } from '../moonraker-bridge/moonraker.service';
-import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE } from './job-transitions';
+import {
+  assertOrderAcceptsJobs, cancelQueuedJobsForItem, cancelQueuedJobsForOrder, LINE_STARTED_MESSAGE, ORDER_CANCELLED_NO_NEW_JOBS,
+  ORDER_CANCELLED_NO_REQUEUE, orderAcceptsJobs,
+} from './job-transitions';
 import { addJobRow, addOrder, expectStatus, productionHarness } from './__fixtures__/production-harness';
 
 /** §3.9 S11 job half (WP6 for WP7), §7.1 item 38. */
@@ -68,5 +71,94 @@ describe('cancelQueuedJobsForItem', () => {
       await bridge(h).handleJobStarted('pr-1', started as any);
       expect(statusOf(h, job.id)).toBe('CANCELLED');
     });
+  });
+});
+
+/** v2.17.2: S9's job half. */
+describe('cancelQueuedJobsForOrder', () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s));
+
+  it('cancels only this order\'s QUEUED jobs; returns them and the started ones in createdAt order; never throws', async () => {
+    const { h, order, line, other, mk } = setup();
+    const b = mk(line.id, 'QUEUED', 'Box b', { createdAt: at(2), printerId: null });
+    const a = mk(other.id, 'QUEUED', 'Box a', { createdAt: at(1) });
+    const ph = mk(line.id, 'QUEUED', 'placeholder', { createdAt: at(3), productId: null, componentId: null });
+    const paused = mk(line.id, 'PAUSED', 'Box paused', { createdAt: at(5) });
+    const printing = mk(line.id, 'IN_PROGRESS', 'Box printing', { createdAt: at(4), printerId: null });
+    const old = mk(line.id, 'CANCELLED', 'old', { createdAt: at(0) });
+    const failed = mk(line.id, 'FAILED', 'failed');
+    const done = mk(other.id, 'COMPLETED', 'done');
+    const { order: elsewhere } = addOrder(h.db, [{ productId: BOX_ID, quantity: 1 }]);
+    const foreign = addJobRow(h.db, { orderId: elsewhere.id, status: 'QUEUED', name: 'other order' });
+
+    const out = await h.db.$transaction((tx: any) => cancelQueuedJobsForOrder(tx, order.id));
+    expect(out.cancelled).toEqual([
+      { id: a.id, name: 'Box a', printerName: 'K1' },
+      { id: b.id, name: 'Box b', printerName: null },
+      { id: ph.id, name: 'placeholder', printerName: 'K1' },
+    ]);
+    expect(out.stillRunning).toEqual([
+      { id: printing.id, name: 'Box printing', status: 'IN_PROGRESS', printerName: null },
+      { id: paused.id, name: 'Box paused', status: 'PAUSED', printerName: 'K1' },
+    ]);
+    expect([a, b, ph, paused, printing, old, failed, done, foreign].map((j) => statusOf(h, j.id)))
+      .toEqual(['CANCELLED', 'CANCELLED', 'CANCELLED', 'PAUSED', 'IN_PROGRESS', 'CANCELLED', 'FAILED', 'COMPLETED', 'QUEUED']);
+  });
+
+  it('an order without active jobs → both lists empty', async () => {
+    const { h, order, line, mk } = setup();
+    mk(line.id, 'COMPLETED', 'done');
+    expect(await h.db.$transaction((tx: any) => cancelQueuedJobsForOrder(tx, order.id))).toEqual({ cancelled: [], stillRunning: [] });
+  });
+
+  describe('race with a printer bridge\'s guarded QUEUED → IN_PROGRESS flip: exactly one wins, no error', () => {
+    const bridge = (h: ReturnType<typeof productionHarness>) => new MoonrakerService(h.db as any, { create: jest.fn() } as any, h.completion);
+    const started = { hostname: 'x', printerState: 'printing', progress: 0, heaterBed: null, extruder: null, printStats: { filename: 'Box x12.gcode', total_duration: 0, print_duration: 0, filament_used: 0, state: 'printing', message: '' } };
+
+    it('the flip lands between S9\'s read and its update → the job stays IN_PROGRESS and is listed as still running', async () => {
+      const { h, order, line, mk } = setup();
+      const job = mk(line.id, 'QUEUED', 'Box ×12', { gcodeFilename: 'Box x12.gcode' });
+      const tx: any = Object.create(h.db);
+      tx.productionJob = { ...h.db.productionJob };
+      tx.productionJob.updateMany = async (args: any) => {
+        await bridge(h).handleJobStarted('pr-1', started as any); // barrier: the bridge commits first
+        return h.db.productionJob.updateMany(args);
+      };
+      const out = await cancelQueuedJobsForOrder(tx, order.id);
+      expect(out).toEqual({ cancelled: [], stillRunning: [{ id: job.id, name: 'Box ×12', status: 'IN_PROGRESS', printerName: 'K1' }] });
+      expect(statusOf(h, job.id)).toBe('IN_PROGRESS');
+    });
+
+    it('S9 commits first → the bridge\'s flip matches nothing and the job stays cancelled', async () => {
+      const { h, order, line, mk } = setup();
+      const job = mk(line.id, 'QUEUED', 'Box ×12', { gcodeFilename: 'Box x12.gcode' });
+      await h.db.$transaction((tx: any) => cancelQueuedJobsForOrder(tx, order.id));
+      await bridge(h).handleJobStarted('pr-1', started as any);
+      expect(statusOf(h, job.id)).toBe('CANCELLED');
+    });
+  });
+});
+
+describe('orderAcceptsJobs / assertOrderAcceptsJobs', () => {
+  it('takes plan:<orderId> before reading the order; false only for CANCELLED', async () => {
+    const { h, order } = setup();
+    const read = jest.spyOn(h.db.order, 'findUnique');
+    expect(await orderAcceptsJobs(h.db as any, order.id)).toBe(true);
+    const calls = h.db.$queryRaw.mock.calls.map(([q]: any) => q);
+    const i = calls.findIndex((q: any) => /plan:advisory/.test(q.sql));
+    expect(calls[i].values).toEqual([`plan:${order.id}`]);
+    expect(h.db.$queryRaw.mock.invocationCallOrder[i]).toBeLessThan(read.mock.invocationCallOrder[0]);
+
+    order.status = 'CANCELLED';
+    expect(await orderAcceptsJobs(h.db as any, order.id)).toBe(false);
+    expect(await orderAcceptsJobs(h.db as any, 'missing')).toBe(true);
+  });
+
+  it('the assert → 409 with the default message or the one given', async () => {
+    const { h, order } = setup();
+    await expect(assertOrderAcceptsJobs(h.db as any, order.id)).resolves.toBeUndefined();
+    order.status = 'CANCELLED';
+    await expectStatus(assertOrderAcceptsJobs(h.db as any, order.id), 409, ORDER_CANCELLED_NO_NEW_JOBS);
+    await expectStatus(assertOrderAcceptsJobs(h.db as any, order.id, ORDER_CANCELLED_NO_REQUEUE), 409, ORDER_CANCELLED_NO_REQUEUE);
   });
 });

@@ -11,7 +11,6 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
 import { WhatsAppService } from '../communications/whatsapp.service';
 import { CostingService } from '../costing/costing.service';
-import { STAFF_CUSTOMER_SELECT } from '../orders/orders.service';
 import { lockOptions, TX_OPTS } from '../products/product-locks';
 import { SettingsService } from '../settings/settings.service';
 import { JobCompletionService } from '../stock-ledger/job-completion.service';
@@ -20,19 +19,14 @@ import { materialLines, plateRows, reservationSummary, singlePlateFilename } fro
 import { reprintRows } from './job-reprint';
 import { parseCreateJob, parseFail, parseReprint, parseUpdateJob } from './job-input';
 import { JobPlanningService } from './job-planning.service';
+import { assertOrderAcceptsJobs, ORDER_CANCELLED_NO_REQUEUE } from './job-transitions';
+import { notifyOrderCompletedIfAllDone } from './order-completed-notice';
 import { buildFilamentPlan, jobDetailExtras } from './job-presenter';
 import { JobSchedulingService } from './job-scheduling.service';
 
 const ACTIVE = ['QUEUED', 'IN_PROGRESS', 'PAUSED'];
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
 const NO_LONGER_ACTIVE = 'This job was already completed, failed or cancelled';
-
-/** Minimal shape of a customer row returned via Prisma include. */
-interface CustomerRecord {
-  name: string;
-  email: string | null;
-  phone: string | null;
-}
 
 @Injectable()
 export class JobsService {
@@ -127,7 +121,10 @@ export class JobsService {
     }
 
     const result = await this.prisma.$transaction(async (tx: any) => {
-      // First statement: the option rows the pair is validated on (§3.1 rule 3).
+      // First statement: the order's plan lock and its status (as in J5; a
+      // cancelled order never gains a QUEUED job), then the option rows the pair
+      // is validated on (§3.1 rule 3).
+      if (dto.orderId) await assertOrderAcceptsJobs(tx, dto.orderId);
       const optionIds = [sizeOptionId, colourOptionId].filter((x): x is string => !!x);
       if (optionIds.length) await lockOptions(tx, optionIds, 'SHARE');
 
@@ -278,7 +275,7 @@ export class JobsService {
   /** J8: allowlist only; a status change is a guarded transition (§3.7 "Updating a job"). */
   async update(id: string, body: unknown) {
     const dto = parseUpdateJob(body);
-    const job = await this.prisma.productionJob.findUnique({ where: { id }, select: { id: true, status: true } });
+    const job = await this.prisma.productionJob.findUnique({ where: { id }, select: { id: true, status: true, orderId: true } });
     if (!job) throw new NotFoundException('Production job not found');
     if (TERMINAL.includes(job.status)) {
       throw new BadRequestException(`Cannot modify a job in terminal state: ${job.status}`);
@@ -293,6 +290,8 @@ export class JobsService {
     }
 
     return this.prisma.$transaction(async (tx: any) => {
+      // Back to QUEUED: the order's plan lock and status first (a cancelled order's jobs stay off the queue).
+      if (dto.status === 'QUEUED' && job.orderId) await assertOrderAcceptsJobs(tx, job.orderId, ORDER_CANCELLED_NO_REQUEUE);
       // Guarded transition first; also re-checks "still active" for field edits.
       const data: Record<string, unknown> = {};
       let from = ACTIVE;
@@ -388,39 +387,11 @@ export class JobsService {
       message: `"${job.name}" finished successfully.`,
     });
     if (job.orderId) {
-      await this.notifyOrderCompletedIfAllDone(job.orderId).catch(() => {});
+      const deps = { prisma: this.prisma, settings: this.settingsService, email: this.emailNotifications, whatsapp: this.whatsapp };
+      await notifyOrderCompletedIfAllDone(deps, job.orderId).catch(() => {});
     }
     const { plates: _plates, ...rest } = job;
     return { ...rest, stockCredits: result.stockCredits, warnings: result.warnings };
-  }
-
-  private async notifyOrderCompletedIfAllDone(orderId: string) {
-    const allJobs = await this.prisma.productionJob.findMany({
-      where: { orderId },
-      select: { status: true },
-    });
-
-    const allDone = allJobs.length > 0 && allJobs.every((j) => TERMINAL.includes(j.status));
-    if (!allDone) return;
-
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { customer: { select: STAFF_CUSTOMER_SELECT } },
-    });
-    if (!order) return;
-
-    const notifyEnabled = await this.settingsService?.get('notify_order_completed', 'true') ?? 'true';
-    if (notifyEnabled === 'false') return;
-
-    const companyName = await this.settingsService?.get('company_name', 'PrintForge') ?? 'PrintForge';
-    const customer = order.customer as CustomerRecord | null;
-
-    if (customer?.email) {
-      this.emailNotifications?.notifyCustomerOrderCompleted(customer.email, { orderNumber: order.orderNumber }).catch(() => {});
-    }
-    if (customer?.phone) {
-      this.whatsapp?.sendOrderCompleted(customer.phone, { customerName: customer.name, orderNumber: order.orderNumber, companyName }).catch(() => {});
-    }
   }
 
   // ------------------------------------------------------------------ J9
@@ -513,6 +484,7 @@ export class JobsService {
     const { newPlates, lines } = reprintRows(original, counts, (id) => mats.find((m) => m.id === id)?.costPerGram ?? 0);
 
     return this.prisma.$transaction(async (tx: any) => {
+      if (original.orderId) await assertOrderAcceptsJobs(tx, original.orderId);
       const job = await tx.productionJob.create({
         data: {
           name: `${original.name} (reprint)`,

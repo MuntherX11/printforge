@@ -160,9 +160,15 @@ export class ProductStockService {
     return { componentId: args.componentId, colourKey: args.colourKey, baseColumn, quantity: -k, balanceAfter: after, reason: 'PLAN_ALLOCATE' };
   }
 
+  /** S9: the order's lines, before its jobs (the S11 / O7 order). FOR UPDATE, in id order. */
+  async lockOrderLines(tx: LedgerTx, orderId: string): Promise<void> {
+    const items = await tx.orderItem.findMany({ where: { orderId }, select: { id: true }, orderBy: { id: 'asc' } });
+    for (const i of items) await sql.lockLine(tx, i.id);
+  }
+
   /** Order cancelled (S9): return every line's net allocation. */
   async releaseForOrder(tx: LedgerTx, orderId: string, userId?: string | null): Promise<StockCredit[]> {
-    const items = await tx.orderItem.findMany({ where: { orderId }, select: { id: true } });
+    const items = await tx.orderItem.findMany({ where: { orderId }, select: { id: true }, orderBy: { id: 'asc' } });
     const out: StockCredit[] = [];
     for (const item of items) out.push(...(await this.releaseForItem(tx, item.id, userId)));
     return out;

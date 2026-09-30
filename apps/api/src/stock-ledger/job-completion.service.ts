@@ -46,6 +46,49 @@ export interface CompletionResult {
 
 const ACTIVE = ['QUEUED', 'IN_PROGRESS', 'PAUSED'];
 
+export const ORDER_CANCELLED_UNITS = 'ORDER_CANCELLED_UNITS_NOT_STOCKED';
+
+/** What cancelledOrderWarning reads of the completed job. */
+export interface JobForCancelWarning {
+  purpose: string;
+  componentId: string | null;
+  quantityToProduce: number;
+  order?: { status: string; orderNumber: string } | null;
+  plates: Array<{ componentId: string | null; unitsRequired: number }>;
+}
+
+/**
+ * A CUSTOMER job of a cancelled order finished (it was already printing when
+ * the order was cancelled, v2.17.2): printed stock still gets only the surplus
+ * (§3.6), so staff are told how many of the order's units R are not in stock.
+ * R per component is the first plate's unitsRequired, as creditOnComplete
+ * takes it; a job without plates counts quantityToProduce when it has a
+ * component, else nothing (placeholders and whole-product jobs have no bucket).
+ */
+export function cancelledOrderWarning(job: JobForCancelWarning): Problem | null {
+  if (job.purpose !== 'CUSTOMER' || job.order?.status !== 'CANCELLED') return null;
+  let units: number | null = null;
+  if (job.plates.length) {
+    const firstOf = new Map<string, number>();
+    for (const p of job.plates) if (p.componentId && !firstOf.has(p.componentId)) firstOf.set(p.componentId, p.unitsRequired);
+    units = [...firstOf.values()].reduce((s, r) => s + r, 0);
+  } else if (job.componentId) {
+    units = job.quantityToProduce;
+  }
+  if (units === null || units <= 0) return null;
+  const one = units === 1;
+  return {
+    code: ORDER_CANCELLED_UNITS,
+    message: `Order ${job.order.orderNumber} was cancelled — the ${units} unit${one ? '' : 's'} this job printed for it ${one ? 'was' : 'were'} not added to printed stock. Add ${one ? 'it' : 'them'} by hand if you keep ${one ? 'it' : 'them'}`,
+  };
+}
+
+/** The bridges' notification suffix: ` — <message>` for that warning, else ''. */
+export function cancelledOrderNote(warnings: Problem[]): string {
+  const w = warnings.find((x) => x.code === ORDER_CANCELLED_UNITS);
+  return w ? ` — ${w.message}` : '';
+}
+
 @Injectable()
 export class JobCompletionService {
   private readonly logger = new Logger(JobCompletionService.name);
@@ -95,6 +138,7 @@ export class JobCompletionService {
         printer: true,
         materials: { include: { material: true } },
         plates: { orderBy: { sortOrder: 'asc' } },
+        order: { select: { status: true, orderNumber: true } },
       },
     });
     if (!job) return null;
@@ -136,6 +180,8 @@ export class JobCompletionService {
 
     // 6. Printed stock, from the filament actually on the job.
     const { credits, warnings } = await this.stock.creditOnComplete(tx, job as JobForCredit, opts.userId ?? null);
+    const cancelled = cancelledOrderWarning(job as JobForCancelWarning);
+    if (cancelled) warnings.push(cancelled);
     const stockCredits = credits.map((c) => ({
       componentId: c.componentId,
       colourKey: c.colourKey || null,

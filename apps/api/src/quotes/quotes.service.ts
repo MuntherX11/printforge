@@ -15,6 +15,7 @@ import { round3 } from '../catalog-core/cost-engine';
 import { validatePair } from '../catalog-core/option-pair';
 import { PricingService } from '../catalog-core/pricing.service';
 import { JobPlanningService } from '../production/job-planning.service';
+import { orderAcceptsJobs } from '../production/job-transitions';
 import { TX_OPTS } from '../products/product-locks';
 import {
   documentTotals, lineOptionsOf, lockLineForSplit, lockLineRows, lockQuote, MAX_LINES, optionalId, parseColourSplit, parseItemsArray,
@@ -473,9 +474,10 @@ export class QuotesService {
    * and FOR SHARE locks.
    *
    * With autoCreateJobs (default), AFTER the commit: custom lines keep one
-   * placeholder job per unit (they have no BOM); product lines are planned by
-   * WP6's planWithSuggestions — exactly J4 then J5 without edits. A planning
-   * failure never undoes the conversion; it only adds JOBS_NOT_PLANNED.
+   * placeholder job per unit (no BOM; under the plan lock, none once the order
+   * is cancelled); product lines are planned by WP6's planWithSuggestions —
+   * exactly J4 then J5 without edits. A planning failure never undoes the
+   * conversion; it only adds JOBS_NOT_PLANNED.
    *
    * The transaction locks the quote row first (FOR UPDATE, as quote S11 does)
    * and re-reads the quote and its lines under it, so the order copies the lines
@@ -566,8 +568,8 @@ export class QuotesService {
         }
       }
       if (placeholders.length) {
-        await this.prisma.productionJob.createMany({ data: placeholders });
-        planning.jobsCreated += placeholders.length;
+        const made = await this.prisma.$transaction(async (tx: any) => ((await orderAcceptsJobs(tx, orderId)) ? (await tx.productionJob.createMany({ data: placeholders })).count : 0), TX_OPTS);
+        planning.jobsCreated += made;
       }
       const productLines = lines.filter((l) => l.productId);
       if (productLines.length) {

@@ -24,6 +24,7 @@ import {
 import {
   labelStock, materialAvailability, netAllocations, printFilesFor, resolveOrderLines, type PlannedLine,
 } from './order-insights';
+import { cancelOrderInTx, noCancel } from './order-cancel';
 
 /** Minimal shape of a customer row returned via Prisma include. */
 interface CustomerRecord {
@@ -387,13 +388,14 @@ export class OrdersService {
   }
 
   /**
-   * S9. Moving an order to CANCELLED (from any other status) and returning its
-   * printed-stock allocations happen in one transaction; the guarded status
-   * change comes first, so a second cancel releases nothing. It runs under the
-   * order's plan lock, so a J5 of this order either commits first (and its
-   * allocations are returned here) or runs after and finds the order cancelled.
+   * S9. Moving an order to CANCELLED (from any other status), cancelling its
+   * QUEUED jobs and returning its printed-stock allocations happen in one
+   * transaction (cancelOrderInTx); started jobs are left alone and listed in
+   * jobsStillRunning. Every request for CANCELLED decides under the plan lock:
+   * a J5 of this order either commits first (its jobs are cancelled and its
+   * allocations returned here) or runs after and finds the order cancelled.
    */
-  async update(id: string, body: unknown) {
+  async update(id: string, body: unknown, userId?: string | null) {
     const b = isObject(body) ? body : {};
     const status = b.status === undefined || b.status === null || b.status === '' ? undefined : (requiredEnum(b.status, 'status', ORDER_STATUSES) as OrderStatus);
     const notes = b.notes === undefined ? undefined : b.notes === null ? null : String(b.notes).slice(0, 5000);
@@ -402,15 +404,9 @@ export class OrdersService {
     const existing = await this.prisma.order.findUnique({ where: { id }, select: { status: true } });
     if (!existing) throw new NotFoundException('Order not found');
 
-    let released: Array<{ componentId: string; colourKey: string; units: number }> = [];
-    if (status === 'CANCELLED' && existing.status !== 'CANCELLED') {
-      released = await this.prisma.$transaction(async (tx: any) => {
-        await lockOrderPlan(tx, id);
-        const flipped = await tx.order.updateMany({ where: { id, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED', notes, dueDate } });
-        if (flipped.count === 0) return [];
-        const credits = await this.stock.releaseForOrder(tx, id);
-        return credits.map((c) => ({ componentId: c.componentId, colourKey: c.colourKey, units: c.quantity }));
-      }, TX_OPTS);
+    let cancel = noCancel();
+    if (status === 'CANCELLED') {
+      cancel = await this.prisma.$transaction((tx) => cancelOrderInTx(tx, this.stock, id, { notes, dueDate }, userId ?? null), TX_OPTS);
     } else {
       await this.prisma.order.update({ where: { id }, data: { status: status ?? undefined, notes, dueDate } });
     }
@@ -446,8 +442,8 @@ export class OrdersService {
     }
 
     this.cache?.invalidate('dashboard:kpis').catch(() => {});
-    const stockReleased = (await labelStock(this.prisma, released)).map((r) => ({ componentDescription: r.componentDescription, colourLabel: r.colourLabel, units: r.units }));
-    return { ...updated, stockReleased };
+    const stockReleased = (await labelStock(this.prisma, cancel.released)).map((r) => ({ componentDescription: r.componentDescription, colourLabel: r.colourLabel, units: r.units }));
+    return { ...updated, stockReleased, jobsCancelled: cancel.jobsCancelled, jobsStillRunning: cancel.jobsStillRunning };
   }
 
   /**

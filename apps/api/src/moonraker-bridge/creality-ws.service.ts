@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import WebSocket from 'ws';
-import { JobCompletionService } from '../stock-ledger/job-completion.service';
+import { cancelledOrderNote, JobCompletionService } from '../stock-ledger/job-completion.service';
 import { findJobForCompletion } from './moonraker.service';
 
 // Heartbeat sent every 10s to keep the connection alive and receive fresh state
@@ -329,7 +329,7 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
     await this.notifications.create({
       type: 'JOB_COMPLETED',
       title: 'Print Job Completed',
-      message: `"${result.job.name}" finished on ${snapshot.printerName}. Duration: ${Math.round(snapshot.printJobTime / 60)}min`,
+      message: `"${result.job.name}" finished on ${snapshot.printerName}. Duration: ${Math.round(snapshot.printJobTime / 60)}min${cancelledOrderNote(result.warnings)}`,
       entityType: 'job',
       entityId: job.id,
     }).catch(() => {});

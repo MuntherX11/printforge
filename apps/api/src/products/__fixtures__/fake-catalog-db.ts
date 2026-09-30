@@ -98,7 +98,7 @@ const MODELS = [
   'colourSizeExclusion', 'priceTier', 'variantPriceTier', 'componentColourStock', 'componentStockMovement',
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
-  'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting',
+  'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting', 'auditLog',
   // accounting specs
   'expense', 'expenseCategory', 'account', 'accountTransaction',
 ];

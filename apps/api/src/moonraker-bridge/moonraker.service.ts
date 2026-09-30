@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isLocalUrl } from '../common/utils/is-local-url';
-import { JobCompletionService } from '../stock-ledger/job-completion.service';
+import { cancelledOrderNote, JobCompletionService } from '../stock-ledger/job-completion.service';
 
 /**
  * The job a printer's completion event belongs to (§3.6): this printer, this
@@ -288,7 +288,7 @@ export class MoonrakerService {
     await this.notifications.create({
       type: 'JOB_COMPLETED',
       title: 'Print Job Completed',
-      message: `"${result.job.name}" finished on ${result.job.printer?.name || 'printer'}. Duration: ${Math.round((stats.print_duration || 0) / 60)}min, Filament: ${filamentGrams.toFixed(1)}g`,
+      message: `"${result.job.name}" finished on ${result.job.printer?.name || 'printer'}. Duration: ${Math.round((stats.print_duration || 0) / 60)}min, Filament: ${filamentGrams.toFixed(1)}g${cancelledOrderNote(result.warnings)}`,
       entityType: 'job',
       entityId: job.id,
     }).catch(() => {});
