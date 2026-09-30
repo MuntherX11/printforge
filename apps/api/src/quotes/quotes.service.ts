@@ -474,10 +474,9 @@ export class QuotesService {
    * and FOR SHARE locks.
    *
    * With autoCreateJobs (default), AFTER the commit: custom lines keep one
-   * placeholder job per unit (no BOM; under the plan lock, none once the order
-   * is cancelled); product lines are planned by WP6's planWithSuggestions —
-   * exactly J4 then J5 without edits. A planning failure never undoes the
-   * conversion; it only adds JOBS_NOT_PLANNED.
+   * placeholder job per unit (no BOM; none once the order is cancelled, checked
+   * under the plan lock); product lines are planned by WP6's planWithSuggestions
+   * — J4 then J5 unedited. A planning failure only adds JOBS_NOT_PLANNED.
    *
    * The transaction locks the quote row first (FOR UPDATE, as quote S11 does)
    * and re-reads the quote and its lines under it, so the order copies the lines
