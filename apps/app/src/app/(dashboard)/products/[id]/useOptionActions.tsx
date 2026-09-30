@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { isConverted } from '@printforge/types';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import type { ApiKeepStandard, ApiOptionHistory, ApiOptionRow, ColourOptionDetail, ProductDetail, SizeOptionDetail } from '@/lib/types/api';
@@ -134,11 +135,14 @@ export function useOptionActions(product: ProductDetail, onChanged: () => void) 
         deactivateOffer(kind, option, reason);
         return;
       }
+      const convertedTo = 'convertedTo' in option && isConverted(option) ? option.convertedTo : null;
       setPending({
         title: `Delete ${option.name}?`,
-        message: kind === 'SIZE'
-          ? <p>This permanently deletes the size &quot;{option.name}&quot; with its components, plate layouts, bulk tiers and unused files. It has never been ordered, quoted or produced.</p>
-          : <p>This permanently deletes the colour &quot;{option.name}&quot; and its filament choices. It has never been ordered, quoted or produced. Printed stock is not touched.</p>,
+        message: convertedTo
+          ? <p>This permanently deletes the size &quot;{option.name}&quot;. Its plate layout {convertedTo.label} stays on the part. It has never been ordered, quoted or produced.</p>
+          : kind === 'SIZE'
+            ? <p>This permanently deletes the size &quot;{option.name}&quot; with its components, plate layouts, bulk tiers and unused files. It has never been ordered, quoted or produced.</p>
+            : <p>This permanently deletes the colour &quot;{option.name}&quot; and its filament choices. It has never been ordered, quoted or produced. Printed stock is not touched.</p>,
         confirmLabel: 'Delete permanently',
         destructive: true,
         run: async () => {

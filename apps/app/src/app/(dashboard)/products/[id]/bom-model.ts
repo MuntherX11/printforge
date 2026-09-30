@@ -2,7 +2,7 @@
  * Pure helpers for section D (bill of materials, spec §5.2 D) and E (plate
  * layouts). No React, no fetching.
  */
-import type { ComponentDetail, MaterialLite, ProductDetail } from '@/lib/types/api';
+import type { ApiGcodeAnalysis, ComponentDetail, MaterialLite, ProductDetail } from '@/lib/types/api';
 import { STANDARD_KEY, isMultiColour, orderedSizes, standardSizeLabel } from './options-model';
 
 /** The components section D shows for a scope ('standard' or a size id). */
@@ -120,4 +120,14 @@ export function parseDecimal(raw: string, min: number, max: number): number | nu
   if (raw.trim() === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
+
+/** What a plate G-code's object labels say, as bullet lines (plate layouts and Convert to plate). */
+export function detectedLines(a: ApiGcodeAnalysis): string[] {
+  const out: string[] = [];
+  if (a.objectCount === null) out.push('No object labels — enter the units');
+  else out.push(`Detected: ${a.objectModels.map(m => `${m.count} × ${m.model}`).join(', ') || `${a.objectCount} objects`}`);
+  if (a.objectModels.length > 1) out.push('Mixed plate — more than one model; enter the units of this component only');
+  if (a.ignoredLabels.length > 0) out.push('Purge tower not counted');
+  return out;
 }

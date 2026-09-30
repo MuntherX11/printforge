@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowDown, ArrowUp } from 'lucide-react';
+import { isConverted } from '@printforge/types';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useFormatCurrency } from '@/lib/locale-context';
@@ -8,7 +9,7 @@ import { formatGrams, formatMinutes, formatPct, plural } from '@/lib/product-for
 import type { OptionCost, ProductCostPayload, ProductDetail, SizeOptionDetail, UnlinkedSlot } from '@/lib/types/api';
 import { LinkButton, Toggle } from './options-ui';
 import {
-  STANDARD_KEY, activeCellsOfSize, marginRange, orderedSizes, standardSizeLabel, unlinkedLabels, unlinkedSentence,
+  STANDARD_KEY, activeCellsOfSize, allComponents, marginRange, orderedSizes, standardSizeLabel, unlinkedLabels, unlinkedSentence,
 } from './options-model';
 
 interface Props {
@@ -24,6 +25,8 @@ interface Props {
   onMove: (size: SizeOptionDetail, dir: -1 | 1) => void;
   onSetActive: (size: SizeOptionDetail, isActive: boolean) => void;
   onDelete: (size: SizeOptionDetail) => void;
+  /** Convert to plate (a legacy "N per plate" option) */
+  onConvert: (size: SizeOptionDetail) => void;
   onEditLinks: () => void;
   onStandardSellable: (sell: boolean) => void;
 }
@@ -91,6 +94,7 @@ export function SizesTable(props: Props) {
 
   const stdLabel = standardSizeLabel(product);
   const stdComponents = product.components.length;
+  const hasParts = allComponents(product).length > 0;
 
   return (
     <Table>
@@ -153,29 +157,40 @@ export function SizesTable(props: Props) {
         {sizes.map((s, i) => {
           const own = s.components.length;
           const busy = busyId === s.id;
+          const converted = isConverted(s);
           return (
             <TableRow key={s.id} className={s.isActive ? undefined : 'opacity-70'}>
               <TableCell>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{s.name}</span>
-                {s.notSetUp && s.likelyColour && <Badge variant="info" className="ml-2">Looks like a colour</Badge>}
+                {s.notSetUp && s.likelyColour && !converted && <Badge variant="info" className="ml-2">Looks like a colour</Badge>}
               </TableCell>
               <TableCell className="font-mono text-xs">{s.sku ?? '—'}</TableCell>
               <TableCell className="text-right">{priceCell(costOf(s.id), s.notSetUp)}</TableCell>
               {costCells(s.id)}
               <TableCell>
-                {own > 0
-                  ? <span className="text-green-700 dark:text-green-400">{plural(own, 'component')} ✓</span>
-                  : <span className="text-red-600 dark:text-red-400">No sliced files — using the standard bill of materials</span>}
+                {converted && s.convertedTo ? (
+                  <span className="text-gray-600 dark:text-gray-400">
+                    Converted to {s.convertedTo.label}{s.convertedTo.layoutActive ? '' : ' · plate switched off'}
+                  </span>
+                ) : (
+                  <>
+                    {s.convertedTo && <p className="text-gray-600 dark:text-gray-400">Converted to a plate layout that was later deleted</p>}
+                    {own > 0
+                      ? <span className="text-green-700 dark:text-green-400">{plural(own, 'component')} ✓</span>
+                      : <span className="text-red-600 dark:text-red-400">No sliced files — using the standard bill of materials</span>}
+                  </>
+                )}
                 {unlinkedLine(s.name, s.unlinkedSlots)}
               </TableCell>
               <TableCell><Badge variant={s.isActive ? 'success' : 'default'}>{s.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
               {canEdit && (
                 <TableCell className="whitespace-nowrap text-right">
-                  <LinkButton onClick={() => props.onConfigure(s.id)}>Configure</LinkButton>
+                  {!converted && <LinkButton onClick={() => props.onConfigure(s.id)}>Configure</LinkButton>}
                   <LinkButton onClick={() => props.onCost(s)}>Cost</LinkButton>
                   <LinkButton onClick={() => props.onEdit(s)}>Edit</LinkButton>
                   <LinkButton title={`Move ${s.name} up`} disabled={busy || i === 0} onClick={() => props.onMove(s, -1)}><ArrowUp className="h-3.5 w-3.5" /></LinkButton>
                   <LinkButton title={`Move ${s.name} down`} disabled={busy || i === sizes.length - 1} onClick={() => props.onMove(s, 1)}><ArrowDown className="h-3.5 w-3.5" /></LinkButton>
+                  {s.notSetUp && !converted && hasParts && <LinkButton disabled={busy} onClick={() => props.onConvert(s)}>Convert to plate</LinkButton>}
                   <LinkButton disabled={busy} onClick={() => props.onSetActive(s, !s.isActive)}>{s.isActive ? 'Deactivate' : 'Activate'}</LinkButton>
                   {isAdmin && <LinkButton tone="danger" disabled={busy} onClick={() => props.onDelete(s)}>Delete</LinkButton>}
                 </TableCell>

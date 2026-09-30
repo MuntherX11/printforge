@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
+import { isConverted } from '@printforge/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -16,6 +17,7 @@ import { OptionDialog } from './OptionDialog';
 import { ClassifyOptionsDialog } from './ClassifyOptionsDialog';
 import { ColourOptionDialog } from './ColourOptionDialog';
 import { OptionCostDialog, type CostTarget } from './OptionCostDialog';
+import { ConvertToLayoutDialog } from './ConvertToLayoutDialog';
 import { useOptionActions } from './useOptionActions';
 import { errorText } from './options-ui';
 import { standardSizeLabel, type OptionKind } from './options-model';
@@ -45,11 +47,12 @@ export function OptionsCard({ data, product, onConfigureSize }: Props) {
   const [linksOpen, setLinksOpen] = useState(false);
   const [filamentsFor, setFilamentsFor] = useState<ColourOptionDetail | null>(null);
   const [costTarget, setCostTarget] = useState<CostTarget | null>(null);
+  const [convertFor, setConvertFor] = useState<SizeOptionDetail | null>(null);
   const [savingStandard, setSavingStandard] = useState(false);
 
   const hasSizes = product.sizes.length > 0;
   const hasColours = product.colours.length > 0;
-  const legacy = product.sizes.some(s => s.notSetUp);
+  const legacy = product.sizes.some(s => s.notSetUp && !isConverted(s));
 
   async function patchStandard(body: { baseOptionSellable?: boolean; standardColourSellable?: boolean }) {
     setSavingStandard(true);
@@ -112,6 +115,7 @@ export function OptionsCard({ data, product, onConfigureSize }: Props) {
                 onMove={(s, dir) => void actions.move('SIZE', s, dir)}
                 onSetActive={(s, on) => actions.setActive('SIZE', s, on)}
                 onDelete={s => void actions.remove('SIZE', s)}
+                onConvert={s => setConvertFor(s)}
                 onEditLinks={() => setLinksOpen(true)}
                 onStandardSellable={sell => void patchStandard({ baseOptionSellable: sell })}
               />
@@ -165,6 +169,13 @@ export function OptionsCard({ data, product, onConfigureSize }: Props) {
             onSaved={reload}
           />
           <OptionCostDialog productId={product.id} target={costTarget} cost={cost} onClose={() => setCostTarget(null)} />
+          <ConvertToLayoutDialog
+            product={product}
+            option={convertFor ? product.sizes.find(s => s.id === convertFor.id) ?? convertFor : null}
+            open={!!convertFor}
+            onClose={() => setConvertFor(null)}
+            onSaved={reload}
+          />
           {actions.confirmNode}
         </>
       )}

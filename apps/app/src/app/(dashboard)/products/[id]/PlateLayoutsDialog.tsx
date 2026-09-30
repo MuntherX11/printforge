@@ -11,7 +11,7 @@ import { stageLargeFile } from '@/lib/chunked-upload';
 import { formatGrams, formatMinutes } from '@/lib/product-format';
 import type { ApiGcodeAnalysis, ComponentDetail, PlateLayoutCreateResult, ProductDetail } from '@/lib/types/api';
 import { LinkButton, Toggle, errorText } from './options-ui';
-import { componentGrams, parseDecimal, parseWhole, vsSingle } from './bom-model';
+import { componentGrams, detectedLines, parseDecimal, parseWhole, vsSingle } from './bom-model';
 
 interface Props {
   product: ProductDetail;
@@ -27,15 +27,6 @@ type AddState =
   | { mode: 'manual' };
 
 const INTRO = 'A plate layout is a saved, sliced plate of this component with several units on it (e.g. ×12). Job planning uses them to pick plate combinations, and bulk pricing uses them for the cost floor. Customers still order loose units.';
-
-function detectedLines(a: ApiGcodeAnalysis): string[] {
-  const out: string[] = [];
-  if (a.objectCount === null) out.push('No object labels — enter the units');
-  else out.push(`Detected: ${a.objectModels.map(m => `${m.count} × ${m.model}`).join(', ') || `${a.objectCount} objects`}`);
-  if (a.objectModels.length > 1) out.push('Mixed plate — more than one model; enter the units of this component only');
-  if (a.ignoredLabels.length > 0) out.push('Purge tower not counted');
-  return out;
-}
 
 /** Section E (spec §5.2 E): the component's plate layouts (M3–M6). */
 export function PlateLayoutsDialog({ product, component: c, open, canEdit, onClose, onChanged }: Props) {
