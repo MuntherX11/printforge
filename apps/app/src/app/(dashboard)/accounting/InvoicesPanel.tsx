@@ -152,7 +152,7 @@ export function InvoicesPanel() {
                   <TableCell>
                     <Badge className={`text-xs ${STATUS_STYLE[inv.status] ?? ''}`}>{inv.status}</Badge>
                     {inv.paymentUndone && inv.status !== 'PAID' && (
-                      <p className="mt-1 max-w-[16rem] truncate text-xs text-gray-500 dark:text-gray-400" title={undoNote(inv.paymentUndone)}>
+                      <p className="mt-1 max-w-[16rem] break-words text-xs text-gray-500 dark:text-gray-400" title={undoNote(inv.paymentUndone)}>
                         {undoNote(inv.paymentUndone)}
                       </p>
                     )}

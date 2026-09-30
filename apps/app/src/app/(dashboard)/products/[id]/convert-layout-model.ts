@@ -4,7 +4,7 @@
  * O8a preview and the form.
  */
 import type { UnitsPrefillSource } from '@printforge/types';
-import { formatGrams, formatMinutes, policyLabel } from '@/lib/product-format';
+import { formatGrams, formatMinutes, plural, policyLabel } from '@/lib/product-format';
 import type { LayoutConversionPreview, PlanSummary, ProductDetail, SizeOptionDetail, SurplusPolicy } from '@/lib/types/api';
 import { isLastActive, lastOfAxisText } from './options-model';
 
@@ -50,10 +50,12 @@ export function unitsHint(
   return 'Enter how many units are on the plate';
 }
 
-/** The units field's error, or null (whole 2–500; 1 is the part itself). */
-export function unitsError(raw: string, partName: string, optionName: string): string | null {
+/** The units field's error, or null (whole 2–500; 1 is the part itself). `partName` null = no part chosen yet. */
+export function unitsError(raw: string, partName: string | null, optionName: string): string | null {
   if (raw.trim() === '') return null;
-  if (/^\s*1\s*$/.test(raw)) return `One unit per plate is "${partName}" itself — close this and use Deactivate on the ${optionName} row`;
+  if (/^\s*1\s*$/.test(raw)) {
+    return `One unit per plate is ${partName ? `"${partName}"` : 'the part'} itself — close this and use Deactivate on the ${optionName} row`;
+  }
   const n = Number(raw);
   return /^\d+$/.test(raw.trim()) && n >= 2 && n <= 500 ? null : 'Whole number from 2 to 500';
 }
@@ -88,14 +90,19 @@ export function whatHappens(
   const h = p.history;
   out.push({
     text: h.orderLines + h.quoteLines + h.jobs > 0
-      ? `Its history is kept: ${h.orderLines} order lines, ${h.quoteLines} quote lines and ${h.jobs} jobs keep ${name}.`
+      ? `Its history is kept: ${plural(h.orderLines, 'order line')}, ${plural(h.quoteLines, 'quote line')} and ${plural(h.jobs, 'job')} keep ${name}.`
       : `${name} has never been ordered, quoted or produced.`,
   });
   if (p.openLines.total > 0) {
     const list = p.openLines.lines.map(l => `${l.number} ×${l.quantity}${l.partlyPlanned ? ' (partly planned)' : ''}`);
     const more = p.openLines.total - p.openLines.lines.length;
     if (more > 0) list.push(`and ${more} more`);
-    out.push({ text: `${p.openLines.total} open order or quote lines on ${name} still plan one standard set per unit, as they do today — plan them by hand:`, list });
+    const one = p.openLines.total === 1;
+    out.push({
+      text: `${plural(p.openLines.total, 'open order or quote line')} on ${name} still ${one ? 'plans' : 'plan'} one standard set per unit, `
+        + `as ${one ? 'it does' : 'they do'} today — plan ${one ? 'it' : 'them'} by hand:`,
+      list,
+    });
   }
   const price = p.option.legacyPrice !== null
     ? `Its own price (${money(p.option.legacyPrice)}) stays on it for its history.`

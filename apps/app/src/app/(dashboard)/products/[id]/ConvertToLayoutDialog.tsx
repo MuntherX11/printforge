@@ -98,7 +98,7 @@ export function ConvertToLayoutDialog({ product, option, open, onClose, onSaved 
   const u = parseUnits(units);
   const m = parseDecimal(minutes, 1, 100_000);
   const g = parseDecimal(grams, 0.1, 100_000);
-  const uError = unitsError(units, part?.description ?? 'the part', option.name);
+  const uError = unitsError(units, part?.description ?? null, option.name);
   const valid = !!part && u !== null && m !== null && g !== null;
   const base = `/products/${product.id}/variants/${option.id}/convert-to-layout`;
 
