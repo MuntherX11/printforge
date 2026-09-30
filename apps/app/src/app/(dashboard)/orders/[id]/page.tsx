@@ -20,8 +20,9 @@ import { useToast } from '@/components/ui/toast';
 import { LinePriceHint } from '@/components/pricing/LinePriceHint';
 import { ChangeLineColourDialog } from '@/components/orders/ChangeLineColourDialog';
 import { ConfirmDialog } from '../../products/[id]/ConfirmDialog';
-import type { ApiActiveProduct, ApiPrinter, PlanSubmitResult, ProductionPlan, StockReleasedRow } from '@/lib/types/api';
+import type { ApiActiveProduct, ApiPrinter, OrderCancelResult, PlanSubmitResult, ProductionPlan } from '@/lib/types/api';
 import { useOrder, type OrderInvoice, type OrderLine } from './useOrder';
+import { CancelledJobNote, CancelOrderSummary, cancelToast } from './CancelOrderSummary';
 import { InvoiceList } from './InvoiceList';
 import { ConfigArtifactsCard } from './ConfigArtifactsCard';
 import { PlanProductionDialog } from './PlanProductionDialog';
@@ -37,13 +38,6 @@ const orderStatuses = [
 ];
 
 const errorText = (err: unknown, fallback = 'Something went wrong') => (err instanceof Error && err.message) || fallback;
-
-/** `Box 2, Lid 1 (PLA Red)`: units per component, the colour once per group. */
-function stockText(rows: Array<{ componentDescription: string; colourLabel: string; units: number }>): string {
-  const byColour = new Map<string, string[]>();
-  for (const r of rows) byColour.set(r.colourLabel, [...(byColour.get(r.colourLabel) ?? []), `${r.componentDescription} ${r.units}`]);
-  return [...byColour.entries()].map(([colour, parts]) => `${parts.join(', ')} (${colour})`).join('; ');
-}
 
 export default function OrderDetailPage() {
   const formatCurrency = useFormatCurrency();
@@ -86,9 +80,9 @@ export default function OrderDetailPage() {
   async function cancelOrder() {
     setUpdating(true);
     try {
-      const res = await api.patch<{ stockReleased?: StockReleasedRow[] }>(`/orders/${id}`, { status: 'CANCELLED' });
-      const back = res.stockReleased ?? [];
-      toast('success', back.length ? `Order cancelled — returned to printed stock: ${stockText(back)}` : 'Order cancelled');
+      const res = await api.patch<Partial<OrderCancelResult>>(`/orders/${id}`, { status: 'CANCELLED' });
+      const t = cancelToast(res);
+      toast(t.type, t.message);
       setConfirmCancel(false);
       reload();
     } catch (err: unknown) {
@@ -414,6 +408,7 @@ export default function OrderDetailPage() {
                   <div>
                     <p className="text-sm font-medium">{job.name}</p>
                     <p className="text-xs text-gray-500">{job.printer?.name}</p>
+                    <CancelledJobNote orderStatus={order.status} jobStatus={job.status} />
                   </div>
                   <StatusBadge status={job.status} />
                 </Link>
@@ -439,9 +434,7 @@ export default function OrderDetailPage() {
         destructive
         busy={updating}
         confirmLabel="Cancel order"
-        message={(order.stockAllocations ?? []).length
-          ? `Returns to printed stock: ${stockText(order.stockAllocations ?? [])}`
-          : 'Nothing to return to printed stock'}
+        message={<CancelOrderSummary stock={order.stockAllocations ?? []} jobs={order.productionJobs ?? []} />}
         onConfirm={cancelOrder}
         onClose={() => setConfirmCancel(false)}
       />
