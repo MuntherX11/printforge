@@ -18,7 +18,9 @@ export function stockText(rows: Array<{ componentDescription: string; colourLabe
 /**
  * The cancel confirm's message (S9): the printed stock returned, the queued
  * jobs that will be cancelled and the started ones that will not. Built from
- * S4's data; the result toast reports what the server actually did.
+ * S4's data; the result toast reports what the server actually did. Each job
+ * list scrolls inside a bounded height: Dialog itself doesn't scroll, so a long
+ * list (a 30-unit quote's placeholders) would push its buttons off a phone.
  */
 export function CancelOrderSummary({ stock, jobs }: { stock: OrderStockAllocation[]; jobs: OrderJobs }) {
   const queued = jobs.filter(j => j.status === 'QUEUED');
@@ -30,7 +32,7 @@ export function CancelOrderSummary({ stock, jobs }: { stock: OrderStockAllocatio
       {queued.length > 0 && (
         <>
           <p className="font-medium text-amber-700 dark:text-amber-300">Cancel {queued.length} queued job{plural(queued.length)}:</p>
-          <ul className="list-disc pl-5 text-gray-600 dark:text-gray-300">
+          <ul className="max-h-40 overflow-y-auto list-disc pl-5 text-gray-600 dark:text-gray-300">
             {queued.map(j => <li key={j.id} className="break-words">{j.name}{j.printer ? ` · ${j.printer.name}` : ''}</li>)}
           </ul>
         </>
@@ -40,7 +42,7 @@ export function CancelOrderSummary({ stock, jobs }: { stock: OrderStockAllocatio
           <p className="font-medium text-red-600 dark:text-red-400">
             Already started — not cancelled. Stop {m === 1 ? 'it' : 'them'} on the printer, then open {m === 1 ? 'the job' : 'each job'} and use Mark Failed or Cancel Job:
           </p>
-          <ul className="list-disc pl-5 text-gray-600 dark:text-gray-300">
+          <ul className="max-h-40 overflow-y-auto list-disc pl-5 text-gray-600 dark:text-gray-300">
             {started.map(j => (
               <li key={j.id} className="break-words">
                 {j.name} · {j.status === 'PAUSED' ? 'paused' : 'printing'}{j.printer ? ` on ${j.printer.name}` : ''}
