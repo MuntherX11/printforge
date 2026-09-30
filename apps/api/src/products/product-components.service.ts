@@ -11,6 +11,7 @@ import {
 import {
   ACTIVE_JOBS, impactWarnings, lockOptions, mergeImpact, requireConfirm, TX_OPTS, unlinkAfterCommit, unreferencedAttachments,
 } from './product-locks';
+import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { ProductsService } from './products.service';
 
 /**
@@ -113,6 +114,7 @@ export class ProductComponentsService {
         const [row] = await lockOptions(tx, [input.sizeOptionId], 'SHARE');
         if (!row || row.productId !== productId) throw new NotFoundException('Size not found');
         if (row.kind === 'COLOUR') throw new BadRequestException("Colours use each size's components — add the component to a size");
+        if (await liveConversion(tx, row)) throw new ConflictException(CONVERTED_BLOCKER(row.name, CONVERTED_TAIL.components));
         variantId = row.id;
       }
       await this.assertSlot(tx, productId, input.colourSlotId);

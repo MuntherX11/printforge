@@ -424,4 +424,52 @@ describe('VariantsService (§7.1 items 14, 33, 35, 41)', () => {
     expect(size.applied).toHaveLength(1);
     expect(size.sizeOptionId).toBe(OPT.large);
   });
+
+  describe('O8 conversion marker (Convert to plate)', () => {
+    const BLOCKER = '"Box x 12" was converted to a plate layout — activate it to change its kind.';
+    const converted = (extra: Record<string, any> = {}) => option('v-b12', 'Box x 12', 'SIZE', { isActive: false, basePrice: 9, convertedLayoutId: 'box12', ...extra });
+    const marker = (h: any) => h.db.t('productVariant').find((v: any) => v.id === 'v-b12').convertedLayoutId;
+
+    it('O2: activating clears the marker (plain and keep-selling paths); the plate layout stays; other patches keep it', async () => {
+      const plain = productsHarness([boxWith(converted(), option('v-a', 'A', 'SIZE'))]);
+      await plain.variants.update(BOX_ID, 'v-b12', { name: 'Box ×12' });
+      expect(marker(plain)).toBe('box12');
+      await plain.variants.update(BOX_ID, 'v-b12', { isActive: true });
+      expect(marker(plain)).toBeNull();
+      expect(plain.db.t('plateLayout').map((l: any) => l.id)).toEqual(['box12']);
+
+      const keepPath = productsHarness([boxWith(converted())]);
+      await keepPath.variants.update(BOX_ID, 'v-b12', { isActive: true, keepStandard: { label: 'Regular', sellInShop: true } });
+      expect(marker(keepPath)).toBeNull();
+      expect(keepPath.db.t('productVariant')[0].isActive).toBe(true);
+    });
+
+    it('O7: a live-converted option can\'t change kind (409 naming it); once activated it can', async () => {
+      const h = productsHarness([boxWith(converted(), option('v-a', 'A', 'SIZE'))]);
+      const change = { changes: [{ variantId: 'v-b12', kind: 'COLOUR' }], keepStandard: { colour: { label: 'Black', sellInShop: true } } };
+      expect(await statusOf(h.variants.setKinds(BOX_ID, change))).toBe(409);
+      await expect(h.variants.setKinds(BOX_ID, change)).rejects.toThrow(BLOCKER);
+      expect(h.db.t('productVariant').find((v: any) => v.id === 'v-b12').kind).toBe('SIZE');
+      await h.variants.update(BOX_ID, 'v-b12', { isActive: true });
+      await expect(h.variants.setKinds(BOX_ID, change)).resolves.toBeTruthy();
+    });
+
+    it('ProductDetail: convertedTo names the layout, then label null once it is deleted; the kind blocker only while live', async () => {
+      const h = productsHarness([boxWith(converted(), option('v-a', 'A', 'SIZE'))]);
+      let d = await h.products.findOne(BOX_ID);
+      let s = d.sizes.find((x) => x.id === 'v-b12')!;
+      expect(s.convertedTo).toEqual({ layoutId: 'box12', label: 'Box ×12', layoutActive: true });
+      expect(s.kindChange).toMatchObject({ allowed: false, blockers: [BLOCKER] });
+      expect(d.sizes.find((x) => x.id === 'v-a')!.convertedTo).toBeNull();
+
+      h.db.t('plateLayout')[0].isActive = false;
+      expect((await h.products.findOne(BOX_ID)).sizes.find((x) => x.id === 'v-b12')!.convertedTo).toMatchObject({ label: 'Box ×12', layoutActive: false });
+
+      await h.db.plateLayout.delete({ where: { id: 'box12' } });
+      d = await h.products.findOne(BOX_ID);
+      s = d.sizes.find((x) => x.id === 'v-b12')!;
+      expect(s.convertedTo).toEqual({ layoutId: 'box12', label: null, layoutActive: false });
+      expect(s.kindChange).toMatchObject({ allowed: true, blockers: [] });
+    });
+  });
 });

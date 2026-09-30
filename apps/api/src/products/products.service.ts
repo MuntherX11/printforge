@@ -11,6 +11,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { paginatedResponse } from '../common/dto/pagination.dto';
 import { PartsService } from '../parts/parts.service';
 import { parseColourKey } from '../stock-ledger/colour-key';
+import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { activeProductView, catalogDetailView, catalogProductView } from './product-catalog-views';
 import { buildProductDetail, coverUrl, DETAIL_INCLUDE, type AttachmentLite } from './product-detail';
 import { containedUploadPath } from './product-images.service';
@@ -235,6 +236,7 @@ export class ProductsService {
         const [row] = await lockOptions(tx, [sizeOptionId], 'SHARE');
         if (!row || row.productId !== id) throw new NotFoundException('Size not found');
         if (row.kind === 'COLOUR') throw new BadRequestException("Colours share their size's tiers — set tiers on the size");
+        if (await liveConversion(tx, row)) throw new ConflictException(CONVERTED_BLOCKER(row.name, CONVERTED_TAIL.tiers));
         await tx.variantPriceTier.deleteMany({ where: { variantId: sizeOptionId } });
         if (tiers.length) await tx.variantPriceTier.createMany({ data: tiers.map((t) => ({ ...t, variantId: sizeOptionId })) });
         return tx.variantPriceTier.findMany({ where: { variantId: sizeOptionId }, orderBy: { minQty: 'asc' } });

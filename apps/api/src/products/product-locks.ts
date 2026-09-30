@@ -26,6 +26,8 @@ export interface LockedOption {
   name: string;
   isActive: boolean;
   basePrice: number | null;
+  /** O8 marker: the plate layout this option was converted into (see liveConversion) */
+  convertedLayoutId: string | null;
 }
 
 async function lock<T>(tx: RawTx, table: keyof typeof TABLES, ids: string[], mode: Mode, cols: string): Promise<T[]> {
@@ -37,7 +39,7 @@ async function lock<T>(tx: RawTx, table: keyof typeof TABLES, ids: string[], mod
 
 /** `SELECT … FROM "ProductVariant" WHERE id = ANY($1) FOR UPDATE|FOR SHARE`: the kind read from the locked row. */
 export function lockOptions(tx: RawTx, ids: string[], mode: Mode): Promise<LockedOption[]> {
-  return lock<LockedOption>(tx, 'ProductVariant', ids, mode, '"id", "productId", "kind", "name", "isActive", "basePrice"');
+  return lock<LockedOption>(tx, 'ProductVariant', ids, mode, '"id", "productId", "kind", "name", "isActive", "basePrice", "convertedLayoutId"');
 }
 
 export async function lockProduct(tx: RawTx, id: string, mode: Mode = 'UPDATE'): Promise<{ id: string; name: string } | null> {

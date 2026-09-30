@@ -1151,7 +1151,13 @@ export interface SizeOptionDetail {
   setup: { complete: boolean; problems: Problem[] };
   /** rewrites = orders, quotes and jobs using it as their size with no colour, which O7 moves to the colour axis on SIZE→COLOUR. */
   kindChange: { allowed: boolean; blockers: string[]; rewrites: number };
+  /** O8: the plate layout this option was converted into (label null = that layout was deleted); null = never converted. */
+  convertedTo: SizeConvertedTo | null;
 }
+
+// Convert to plate (O8): the conversion marker, the preview and result, and the form's prefills (pure).
+export * from './plate-conversion';
+import type { SizeConvertedTo } from './plate-conversion';
 
 export interface ColourOptionDetail {
   id: string;

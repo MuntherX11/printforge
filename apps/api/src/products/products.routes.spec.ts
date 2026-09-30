@@ -2,6 +2,8 @@ import { Global, INestApplication, Module } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import { ROLES_KEY } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { PrismaModule } from '../common/prisma/prisma.module';
@@ -12,6 +14,7 @@ import { ProductImageBackfillService } from './product-image-backfill.service';
 import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { ProductsController } from './products.controller';
 import { ProductsModule } from './products.module';
+import { VariantsController } from './variants.controller';
 
 /**
  * Critic fix 1 / WP4 acceptance: boots ProductsModule, walks the Express router
@@ -77,6 +80,17 @@ describe('ProductsModule routes', () => {
       'PATCH /products/:id/components/:componentId/plate-layouts/:layoutId',
       'DELETE /products/:id/components/:componentId/plate-layouts/:layoutId',
     ]));
+  });
+
+  it('registers Convert to plate (O8a GET, O8 POST) once each, for ADMIN and OPERATOR only', () => {
+    for (const r of ['GET /products/:id/variants/:variantId/convert-to-layout', 'POST /products/:id/variants/:variantId/convert-to-layout']) {
+      expect(routes.filter((x) => x === r)).toHaveLength(1);
+    }
+    const reflector = new Reflector();
+    for (const handler of [VariantsController.prototype.previewConversion, VariantsController.prototype.convertToLayout]) {
+      expect(reflector.get(ROLES_KEY, handler)).toEqual(['ADMIN', 'OPERATOR']);
+      expect(reflector.get(GUARDS_METADATA, handler)).toContain(RolesGuard);
+    }
   });
 
   it('the removed routes are gone', () => {

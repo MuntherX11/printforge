@@ -221,6 +221,18 @@ describe('ProductsService (§7.1 items 13, 29, 42)', () => {
       expect(h.db.locks).toContainEqual({ table: 'ProductVariant', mode: 'SHARE', ids: [OPT.large] });
     });
 
+    it('P19 on a size converted to a plate layout → 409; its layout deleted → allowed again', async () => {
+      const row = sardineRow();
+      row.variants.push({ ...row.variants[0], id: 'v-b12', name: 'Box x 12', isActive: false, convertedLayoutId: 'l1' });
+      const h = productsHarness([row]);
+      const body = { sizeOptionId: 'v-b12', tiers: [{ minQty: 10, unitPrice: 2 }] };
+      await expect(h.products.setPriceTiers(P, body)).rejects.toThrow('"Box x 12" was converted to a plate layout — activate it before setting its bulk tiers');
+      expect(await statusOf(h.products.setPriceTiers(P, body))).toBe(409);
+      expect(h.db.t('variantPriceTier')).toHaveLength(0);
+      await h.db.plateLayout.delete({ where: { id: 'l1' } });
+      await expect(h.products.setPriceTiers(P, body)).resolves.toHaveLength(1);
+    });
+
     it('P18/P20 with a variantId parameter → 400', async () => {
       const h = productsHarness([sardineRow()]);
       await expect(h.products.bulkFloor(P, { variantId: 'x' })).rejects.toThrow('out of date');

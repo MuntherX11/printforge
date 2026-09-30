@@ -7,6 +7,7 @@ import { STANDARD_KEY } from '../catalog-core/option-pair';
 import { PricingService } from '../catalog-core/pricing.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
+import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { parseAssignments, parseKindChanges, parseOptionCreate, parseOptionPatch } from './product-input';
 import {
   assertSkuFree, impactWarnings, lockOptions, lockProduct, mergeImpact, optionHistory, requireConfirm, TX_OPTS,
@@ -95,15 +96,17 @@ export class VariantsService {
    * O2. `keepStandard` is the O1 step for a re-activation: accepted only when
    * the patch activates an inactive option on an axis with no active option
    * whose switch is undecided (§3.1 rules 6 and 7), checked under the option
-   * and product locks (O7's order), 400 otherwise.
+   * and product locks (O7's order), 400 otherwise. Activating an option clears
+   * its O8 conversion marker; the plate layout it was converted into stays.
    */
   async update(productId: string, variantId: string, body: unknown) {
     const { keepStandard, ...input } = parseOptionPatch(body);
     await this.owned(productId, variantId);
     if (input.sku) await assertSkuFree(this.prisma, input.sku, { variantId });
+    const data = input.isActive === true ? { ...input, convertedLayoutId: null } : input;
     if (!keepStandard) {
       if (!Object.keys(input).length) return this.owned(productId, variantId);
-      return this.prisma.productVariant.update({ where: { id: variantId }, data: input });
+      return this.prisma.productVariant.update({ where: { id: variantId }, data });
     }
     return this.prisma.$transaction(async (tx: any) => {
       const [row] = await lockOptions(tx, [variantId], 'UPDATE');
@@ -113,7 +116,7 @@ export class VariantsService {
       const sameKind = await tx.productVariant.findMany({ where: { productId, kind: row.kind }, select: { isActive: true } });
       if (row.isActive || input.isActive !== true || !axisUndecided(product, row.kind, sameKind)) throw notNeeded(row.kind);
       await tx.product.update({ where: { id: productId }, data: keepStandardData(row.kind, keepStandard) });
-      return tx.productVariant.update({ where: { id: variantId }, data: input });
+      return tx.productVariant.update({ where: { id: variantId }, data });
     }, TX_OPTS);
   }
 
@@ -254,6 +257,7 @@ export class VariantsService {
       for (const c of input.changes) {
         const row = byId.get(c.variantId)!;
         const V = row.id;
+        if (await liveConversion(tx, row)) blocked.push(CONVERTED_BLOCKER(row.name, CONVERTED_TAIL.kind));
         if (c.kind === 'COLOUR') {
           if (await tx.productComponent.count({ where: { variantId: V } })) blocked.push(`"${row.name}" can't become a colour: it has its own components.`);
           if (await tx.variantPriceTier.count({ where: { variantId: V } })) blocked.push(`"${row.name}" can't become a colour: it has its own bulk tiers.`);

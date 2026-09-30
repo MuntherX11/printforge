@@ -1,5 +1,6 @@
 import type {
-  CellCost, ColourOptionDetail, ColourSlotDetail, ComponentDetail, MaterialLite, ProductDetail, Problem, SizeOptionDetail, UnlinkedSlot,
+  CellCost, ColourOptionDetail, ColourSlotDetail, ComponentDetail, MaterialLite, ProductDetail, Problem, SizeConvertedTo, SizeOptionDetail,
+  UnlinkedSlot,
 } from '@printforge/types';
 import { resolveInConfig, standardMixedWarnings, type ResolvedBom } from '../catalog-core/bom-resolve';
 import { optionsOfKind, PRODUCT_CONFIG_INCLUDE, type ComponentRow, type OptionRow, type ProductConfig } from '../catalog-core/catalog-config';
@@ -9,6 +10,7 @@ import {
 } from '../catalog-core/option-pair';
 import { colourCostWarnings } from '../catalog-core/pricing-core';
 import { baseColourKeyOf, colourLabel, isMultiColourComponent } from '../stock-ledger/colour-key';
+import { CONVERTED_BLOCKER, CONVERTED_TAIL } from './option-conversion-rules';
 import { compareImages, type ImageRow } from './product-images.service';
 
 /**
@@ -142,13 +144,28 @@ function componentDetail(productId: string, raw: any, row: ComponentRow, config:
   };
 }
 
+/**
+ * O8: where a size was converted to. The layout is looked up among every
+ * component's layouts (active or not); a marker whose layout is gone gives
+ * label null — the option is then an ordinary one again.
+ */
+export function convertedToOf(config: ProductConfig, convertedLayoutId: string | null | undefined): SizeConvertedTo | null {
+  if (!convertedLayoutId) return null;
+  for (const c of config.components) {
+    const l = c.layouts.find((x) => x.id === convertedLayoutId);
+    if (l) return { layoutId: l.id, label: `${c.description} ×${l.unitsPerPlate}`, layoutActive: l.isActive };
+  }
+  return { layoutId: convertedLayoutId, label: null, layoutActive: false };
+}
+
 /** The O7 blockers of one option (§3.1 rule 3, §4.2 O7 sentences), from pre-loaded counts. */
 export function kindChangeBlockers(
   config: ProductConfig,
   option: OptionRow,
-  counts: { ownComponents: number; ownTiers: number; refsWithColour: number; colourRefs: number },
+  counts: { ownComponents: number; ownTiers: number; refsWithColour: number; colourRefs: number; converted?: boolean },
 ): string[] {
   const out: string[] = [];
+  if (counts.converted) out.push(CONVERTED_BLOCKER(option.name, CONVERTED_TAIL.kind));
   if (option.kind === 'SIZE') {
     if (counts.ownComponents > 0) out.push(`"${option.name}" can't become a colour: it has its own components.`);
     if (counts.ownTiers > 0) out.push(`"${option.name}" can't become a colour: it has its own bulk tiers.`);
@@ -185,7 +202,9 @@ export function buildProductDetail(raw: any, config: ProductConfig, pc: PairCont
     const refsWithColour = extras.optionRefs.filter((r) => r.sizeOptionId === s.id && r.colourOptionId).length;
     // The rows O7 rewrites when this size becomes a colour (its size with no colour).
     const rewrites = extras.optionRefs.filter((r) => r.sizeOptionId === s.id && !r.colourOptionId).length;
-    const blockers = kindChangeBlockers(config, s, { ownComponents: own.length, ownTiers: tiers.length, refsWithColour, colourRefs: 0 });
+    const convertedTo = convertedToOf(config, rawVariants.get(s.id)?.convertedLayoutId);
+    const converted = !!convertedTo && convertedTo.label !== null;
+    const blockers = kindChangeBlockers(config, s, { ownComponents: own.length, ownTiers: tiers.length, refsWithColour, colourRefs: 0, converted });
     const notSetUp = own.length === 0 && tiers.length === 0;
     return {
       id: s.id, name: s.name, sku: s.sku, isActive: s.isActive, sortOrder: s.sortOrder, basePrice: s.basePrice,
@@ -197,6 +216,7 @@ export function buildProductDetail(raw: any, config: ProductConfig, pc: PairCont
       priceTiers: tiers,
       setup: { complete: !!bom?.complete, problems: bom?.problems ?? [] },
       kindChange: { allowed: blockers.length === 0, blockers, rewrites },
+      convertedTo,
     };
   });
 

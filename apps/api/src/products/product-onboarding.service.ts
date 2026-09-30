@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { filamentIdentityKey, type Problem, type SlicerImportResult } from '@printforge/types';
 import { decideImportLinks, type ImportedSlot, type LinkComponent } from '../catalog-core/colour-link-proposal';
 import { round1 } from '../catalog-core/cost-engine';
@@ -10,6 +10,7 @@ import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import { findDuplicateMaterial, waitForMaterialIdentity } from '../inventory/material-identity';
 import { ThreeMfParserService } from '../file-parser/threemf-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
+import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { componentSlotIndexes, duplicateLayout, plateLabelWarnings, slotsDifferWarning, slotsFor, toolsForComponent } from './plate-layouts.service';
 import { lockOptions } from './product-locks';
 import { slicerAttachmentData, StoredFile, thumbnailAttachmentData, unlinkWritten, writeUploadFile } from './slicer-files';
@@ -174,9 +175,10 @@ export class ProductOnboardingService {
     if (!product) throw new NotFoundException('Product not found');
     const scope = opts.sizeOptionId;
     if (scope) {
-      const v = await this.prisma.productVariant.findUnique({ where: { id: scope }, select: { id: true, productId: true, kind: true } });
+      const v = await this.prisma.productVariant.findUnique({ where: { id: scope }, select: { id: true, productId: true, kind: true, name: true, convertedLayoutId: true } });
       if (!v || v.productId !== productId) throw new NotFoundException('Size not found');
       if (v.kind === 'COLOUR') throw new BadRequestException(COLOUR_TARGET);
+      if (await liveConversion(this.prisma, v)) throw new ConflictException(CONVERTED_BLOCKER(v.name, CONVERTED_TAIL.import));
     }
     for (const [, componentId] of opts.targets) {
       const c = await this.prisma.productComponent.findUnique({ where: { id: componentId }, select: { productId: true, variantId: true } });
@@ -241,6 +243,7 @@ export class ProductOnboardingService {
       const [row] = await lockOptions(tx, [scope], 'SHARE');
       if (!row || row.productId !== productId) throw new NotFoundException('Size not found');
       if (row.kind === 'COLOUR') throw new BadRequestException(COLOUR_TARGET);
+      if (await liveConversion(tx, row)) throw new ConflictException(CONVERTED_BLOCKER(row.name, CONVERTED_TAIL.import));
       sizeRow = { id: row.id, name: row.name };
     }
 

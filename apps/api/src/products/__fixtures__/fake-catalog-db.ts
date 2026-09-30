@@ -46,7 +46,7 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   componentMaterial: { material: one('material', 'materialId'), component: one('productComponent', 'componentId') },
   productColourSlot: { assignments: many('colourOptionSlot', 'colourSlotId') },
   colourOptionSlot: { material: one('material', 'materialId'), variant: one('productVariant', 'variantId'), colourSlot: one('productColourSlot', 'colourSlotId') },
-  plateLayout: { slots: many('plateLayoutSlot', 'layoutId') },
+  plateLayout: { slots: many('plateLayoutSlot', 'layoutId'), component: one('productComponent', 'componentId') },
   productPart: { part: one('part', 'partId'), product: one('product', 'productId') },
   orderItem: { order: one('order', 'orderId'), productionJobs: many('productionJob', 'orderItemId') },
   quoteItem: { quote: one('quote', 'quoteId') },
@@ -99,7 +99,7 @@ const MODELS = [
   'colourSizeExclusion', 'priceTier', 'variantPriceTier', 'componentColourStock', 'componentStockMovement',
   'plateLayout', 'plateLayoutSlot', 'jobPlate', 'productPart', 'part', 'attachment', 'material', 'spool',
   'jobMaterial', 'orderItem', 'order', 'quoteItem', 'quote', 'productionJob', 'printer', 'productImage',
-  'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting', 'auditLog',
+  'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting', 'auditLog', 'filamentCatalog',
   // accounting specs
   'expense', 'expenseCategory', 'account', 'accountTransaction',
 ];

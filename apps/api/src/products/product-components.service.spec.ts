@@ -106,4 +106,16 @@ describe('ProductComponentsService', () => {
     expect(['c6', 'c7', 'c8', 'c9'].map((id) => comp(h, id).sortOrder)).toEqual([3, 2, 1, 0]);
     await expect(h.components.reorder(P, { sizeOptionId: OPT.red, componentIds: [] })).rejects.toThrow("Colours use each size's components");
   });
+
+  it('P9 into a size converted to a plate layout → 409 and nothing added; after Activate it works', async () => {
+    const row = sardineRow();
+    row.variants.push({ ...row.variants[0], id: 'v-b12', name: 'Box x 12', isActive: false, convertedLayoutId: 'l1' });
+    const h = productsHarness([row]);
+    const body = { description: 'Clip', materialId: M.black, gramsUsed: 2, printMinutes: 5, sizeOptionId: 'v-b12' };
+    expect(await statusOf(h.components.add(P, body))).toBe(409);
+    await expect(h.components.add(P, body)).rejects.toThrow('"Box x 12" was converted to a plate layout — activate it before adding components');
+    expect(h.db.t('productComponent').filter((c: any) => c.variantId === 'v-b12')).toHaveLength(0);
+    await h.variants.update(P, 'v-b12', { isActive: true });
+    await expect(h.components.add(P, body)).resolves.toMatchObject({ description: 'Clip', variantId: 'v-b12' });
+  });
 });

@@ -281,6 +281,7 @@ model ProductVariant {
   colourAssignments ColourOptionSlot[] // COLOUR only
   sizeExclusions    ColourSizeExclusion[] // COLOUR only: sizes this colour isn't made in
   priceTiers        VariantPriceTier[] // SIZE only
+  convertedLayoutId String? // no FK. O8: the plate layout this legacy option was converted into; the option is kept inactive for history. Cleared when it is activated again.
 
   @@index([productId])
 }

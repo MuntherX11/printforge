@@ -44,6 +44,8 @@ export class AuditInterceptor implements NestInterceptor {
       convert: 'converted',
       'send-email': 'sent',
       reprint: 'reprinted',
+      // POST /products/:id/variants/:variantId/convert-to-layout; the service also writes its own ProductVariant row.
+      'convert-to-layout': 'convertedToLayout',
     };
 
     const cleanUrl = request.url.split('?')[0];
