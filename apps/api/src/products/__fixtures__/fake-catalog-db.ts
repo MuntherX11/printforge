@@ -74,6 +74,7 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   customer: { orders: many('order', 'customerId'), quotes: many('quote', 'customerId') },
   // accounting specs
   expense: { category: one('expenseCategory', 'categoryId'), account: one('account', 'accountId'), transactions: many('accountTransaction', 'expenseId') },
+  auditLog: { user: one('user', 'userId') },
 };
 
 /** Children deleted with their parent (onDelete: Cascade in schema.prisma). */
@@ -105,6 +106,7 @@ const MODELS = [
 
 const LOCK_TABLES: Record<string, string> = {
   Product: 'product', ProductVariant: 'productVariant', Material: 'material', Spool: 'spool', OrderItem: 'orderItem', QuoteItem: 'quoteItem', Quote: 'quote',
+  Invoice: 'invoice', Order: 'order', Account: 'account',
 };
 
 /** Column defaults (`@default` in schema.prisma) that services read back. */

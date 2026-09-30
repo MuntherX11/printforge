@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { optionalNumber, requiredNumber, requiredText, requiredEnum } from '../common/utils/validate-number';
 
@@ -112,7 +113,11 @@ export class AccountsService {
 
   /**
    * The single place money moves. Writes the transaction and steps the running
-   * balance in one transaction so the two can never disagree.
+   * balance in one transaction so the two can never disagree. The account row
+   * is locked before its balance is read, so two postings at once can't lose
+   * an update: FOR NO KEY UPDATE, the mode the balance update takes anyway,
+   * which doesn't block inserts that reference the account (an Expense or an
+   * AccountTransaction), so concurrent postings queue instead of deadlocking.
    */
   async post(params: {
     accountId: string;
@@ -126,6 +131,7 @@ export class AccountsService {
     tx?: any;                 // join an outer transaction when there is one
   }) {
     const run = async (db: any) => {
+      await db.$queryRaw(Prisma.sql`/* lock:Account:NO_KEY_UPDATE */ SELECT "id" FROM "Account" WHERE "id" = ANY(${[params.accountId]}::text[]) FOR NO KEY UPDATE`);
       const account = await db.account.findUnique({ where: { id: params.accountId } });
       if (!account) throw new NotFoundException('Account not found');
 
