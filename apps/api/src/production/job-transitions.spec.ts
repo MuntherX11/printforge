@@ -105,28 +105,58 @@ describe('cancelQueuedJobsForOrder', () => {
       .toEqual(['CANCELLED', 'CANCELLED', 'CANCELLED', 'PAUSED', 'IN_PROGRESS', 'CANCELLED', 'FAILED', 'COMPLETED', 'QUEUED']);
   });
 
-  it('an order without active jobs → both lists empty', async () => {
+  it('an order without active jobs → both lists empty, no job row locked', async () => {
     const { h, order, line, mk } = setup();
     mk(line.id, 'COMPLETED', 'done');
     expect(await h.db.$transaction((tx: any) => cancelQueuedJobsForOrder(tx, order.id))).toEqual({ cancelled: [], stillRunning: [] });
+    expect(h.db.locks.filter((l: any) => l.table === 'ProductionJob')).toEqual([]);
+  });
+
+  it('locks the QUEUED candidates FOR UPDATE before cancelling them', async () => {
+    const { h, order, line, other, mk } = setup();
+    const a = mk(line.id, 'QUEUED', 'a');
+    const b = mk(other.id, 'QUEUED', 'b');
+    mk(line.id, 'IN_PROGRESS', 'running');
+    const update = jest.spyOn(h.db.productionJob, 'updateMany');
+    await h.db.$transaction((tx: any) => cancelQueuedJobsForOrder(tx, order.id));
+    const i = h.db.$queryRaw.mock.calls.findIndex(([q]: any) => /lock:ProductionJob:UPDATE/.test(q.sql));
+    expect(h.db.$queryRaw.mock.calls[i][0].sql).toMatch(/ORDER BY "id" FOR UPDATE/);
+    expect([...h.db.locks.find((l: any) => l.table === 'ProductionJob').ids].sort()).toEqual([a.id, b.id].sort());
+    expect(h.db.$queryRaw.mock.invocationCallOrder[i]).toBeLessThan(update.mock.invocationCallOrder[0]);
+  });
+
+  it('a job J8 cancels between S9\'s read and its row lock is not reported as cancelled by this call', async () => {
+    const { h, order, line, mk } = setup();
+    const byHand = mk(line.id, 'QUEUED', 'cancelled on its own page');
+    const q = mk(line.id, 'QUEUED', 'still queued');
+    const tx: any = Object.create(h.db);
+    tx.$queryRaw = async (sql: any) => {
+      if (/lock:ProductionJob:UPDATE/.test(sql.sql)) h.db.t('productionJob').find((j: any) => j.id === byHand.id).status = 'CANCELLED'; // J8 commits first
+      return h.db.$queryRaw(sql);
+    };
+    const out = await cancelQueuedJobsForOrder(tx, order.id);
+    expect(out.cancelled.map((j) => j.id)).toEqual([q.id]);
+    expect([statusOf(h, byHand.id), statusOf(h, q.id)]).toEqual(['CANCELLED', 'CANCELLED']);
   });
 
   describe('race with a printer bridge\'s guarded QUEUED → IN_PROGRESS flip: exactly one wins, no error', () => {
     const bridge = (h: ReturnType<typeof productionHarness>) => new MoonrakerService(h.db as any, { create: jest.fn() } as any, h.completion);
     const started = { hostname: 'x', printerState: 'printing', progress: 0, heaterBed: null, extruder: null, printStats: { filename: 'Box x12.gcode', total_duration: 0, print_duration: 0, filament_used: 0, state: 'printing', message: '' } };
 
-    it('the flip lands between S9\'s read and its update → the job stays IN_PROGRESS and is listed as still running', async () => {
+    it('the flip lands between S9\'s read and its row lock → the job stays IN_PROGRESS and is listed as still running', async () => {
       const { h, order, line, mk } = setup();
       const job = mk(line.id, 'QUEUED', 'Box ×12', { gcodeFilename: 'Box x12.gcode' });
       const tx: any = Object.create(h.db);
-      tx.productionJob = { ...h.db.productionJob };
-      tx.productionJob.updateMany = async (args: any) => {
-        await bridge(h).handleJobStarted('pr-1', started as any); // barrier: the bridge commits first
-        return h.db.productionJob.updateMany(args);
+      tx.$queryRaw = async (q: any) => {
+        if (/lock:ProductionJob:UPDATE/.test(q.sql)) await bridge(h).handleJobStarted('pr-1', started as any); // barrier: the bridge commits first
+        return h.db.$queryRaw(q);
       };
+      const update = jest.spyOn(h.db.productionJob, 'updateMany');
       const out = await cancelQueuedJobsForOrder(tx, order.id);
       expect(out).toEqual({ cancelled: [], stillRunning: [{ id: job.id, name: 'Box ×12', status: 'IN_PROGRESS', printerName: 'K1' }] });
       expect(statusOf(h, job.id)).toBe('IN_PROGRESS');
+      // Only the bridge's flip ran: nothing was left QUEUED under S9's lock, so S9 updated nothing.
+      expect(update.mock.calls.filter(([a]: any) => a.data.status === 'CANCELLED')).toEqual([]);
     });
 
     it('S9 commits first → the bridge\'s flip matches nothing and the job stays cancelled', async () => {

@@ -21,7 +21,8 @@ export const noCancel = (): OrderCancelOutcome => ({ released: [], jobsCancelled
  *   2. the guarded order flip — matching nothing means the order is already
  *      cancelled: only notes / dueDate are saved (when given), nothing else runs;
  *   3. the order's lines, FOR UPDATE in id order;
- *   4. its QUEUED jobs → CANCELLED (started jobs are left alone and listed);
+ *   4. its QUEUED jobs, FOR UPDATE in id order, → CANCELLED (started jobs are
+ *      left alone and listed; only the jobs this step cancelled are reported);
  *   5. printed stock released per line (component rows), attributed to the user;
  *   6. one audit row per cancelled job, atomic with the change it records.
  */

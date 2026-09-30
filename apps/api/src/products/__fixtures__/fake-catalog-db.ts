@@ -106,7 +106,7 @@ const MODELS = [
 
 const LOCK_TABLES: Record<string, string> = {
   Product: 'product', ProductVariant: 'productVariant', Material: 'material', Spool: 'spool', OrderItem: 'orderItem', QuoteItem: 'quoteItem', Quote: 'quote',
-  Invoice: 'invoice', Order: 'order', Account: 'account',
+  Invoice: 'invoice', Order: 'order', Account: 'account', ProductionJob: 'productionJob',
 };
 
 /** Column defaults (`@default` in schema.prisma) that services read back. */

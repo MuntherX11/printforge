@@ -127,7 +127,7 @@ describe('S9 cancel also cancels the order\'s QUEUED jobs (v2.17.2)', () => {
     expect([orderRow(h, order.id).status, statusOf(h, replanned.id), boxStock(h)]).toEqual(['CANCELLED', 'CANCELLED', 2]);
   });
 
-  it('lock order: plan lock < order flip < every line FOR UPDATE in id order < job update < first stock-movement read', async () => {
+  it('lock order: plan lock < order flip < every line FOR UPDATE in id order < job rows FOR UPDATE < job update < first stock-movement read', async () => {
     const h = box();
     const { order } = addOrder(h.db, [
       { id: 'line-b', productId: BOX_ID, quantity: 3, description: 'Box' },
@@ -143,11 +143,12 @@ describe('S9 cancel also cancels the order\'s QUEUED jobs (v2.17.2)', () => {
     const where = (re: RegExp) => calls.map((q: any, i: number) => (re.test(q.sql) ? i : -1)).filter((i: number) => i >= 0);
     const [plan] = where(/plan:advisory/);
     const lines = where(/stock:lockLine/);
+    const [jobLock] = where(/lock:ProductionJob:UPDATE/);
     expect(calls[plan].values).toEqual([`plan:${order.id}`]);
     expect(lines.slice(0, 2).map((i: number) => calls[i].values[0])).toEqual(['line-a', 'line-b']);
     const seq = [
       raw.invocationCallOrder[plan], flip.mock.invocationCallOrder[0], raw.invocationCallOrder[lines[0]], raw.invocationCallOrder[lines[1]],
-      jobFlip.mock.invocationCallOrder[0], movements.mock.invocationCallOrder[0],
+      raw.invocationCallOrder[jobLock], jobFlip.mock.invocationCallOrder[0], movements.mock.invocationCallOrder[0],
     ];
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
   });
@@ -162,6 +163,21 @@ describe('S9 cancel also cancels the order\'s QUEUED jobs (v2.17.2)', () => {
       { userId: 'user-1', action: 'Job.cancelled', entityType: 'Job', entityId: jobs.q1.id, details },
       { userId: 'user-1', action: 'Job.cancelled', entityType: 'Job', entityId: jobs.q2.id, details },
     ]);
+  });
+
+  it('a queued job J8 cancels while S9 waits for the job row locks is neither reported nor audited as this cancel\'s', async () => {
+    const h = box();
+    const { order, jobs } = cancellable(h);
+    const inner = h.db.$queryRaw;
+    h.db.$queryRaw = jest.fn(async (q: any) => {
+      // Committed first: q1 cancelled on its own job page (J8).
+      if (/lock:ProductionJob:UPDATE/.test(q.sql)) h.db.t('productionJob').find((j: any) => j.id === jobs.q1.id).status = 'CANCELLED';
+      return inner(q);
+    });
+    const out: any = await new OrdersController(h.orders).update(order.id, { status: 'CANCELLED' }, { user: { id: 'user-1' } });
+    expect(out.jobsCancelled).toEqual([{ id: jobs.q2.id, name: 'Box q2', printerName: null }]);
+    expect(h.db.t('auditLog').map((a: any) => a.entityId)).toEqual([jobs.q2.id]);
+    expect(statuses(h, jobs)).toEqual({ ...BEFORE, q1: 'CANCELLED', q2: 'CANCELLED' });
   });
 
   it('without a user: the jobs are still cancelled, no audit rows', async () => {

@@ -27,11 +27,11 @@ export async function lockOrderPlan(tx: { $queryRaw: (q: Prisma.Sql) => Promise<
  * Both run inside the caller's transaction, after its other locks (S11's FOR
  * SHARE locks; S9's order flip and line locks), so neither is the first
  * statement (§0.2). They are still race-safe: a printer bridge's guarded
- * QUEUED → IN_PROGRESS flip and their updateMany lock the same row, so
- * whichever commits first wins — the cancel then either doesn't match the
- * started job and sees it on the re-read (S11: 409, the whole transaction rolls
- * back; S9: listed as still running), or has cancelled it (the bridge's flip
- * then matches nothing).
+ * QUEUED → IN_PROGRESS flip and their row lock (S11's updateMany, S9's FOR
+ * UPDATE before its update) take the same row, so whichever commits first
+ * wins — the cancel then either doesn't match the started job and sees it on
+ * the re-read (S11: 409, the whole transaction rolls back; S9: listed as still
+ * running), or has cancelled it (the bridge's flip then matches nothing).
  */
 
 type Tx = Pick<Prisma.TransactionClient, 'productionJob'>;
@@ -61,32 +61,43 @@ export async function cancelQueuedJobsForItem(tx: Tx, orderItemId: string): Prom
   return queued.filter((j) => cancelled.has(j.id));
 }
 
+type RawTx = { $queryRaw: (q: Prisma.Sql) => Promise<unknown> };
+
 /**
  * S9: cancel every QUEUED job of the order (matched by orderId, the jobs S4
  * shows). Returns the jobs this call cancelled and the started ones
  * (IN_PROGRESS / PAUSED) it left alone, both in createdAt order. Jobs cancelled
  * earlier (J8, S11) are not reported; COMPLETED and FAILED jobs are untouched.
+ *
+ * The candidates are locked FOR UPDATE (id order) and re-read before the
+ * update, so "cancelled by this call" is exact: a job that J8 cancelled, or a
+ * bridge started or completed, between the first read and the lock drops out
+ * of the re-read instead of being reported (and audited) as this cancel's.
+ * No new QUEUED job can appear meanwhile: every writer of one takes the
+ * order's plan lock, which S9 holds.
  */
-export async function cancelQueuedJobsForOrder(tx: Tx, orderId: string): Promise<{ cancelled: OrderCancelledJob[]; stillRunning: OrderRunningJob[] }> {
-  const queued = await tx.productionJob.findMany({ where: { orderId, status: 'QUEUED' }, select: { id: true } });
-  if (queued.length) {
-    await tx.productionJob.updateMany({
-      where: { id: { in: queued.map((j) => j.id) }, orderId, status: 'QUEUED' },
-      data: { status: 'CANCELLED' },
-    });
+export async function cancelQueuedJobsForOrder(tx: Tx & RawTx, orderId: string): Promise<{ cancelled: OrderCancelledJob[]; stillRunning: OrderRunningJob[] }> {
+  const candidates = (await tx.productionJob.findMany({ where: { orderId, status: 'QUEUED' }, select: { id: true } })).map((j) => j.id);
+  let mine: string[] = [];
+  if (candidates.length) {
+    await tx.$queryRaw(Prisma.sql`/* lock:ProductionJob:UPDATE */ SELECT "id" FROM "ProductionJob" WHERE "id" = ANY(${candidates}::text[]) ORDER BY "id" FOR UPDATE`);
+    mine = (await tx.productionJob.findMany({ where: { id: { in: candidates }, status: 'QUEUED' }, select: { id: true } })).map((j) => j.id);
+  }
+  if (mine.length) {
+    await tx.productionJob.updateMany({ where: { id: { in: mine }, orderId, status: 'QUEUED' }, data: { status: 'CANCELLED' } });
   }
   const after = await tx.productionJob.findMany({
     where: { orderId, status: { in: ['CANCELLED', 'IN_PROGRESS', 'PAUSED'] } },
     select: { id: true, name: true, status: true, printer: { select: { name: true } } },
     orderBy: { createdAt: 'asc' },
   });
-  const mine = new Set(queued.map((j) => j.id));
+  const ours = new Set(mine);
   const cancelled: OrderCancelledJob[] = [];
   const stillRunning: OrderRunningJob[] = [];
   for (const j of after) {
     const row = { id: j.id, name: j.name, printerName: j.printer?.name ?? null };
     if (j.status !== 'CANCELLED') stillRunning.push({ ...row, status: j.status === 'PAUSED' ? 'PAUSED' : 'IN_PROGRESS' });
-    else if (mine.has(j.id)) cancelled.push(row);
+    else if (ours.has(j.id)) cancelled.push(row);
   }
   return { cancelled, stillRunning };
 }
