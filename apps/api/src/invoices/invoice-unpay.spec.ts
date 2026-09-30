@@ -336,6 +336,12 @@ describe('AuditInterceptor', () => {
     expect(await actionsLogged('POST', '/api/invoices/inv-1/unpay?x=1', '/api/invoices/:id/unpay')).toEqual([]);
   });
 
+  it('skips unpay reached by a URL Express still routes to it: upper case or a trailing slash', async () => {
+    expect(await actionsLogged('POST', '/api/INVOICES/inv-1/Unpay', '/api/invoices/:id/unpay')).toEqual([]);
+    expect(await actionsLogged('POST', '/api/invoices/inv-1/unpay/', '/api/invoices/:id/unpay')).toEqual([]);
+    expect(await actionsLogged('POST', '/api/invoices/inv-1/unpay/?x=1', '/api/invoices/:id/unpay')).toEqual([]);
+  });
+
   it('still logs every other invoice route', async () => {
     expect(await actionsLogged('POST', '/api/invoices/inv-1/send-email', '/api/invoices/:id/send-email')).toEqual(['Invoice.sent']);
     expect(await actionsLogged('PATCH', '/api/invoices/inv-1', '/api/invoices/:id')).toEqual(['Invoice.updated']);

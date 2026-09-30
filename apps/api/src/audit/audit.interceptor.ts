@@ -4,7 +4,7 @@ import { AuditService } from './audit.service';
 
 const AUDIT_METHODS = ['POST', 'PATCH', 'PUT', 'DELETE'];
 
-/** Routes whose service writes its own audit row inside its transaction (with the amounts): a generic row would duplicate it. */
+/** Routes whose service writes its own audit row inside its transaction (with the amounts): a generic row would duplicate it. Tested on the route pattern. */
 const SELF_AUDITED = /\/invoices\/[^/]+\/unpay$/;
 
 @Injectable()
@@ -21,7 +21,14 @@ export class AuditInterceptor implements NestInterceptor {
 
     const user = request.user;
     if (!user) return next.handle();
-    if (SELF_AUDITED.test(String(request.url).split('?')[0])) return next.handle();
+
+    // Decide on the matched route pattern (its case and shape fixed by the
+    // route definition), not the raw URL: Express matches paths
+    // case-insensitively and ignores a trailing slash, so /api/INVOICES/x/Unpay/
+    // reaches the same handler. The URL, normalised, only when no route is set.
+    const cleanUrl = String(request.url ?? '').split('?')[0];
+    const pattern: string = request.route?.path || cleanUrl.toLowerCase().replace(/\/+$/, '');
+    if (SELF_AUDITED.test(pattern)) return next.handle();
 
     const path = request.route?.path || request.url;
     const entityType = this.extractEntityType(path);
@@ -48,8 +55,7 @@ export class AuditInterceptor implements NestInterceptor {
       'convert-to-layout': 'convertedToLayout',
     };
 
-    const cleanUrl = request.url.split('?')[0];
-    const lastSegment = cleanUrl.split('/').filter(Boolean).pop() ?? '';
+    const lastSegment = pattern.split('/').filter(Boolean).pop() ?? '';
     const terminalAction = terminalActionMap[lastSegment];
 
     return next.handle().pipe(

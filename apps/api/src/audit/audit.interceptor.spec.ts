@@ -46,4 +46,12 @@ describe('AuditInterceptor', () => {
     await b.done;
     expect(b.audit.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'Product.updated' }));
   });
+
+  it('the terminal action comes from the matched route, whatever the URL\'s case or trailing slash', async () => {
+    for (const url of ['/api/JOBS/j1/Complete', '/api/jobs/j1/complete/']) {
+      const r = run({ method: 'POST', user, url, route: { path: '/api/jobs/:id/complete' }, params: { id: 'j1' }, body: {} });
+      await r.done;
+      expect(r.audit.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'Job.completed', entityId: 'j1' }));
+    }
+  });
 });
