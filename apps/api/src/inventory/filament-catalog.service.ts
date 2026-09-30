@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { deltaE } from '../common/utils/colour';
+import { catalogueSwatchFor, normSwatch } from './catalogue-swatch';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -227,29 +228,22 @@ export class FilamentCatalogService implements OnModuleInit {
     if (materials.length === 0) return { candidates: [], unmatched: [] };
 
     const catalogue = await this.prisma.filamentCatalog.findMany();
-    const norm = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
     const candidates: any[] = [];
     const unmatched: any[] = [];
 
     for (const m of materials) {
-      const mb = norm(m.brand);
-      const mc = norm(m.color);
-      if (!mb || !mc) { unmatched.push({ ...m, reason: 'no brand or colour recorded' }); continue; }
+      if (!normSwatch(m.brand) || !normSwatch(m.color)) { unmatched.push({ ...m, reason: 'no brand or colour recorded' }); continue; }
 
-      const byBrand = catalogue.filter((c) => norm(c.brand) === mb);
-      const sameColour = byBrand.filter((c) => norm(c.colour) === mc);
-      if (sameColour.length === 0) { unmatched.push({ ...m, reason: 'no catalogue swatch for that brand and colour' }); continue; }
-
-      // Prefer the swatch whose filament type also agrees.
-      const typed = sameColour.find((c) => norm(c.type) === norm(m.type));
-      const pick = typed ?? sameColour[0];
+      // Same brand and colour name, preferring the swatch whose filament type also agrees.
+      const pick = catalogueSwatchFor(m, catalogue);
+      if (!pick) { unmatched.push({ ...m, reason: 'no catalogue swatch for that brand and colour' }); continue; }
       candidates.push({
         materialId: m.id,
         material: [m.color, m.type, m.brand].filter(Boolean).join(' · '),
         hex: pick.hex,
         swatch: `${pick.brand} ${pick.colour} ${pick.type}`,
-        exact: !!typed,
+        exact: normSwatch(pick.type) === normSwatch(m.type),
       });
     }
 
