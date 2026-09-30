@@ -11,7 +11,9 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/components/ui/toast';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { FileText, Download, CheckCircle } from 'lucide-react';
+import { FileText, Download, CheckCircle, Undo2 } from 'lucide-react';
+import type { InvoicePaymentUndo } from '@printforge/types';
+import { UndoPaymentDialog } from './UndoPaymentDialog';
 
 interface Invoice {
   id: string;
@@ -24,6 +26,7 @@ interface Invoice {
   paidAt?: string | null;
   createdAt: string;
   order?: { id: string; orderNumber?: string; customer?: { id: string; name: string } | null } | null;
+  paymentUndone?: InvoicePaymentUndo | null;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -38,13 +41,14 @@ const STATUS_STYLE: Record<string, string> = {
 export function InvoicesPanel() {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
-  // PATCH /invoices/:id is ADMIN-only; ACCOUNTING and VIEWER see the list read-only.
+  // Marking paid (PATCH /invoices/:id, status PAID) and Undo payment (POST /invoices/:id/unpay) are ADMIN or ACCOUNTING; VIEWER sees the list read-only.
   const { role } = useAuth();
-  const canMarkPaid = role === 'ADMIN';
+  const canRecordPayments = role === 'ADMIN' || role === 'ACCOUNTING';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [marking, setMarking] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState<Invoice | null>(null);
 
   function load() {
     api.get<any>('/invoices?limit=100')
@@ -147,6 +151,11 @@ export function InvoicesPanel() {
                   <TableCell className="tabular-nums font-medium">{formatCurrency(inv.total)}</TableCell>
                   <TableCell>
                     <Badge className={`text-xs ${STATUS_STYLE[inv.status] ?? ''}`}>{inv.status}</Badge>
+                    {inv.paymentUndone && inv.status !== 'PAID' && (
+                      <p className="mt-1 max-w-[16rem] truncate text-xs text-gray-500 dark:text-gray-400" title={undoNote(inv.paymentUndone)}>
+                        {undoNote(inv.paymentUndone)}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1.5">
@@ -158,10 +167,15 @@ export function InvoicesPanel() {
                       >
                         <Download className="h-3.5 w-3.5" /> PDF
                       </a>
-                      {canMarkPaid && inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
+                      {canRecordPayments && inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
                         <Button size="sm" disabled={marking === inv.id} onClick={() => markPaid(inv)}>
                           <CheckCircle className="h-3.5 w-3.5 mr-1" />
                           {marking === inv.id ? 'Saving…' : 'Mark Paid'}
+                        </Button>
+                      )}
+                      {canRecordPayments && inv.status === 'PAID' && (
+                        <Button size="sm" variant="outline" onClick={() => setUndoing(inv)}>
+                          <Undo2 className="h-3.5 w-3.5 mr-1" />Undo payment
                         </Button>
                       )}
                     </div>
@@ -172,6 +186,12 @@ export function InvoicesPanel() {
           </Table>
         )}
       </CardContent>
+      <UndoPaymentDialog invoice={undoing} onClose={() => setUndoing(null)} onUndone={load} />
     </Card>
   );
+}
+
+/** The note under an undone invoice's status: when, by whom and why. */
+function undoNote(u: InvoicePaymentUndo): string {
+  return `Payment undone ${new Date(u.at).toLocaleDateString()} by ${u.by}${u.reason ? `: ${u.reason}` : ''}`;
 }
