@@ -9,6 +9,7 @@ import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatGrams, formatMinutes } from '@/lib/product-format';
 import { errorText } from './options-ui';
+import { FilamentMappingList } from './FilamentMappingList';
 import { importToasts, postGcodeImport, type GcodeConfirmState, type GcodeFileCheck } from './useSlicerImport';
 
 interface Props {
@@ -47,9 +48,11 @@ function hintText(d: PlateUnitsDetection): string | null {
 
 /**
  * Upload G-code, confirm step (owner: "gcode uploaded should automatically be
- * scanned for the number of units on plate"). Each file's detected units are
- * prefilled and editable; ×N imports one part per unit plus a ×N plate layout
- * holding the file, or everything can go in as one part with no plate.
+ * scanned for the number of units on plate"). Each file lists its slots and
+ * the filament each becomes (an existing one, or a new one at cost 0). Its
+ * detected units are prefilled and editable; ×N imports one part per unit
+ * plus a ×N plate layout holding the file, or everything can go in as one
+ * part with no plate.
  */
 export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel, onClose, onImported }: Props) {
   const { toast } = useToast();
@@ -113,6 +116,7 @@ export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel,
                 <p className={cn('text-sm', f.detection.kind === 'MIXED' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200')}>
                   {detectedText(f.detection)} <span className="text-gray-800 dark:text-gray-200">{resultText(f, u)}</span>
                 </p>
+                {f.plate.grams > 0 && <FilamentMappingList matches={f.filamentMatches} />}
                 {f.plate.grams > 0 && (
                   <div>
                     <label htmlFor={id} className="text-xs font-medium text-gray-700 dark:text-gray-300">Units on the plate</label>

@@ -12,6 +12,7 @@ import type {
   ProductCostPayload as CostPayloadForCalculate,
   ProductDetail as SharedProductDetail,
   ThreeMfAnalysis as SharedThreeMfAnalysis,
+  FilamentSlotMatch as SharedFilamentSlotMatch,
   VariantKind as SharedVariantKind,
 } from '@printforge/types';
 
@@ -788,6 +789,8 @@ export interface ApiGcodeAnalysis {
   objectCount: number | null;
   objectModels: Array<{ model: string; count: number }>;
   ignoredLabels: string[];
+  /** With ?matchFilaments=1: each used slot and the filament the import maps it to. */
+  filamentMatches?: SharedFilamentSlotMatch[];
 }
 
 /** POST /file-parser/analyze for a .3mf. */

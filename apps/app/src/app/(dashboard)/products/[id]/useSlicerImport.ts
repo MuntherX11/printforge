@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
 import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
-import { detectPlateUnits, gcodePlateFigures, type PlateFigures, type PlateUnitsDetection } from '@printforge/types';
+import { detectPlateUnits, gcodePlateFigures, isExactFilamentMatch, type FilamentSlotMatch, type PlateFigures, type PlateUnitsDetection } from '@printforge/types';
 import { useToast } from '@/components/ui/toast';
 import { plural } from '@/lib/product-format';
 import type { ApiGcodeAnalysis, ApiThreeMfAnalyzeResult, ProductDetail, SlicerImportResult, ThreeMfAnalysis } from '@/lib/types/api';
@@ -52,6 +52,8 @@ export interface GcodeFileCheck {
   stagedId: string;
   detection: PlateUnitsDetection;
   plate: PlateFigures;
+  /** Each used slot and the filament the import will use (read-only preview). */
+  filamentMatches: FilamentSlotMatch[];
 }
 
 export interface GcodeConfirmState {
@@ -87,7 +89,7 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
       } else {
         fd.append('file', file);
       }
-      const r = await api.postForm<ApiThreeMfAnalyzeResult>('/file-parser/analyze', fd);
+      const r = await api.postForm<ApiThreeMfAnalyzeResult>('/file-parser/analyze?matchFilaments=1', fd);
       if (!r.analysis || r.analysis.type !== '3mf') throw new Error('That file is not a 3MF project');
       setWizard({ file, stagedUploadId, analysis: r.analysis });
     } catch (err) {
@@ -100,8 +102,9 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
   /**
    * Each file is staged once and its object labels read (M6, the staged copy
    * is kept); the import then consumes the staged copies. Plates of one
-   * object import straight away as before; anything else (several units,
-   * no labels, mixed models) goes through the confirm step first.
+   * object whose filaments all match exactly import straight away as before;
+   * anything else (several units, no labels, mixed models, a new or
+   * nearest-colour filament) goes through the confirm step first.
    */
   const uploadGcode = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -116,14 +119,16 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
         const stagedId = await stageLargeFile(file);
         const fd = new FormData();
         fd.append('assembledUploadId', stagedId);
-        const a = await api.postForm<ApiGcodeAnalysis>('/file-parser/parse-gcode', fd);
-        checks.push({ fileName: file.name, stagedId, detection: detectPlateUnits(a), plate: gcodePlateFigures(a) });
+        const a = await api.postForm<ApiGcodeAnalysis>('/file-parser/parse-gcode?matchFilaments=1', fd);
+        checks.push({ fileName: file.name, stagedId, detection: detectPlateUnits(a), plate: gcodePlateFigures(a), filamentMatches: a.filamentMatches ?? [] });
       }
     } catch (err) {
       toast('error', errorText(err, 'Couldn\'t read the G-code'));
       checks = [];
     }
-    if (checks.length && checks.some(c => c.detection.kind !== 'SINGLE')) {
+    // The confirm step also shows when a slot isn't an exact match, so a new or
+    // nearest-colour filament is seen before it lands on the bill of materials.
+    if (checks.length && checks.some(c => c.detection.kind !== 'SINGLE' || c.filamentMatches.some(m => !isExactFilamentMatch(m)))) {
       setGcodeConfirm({ files: checks });
     } else if (checks.length) {
       try {

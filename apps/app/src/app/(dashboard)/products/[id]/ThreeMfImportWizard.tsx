@@ -11,6 +11,7 @@ import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
 import type { ComponentDetail } from '@/lib/types/api';
 import { PlatePreviewCard, NEW_COMPONENT, isSliced, unitsOf, type PlateChoice } from './PlatePreviewCard';
 import { errorText } from './options-ui';
+import { FilamentMappingList } from './FilamentMappingList';
 import { importToasts, type ImportResult, type ThreeMfWizardState } from './useSlicerImport';
 
 interface Props {
@@ -38,7 +39,8 @@ function initialChoices(state: ThreeMfWizardState): Record<number, PlateChoice> 
 /**
  * 3MF import onto the BOM scope (spec §5.1, §3.12, M2): per plate, units on
  * the plate and whether it becomes a new component or a plate layout of an
- * existing one. Errors show the server's text.
+ * existing one. The filaments the selected plates use are listed with the
+ * filament each becomes. Errors show the server's text.
  */
 export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabel, targetComponents, onClose, onImported }: Props) {
   const { toast } = useToast();
@@ -128,6 +130,9 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
   }
 
   const { analysis } = state;
+  // The slots the selected plates use, and the filament each becomes.
+  const usedSlots = new Set(selected.flatMap(p => p.tools.filter(t => t.filamentGrams > 0).map(t => t.index)));
+  const filamentMatches = (analysis.filamentMatches ?? []).filter(m => usedSlots.has(m.index));
   return (
     <Dialog open onClose={importing ? () => undefined : onClose} title={`Import 3MF onto ${targetLabel}`} className="max-w-4xl">
       <div className="space-y-3">
@@ -138,6 +143,7 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
           Selected: {plural(selected.length, 'plate')} · total {formatGrams(summary.grams)} · {formatMinutes(summary.seconds / 60)} ·
           adds {plural(summary.components, 'component')} and {plural(summary.layouts, 'plate layout')} (existing {summary.existing})
         </p>
+        <FilamentMappingList matches={filamentMatches} />
         <div className="grid max-h-[55vh] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
           {plates.map(p => choices[p.plateIndex] && (
             <PlatePreviewCard
