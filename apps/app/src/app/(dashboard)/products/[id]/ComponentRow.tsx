@@ -10,6 +10,7 @@ import { LinkButton, Swatch } from './options-ui';
 import { componentGrams, slotViews, type LinkState } from './bom-model';
 import { ComponentStockCell } from './ComponentStockCell';
 import type { ColourLinksFocus } from './ColourLinksDialog';
+import { plateLinkLabel } from '@printforge/types';
 
 interface Props {
   product: ProductDetail;
@@ -127,6 +128,11 @@ export function ComponentRow(props: Props) {
         <span className="tabular-nums">{formatGrams(grams)} · {formatMinutes(c.printMinutes)}</span>
         {c.perUnitEstimatedFrom && (
           <p className="text-xs text-gray-500 dark:text-gray-400">est. from ×{c.perUnitEstimatedFrom.unitsPerPlate} plate</p>
+        )}
+        {canEdit && (
+          <div className="-ml-1.5">
+            <LinkButton title={`${plateLinkLabel(c.plateLayouts)} — ${c.description}`} onClick={props.onLayouts}>{plateLinkLabel(c.plateLayouts)}</LinkButton>
+          </div>
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">{c.quantity}</TableCell>
