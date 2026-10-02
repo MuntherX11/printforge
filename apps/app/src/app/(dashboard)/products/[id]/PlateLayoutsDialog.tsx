@@ -98,8 +98,9 @@ export function PlateLayoutsDialog({ product, component: c, open, canEdit, onClo
   });
 
   const remove = (id: string) => void run(id, async () => {
-    const r = await api.delete<{ deleted?: true; deactivated?: true }>(`${base}/${id}`);
-    toast('success', r.deactivated ? 'Layout is used by jobs, so it was deactivated instead of deleted' : 'Layout deleted');
+    const r = await api.delete<{ deleted?: true; deactivated?: true; fileDeleted?: boolean }>(`${base}/${id}`);
+    const file = r.fileDeleted ? ' Its file was deleted.' : '';
+    toast('success', r.deactivated ? `Layout is used by past jobs, so it was deactivated instead of deleted.${file}` : 'Layout deleted');
     setConfirmDelete(null);
     onChanged();
   });

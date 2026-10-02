@@ -132,12 +132,15 @@ export class ProductsService {
     const V = config.options.map((o) => o.id);
     const refWhere = { OR: [{ sizeOptionId: { in: V } }, { colourOptionId: { in: V } }] };
     const refSelect = { sizeOptionId: true, colourOptionId: true };
-    const [atts, orderRefs, quoteRefs, jobRefs, grid] = await Promise.all([
-      attIds.size ? this.prisma.attachment.findMany({ where: { id: { in: [...attIds] } }, select: { id: true, originalName: true, filename: true, sizeBytes: true } }) : [],
+    const [atts, orderRefs, quoteRefs, jobRefs, grid, printers] = await Promise.all([
+      attIds.size
+        ? this.prisma.attachment.findMany({ where: { id: { in: [...attIds] } }, select: { id: true, originalName: true, filename: true, sizeBytes: true, slicedForPrinter: true } })
+        : [],
       V.length ? this.prisma.orderItem.findMany({ where: refWhere, select: refSelect }) : [],
       V.length ? this.prisma.quoteItem.findMany({ where: refWhere, select: refSelect }) : [],
       V.length ? this.prisma.productionJob.findMany({ where: refWhere, select: refSelect }) : [],
       this.pricing.cellCosts(id, ctx),
+      this.prisma.printer.findMany({ where: { isActive: true }, select: { id: true, name: true, model: true, isActive: true } }),
     ]);
 
     const missing = new Set<string>();
@@ -156,6 +159,8 @@ export class ProductsService {
       optionRefs: [...orderRefs, ...quoteRefs, ...jobRefs] as any,
       cells: grid.cells,
       extraMaterials,
+      settings: await this.pricing.settings(ctx),
+      printers,
     });
   }
 

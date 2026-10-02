@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { FileCode, Plus, Upload } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import type { ProductDetail } from '@/lib/types/api';
 import type { ProductPageData } from './useProduct';
 import { BOM_SECTION_ID } from './useBomScope';
 import { ComponentRow } from './ComponentRow';
+import { PlateList } from './PlateList';
 import { AddComponentDialog } from './AddComponentDialog';
 import { EditComponentDialog } from './EditComponentDialog';
 import { PlateLayoutsDialog } from './PlateLayoutsDialog';
@@ -168,24 +169,26 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
               </TableHeader>
               <TableBody>
                 {components.map((c, i) => (
-                  <ComponentRow
-                    key={c.id}
-                    product={product}
-                    component={c}
-                    materials={materials}
-                    canEdit={canEdit}
-                    isFirst={i === 0}
-                    isLast={i === components.length - 1}
-                    busy={busy}
-                    onMove={dir => void move(c.id, dir)}
-                    onEdit={() => setDialog({ kind: 'edit', componentId: c.id })}
-                    onRemove={() => { setRemoveError(null); setDialog({ kind: 'remove', componentId: c.id }); }}
-                    onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
-                    onEditLinks={focus => setDialog({ kind: 'links', focus })}
-                    onReload={() => void reload()}
-                    stock={canEdit ? stockById : null}
-                    onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
-                  />
+                  <Fragment key={c.id}>
+                    <ComponentRow
+                      product={product}
+                      component={c}
+                      materials={materials}
+                      canEdit={canEdit}
+                      isFirst={i === 0}
+                      isLast={i === components.length - 1}
+                      busy={busy}
+                      onMove={dir => void move(c.id, dir)}
+                      onEdit={() => setDialog({ kind: 'edit', componentId: c.id })}
+                      onRemove={() => { setRemoveError(null); setDialog({ kind: 'remove', componentId: c.id }); }}
+                      onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
+                      onEditLinks={focus => setDialog({ kind: 'links', focus })}
+                      onReload={() => void reload()}
+                      stock={canEdit ? stockById : null}
+                      onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
+                    />
+                    <PlateList productId={product.id} component={c} canEdit={canEdit} colSpan={canEdit ? 10 : 8} onChanged={() => void reload()} />
+                  </Fragment>
                 ))}
                 <TableRow>
                   <td colSpan={canEdit ? 5 : 4} className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Per product total</td>

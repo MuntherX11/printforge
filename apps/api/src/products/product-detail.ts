@@ -8,10 +8,13 @@ import { likelyColour } from '../catalog-core/colour-words';
 import {
   colourOffered, orderedSizes, sizeKey, standardColourSellable, standardSizeSellable, type PairContext,
 } from '../catalog-core/option-pair';
-import { colourCostWarnings } from '../catalog-core/pricing-core';
+import { colourCostWarnings, printerOf, storedPriceOf } from '../catalog-core/pricing-core';
+import type { CostSettings } from '../costing/costing.service';
+import type { MatchablePrinter } from '../file-parser/printer-match';
 import { baseColourKeyOf, colourLabel, isMultiColourComponent } from '../stock-ledger/colour-key';
 import { CONVERTED_BLOCKER, CONVERTED_TAIL } from './option-conversion-rules';
 import { compareImages, type ImageRow } from './product-images.service';
+import { plateRowsOf, type PriceTierLite } from './plate-rows';
 
 /**
  * Assembly of `ProductDetail` (spec §4.1.1) from one product row. Pure: the
@@ -33,7 +36,7 @@ export const DETAIL_INCLUDE = {
   },
 } as const;
 
-export interface AttachmentLite { id: string; originalName: string | null; filename: string; sizeBytes: number }
+export interface AttachmentLite { id: string; originalName: string | null; filename: string; sizeBytes: number; slicedForPrinter?: string | null }
 
 /** An order line, quote line or job that names an option through this release's columns. */
 export interface OptionRef { sizeOptionId: string | null; colourOptionId: string | null }
@@ -44,7 +47,14 @@ export interface DetailExtras {
   cells: CellCost[];
   /** materials named only by stock keys (not by the configuration) */
   extraMaterials: Map<string, MaterialLite>;
+  /** for the plate list's costs; null/absent = costs not shown */
+  settings?: CostSettings | null;
+  /** active printers, matched to the printer each file was sliced for */
+  printers?: MatchablePrinter[];
 }
+
+/** The size's list price and bulk tiers, for the plate list. */
+interface SizePricing { listPrice: number | null; tiers: PriceTierLite[] }
 
 export const coverUrl = (productId: string, images: ImageRow[] | undefined): string | null => {
   const first = [...(images ?? [])].sort(compareImages)[0];
@@ -88,7 +98,9 @@ class Resolutions {
   }
 }
 
-function componentDetail(productId: string, raw: any, row: ComponentRow, config: ProductConfig, res: Resolutions, extras: DetailExtras): ComponentDetail {
+function componentDetail(
+  productId: string, raw: any, row: ComponentRow, config: ProductConfig, res: Resolutions, extras: DetailExtras, pricing: SizePricing,
+): ComponentDetail {
   const mat = (id: string) => config.materials.get(id) ?? extras.extraMaterials.get(id);
   const baseKey = (() => { try { return baseColourKeyOf(row); } catch { return ''; } })();
   const label = (key: string) => { try { return colourLabel(key, (id) => mat(id)); } catch { return key; } };
@@ -106,6 +118,33 @@ function componentDetail(productId: string, raw: any, row: ComponentRow, config:
   const standard = res.get(row.variantId, null);
   const est = row.perUnitEstimatedFromLayoutId ? row.layouts.find((l) => l.id === row.perUnitEstimatedFromLayoutId) : null;
   const layouts = [...(raw.plateLayouts ?? [])].sort((a: any, b: any) => a.sortOrder - b.sortOrder || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const file = fileOf(row.attachmentId, extras);
+  const sliced = (id: string | null | undefined) => (id ? extras.attachments.get(id)?.slicedForPrinter ?? null : null);
+  const layoutFiles = new Map<string, { file: NonNullable<ReturnType<typeof fileOf>>; slicedFor: string | null }>();
+  for (const l of layouts) {
+    const f = fileOf(l.attachmentId, extras);
+    if (f) layoutFiles.set(l.attachmentId, { file: f, slicedFor: sliced(l.attachmentId) });
+  }
+  const plates = plateRowsOf({
+    bom: standard,
+    componentId: row.id,
+    own: {
+      printMinutes: row.printMinutes,
+      grams: isMultiColourComponent(row) ? row.materials.reduce((t, m) => t + m.gramsUsed, 0) : row.gramsUsed,
+      file,
+      slicedFor: sliced(row.attachmentId),
+    },
+    layouts: layouts.filter((l: any) => l.isActive !== false).map((l: any) => ({
+      id: l.id, name: l.name ?? `×${l.unitsPerPlate}`, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
+      source: l.source ?? 'MANUAL', attachmentId: l.attachmentId ?? null,
+    })),
+    files: layoutFiles,
+    listPrice: pricing.listPrice,
+    tiers: pricing.tiers,
+    settings: extras.settings ?? null,
+    pricingPrinter: printerOf(config),
+    printers: extras.printers ?? [],
+  });
   return {
     id: row.id,
     variantId: row.variantId,
@@ -131,7 +170,7 @@ function componentDetail(productId: string, raw: any, row: ComponentRow, config:
     baseColourKey: baseKey,
     colourStock: [...stock.entries()].map(([colourKey, v]) => ({ colourKey, label: label(colourKey), stockOnHand: v.stockOnHand, usedBy: v.usedBy })),
     perUnitEstimatedFrom: est ? { layoutId: est.id, unitsPerPlate: est.unitsPerPlate } : null,
-    file: fileOf(row.attachmentId, extras),
+    file,
     thumbnailUrl: raw.thumbnailAttachmentId ? `/api/products/${productId}/components/${row.id}/thumbnail` : null,
     plateLayouts: layouts.map((l: any) => ({
       id: l.id, name: l.name, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
@@ -141,6 +180,7 @@ function componentDetail(productId: string, raw: any, row: ComponentRow, config:
       slots: [...(l.slots ?? [])].sort((a: any, b: any) => a.colorIndex - b.colorIndex).map((s: any) => ({ colorIndex: s.colorIndex, gramsUsed: s.gramsUsed })),
     })),
     problems: (standard?.problems ?? []).filter((p) => p.componentId === row.id),
+    plates,
   };
 }
 
@@ -190,8 +230,14 @@ export function customerSizeKeysOf(pc: PairContext, colourId: string | null): st
 export function buildProductDetail(raw: any, config: ProductConfig, pc: PairContext, extras: DetailExtras): ProductDetail {
   const res = new Resolutions(config);
   const rawComponents = new Map<string, any>((raw.components ?? []).map((c: any) => [c.id, c]));
-  const detailOf = (row: ComponentRow) => componentDetail(config.product.id, rawComponents.get(row.id) ?? {}, row, config, res, extras);
   const rawVariants = new Map<string, any>((raw.variants ?? []).map((v: any) => [v.id, v]));
+  const tierRows = (rows: any[] | undefined): PriceTierLite[] => (rows ?? []).map((t: any) => ({ minQty: t.minQty, unitPrice: t.unitPrice }));
+  const pricingOf = (variantId: string | null): SizePricing => ({
+    listPrice: storedPriceOf(config, variantId ? config.options.find((o) => o.id === variantId) ?? null : null),
+    tiers: tierRows(variantId ? rawVariants.get(variantId)?.priceTiers : raw.priceTiers),
+  });
+  const detailOf = (row: ComponentRow) =>
+    componentDetail(config.product.id, rawComponents.get(row.id) ?? {}, row, config, res, extras, pricingOf(row.variantId));
   const allMaterials = [...config.materials.values()];
   const mixed = standardMixedWarnings(config);
 

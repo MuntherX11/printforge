@@ -14,6 +14,8 @@ export interface PrinterRef {
 export interface ComponentPlateRow {
   /** null = the component's own single unit (×1, its own file) */
   layoutId: string | null;
+  /** "×1" for the part's own unit, else the layout's name (default "×12") */
+  name: string;
   unitsPerPlate: number;
   plateMinutes: number;
   plateGrams: number;
