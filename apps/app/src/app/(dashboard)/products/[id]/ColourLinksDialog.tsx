@@ -205,7 +205,7 @@ export function ColourLinksDialog({ product, open, onClose, onSaved, focus }: Co
                         <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100">{r.part}</td>
                         <td className="px-3 py-1.5">
                           <span className="inline-flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
-                            <Swatch hex={r.material?.colorHex} title={r.material?.name ?? 'No filament'} />
+                            <Swatch hex={r.material?.colorHex} name={r.material ? r.material.color || r.material.name : null} title={r.material?.name ?? 'No filament'} />
                             {r.material?.name ?? '—'}
                           </span>
                         </td>

@@ -12,28 +12,11 @@
  * kind of suggestion.
  */
 
-/** Rough RGB for common colour words, used only when no hex is available. */
-export const COLOUR_RGB: Record<string, [number, number, number]> = {
-  Black:   [0, 0, 0],
-  White:   [255, 255, 255],
-  Red:     [255, 0, 0],
-  Blue:    [0, 0, 255],
-  Green:   [0, 128, 0],
-  Yellow:  [255, 255, 0],
-  Orange:  [255, 128, 0],
-  Purple:  [128, 0, 128],
-  Pink:    [255, 192, 203],
-  Brown:   [128, 64, 0],
-  Grey:    [128, 128, 128],
-  Silver:  [192, 192, 192],
-  Gold:    [255, 215, 0],
-  Beige:   [245, 222, 179],
-  Cyan:    [0, 206, 209],
-  Teal:    [0, 128, 128],
-  Navy:    [0, 0, 128],
-  Magenta: [255, 0, 255],
-  Natural: [240, 225, 200],
-};
+import { colourToRgb } from '@printforge/types';
+
+// The colour-word palette and its name lookup live in @printforge/types, shared
+// with the app (which also draws an approximate dot from a colour name).
+export { COLOUR_RGB, colourToRgb } from '@printforge/types';
 
 /** "#91202B" / "91202b" -> [145, 32, 43]. Null if it isn't a 6-digit hex. */
 export function hexToRgb(hex?: string | null): [number, number, number] | null {
@@ -81,36 +64,6 @@ export function deltaE(hexA?: string | null, hexB?: string | null): number | nul
   const b = hexToLab(hexB);
   if (!a || !b) return null;
   return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
-}
-
-/**
- * RGB for a stored colour name. Names are free text, so this matches loosely:
- * exact first, then a containment match, so "Transparent Purple" still reads as
- * purple rather than falling through to nothing.
- */
-export function colourToRgb(colour?: string | null): [number, number, number] | null {
-  if (!colour) return null;
-  const c = colour.trim().toLowerCase();
-  if (!c) return null;
-
-  for (const [name, rgb] of Object.entries(COLOUR_RGB)) {
-    if (name.toLowerCase() === c) return rgb;
-  }
-  // Longest name wins; ties go to whichever appears first, so "Navy Blue"
-  // resolves to Navy rather than Blue — the qualifier leads in most shade
-  // names ("Navy Blue", "Sky Blue", "Dark Green").
-  let best: [number, number, number] | null = null;
-  let bestLen = 0;
-  let bestIdx = Infinity;
-  for (const [name, rgb] of Object.entries(COLOUR_RGB)) {
-    const n = name.toLowerCase();
-    const idx = c.indexOf(n);
-    if (idx === -1) continue;
-    if (n.length > bestLen || (n.length === bestLen && idx < bestIdx)) {
-      best = rgb; bestLen = n.length; bestIdx = idx;
-    }
-  }
-  return best;
 }
 
 /**

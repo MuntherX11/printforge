@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
 import { Plus, Package, Upload, MapPin, Download, ScanLine, Search, X } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
+import { useAuth } from '@/hooks/use-auth';
 import type { FilamentStockRow } from '@/lib/types/api';
 import {
   DEFAULT_FILAMENT_LIST_STATE,
@@ -49,6 +50,8 @@ function FilamentsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canEditColour = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
 
   // ---- list state, mirrored in the URL (q, type, brand, stock, sort, page)
   const [state, setState] = useState<FilamentListState>(() => parseFilamentListState(searchParams));
@@ -291,7 +294,8 @@ function FilamentsPage() {
               action={<Button variant="outline" onClick={clearFilters}>Clear filters</Button>}
             />
           ) : (
-            <FilamentsTable rows={result.pageRows} spoolHits={result.spoolHits} onBeforeNavigate={flushUrl} />
+            <FilamentsTable rows={result.pageRows} spoolHits={result.spoolHits} onBeforeNavigate={flushUrl} canEditColour={canEditColour}
+              onColourSaved={(id, colorHex) => setRows((all) => all && all.map((r) => (r.id === id ? { ...r, colorHex } : r)))} />
           )}
         </CardContent>
       </Card>

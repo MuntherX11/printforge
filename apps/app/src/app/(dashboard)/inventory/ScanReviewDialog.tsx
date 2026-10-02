@@ -238,7 +238,7 @@ function ScanReviewForm({ fields, rows, loadFailed, onClose, onChanged, onRetry 
         ) : matches.length === 1 ? (
           <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-gray-700 dark:text-gray-300">
             <span>Adds a {gramsText} g spool to:</span>
-            <Swatch hex={swatchHex(matches[0].colorHex)} title={matches[0].color || matches[0].name} />
+            <Swatch hex={swatchHex(matches[0].colorHex)} name={matches[0].color || matches[0].name} title={matches[0].color || matches[0].name} />
             <span className="font-medium">{filamentLabel(matches[0])}</span>
           </p>
         ) : matches.length > 1 ? (

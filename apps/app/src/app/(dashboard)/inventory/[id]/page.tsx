@@ -108,7 +108,8 @@ export default function MaterialDetailPage() {
         type: form.get('type') as string,
         // Brand, colour and hex go only when the user changed them (see
         // EditMaterialIdentity); the server stores '' as null.
-        ...(form.has('color') ? { brand: form.get('brand') as string, color: form.get('color') as string, colorHex: form.get('colorHex') as string } : {}),
+        ...(form.has('color') ? { brand: form.get('brand') as string, color: form.get('color') as string } : {}),
+        ...(form.has('colorHex') ? { colorHex: form.get('colorHex') as string } : {}),
         spoolPrice: parseFloat(form.get('spoolPrice') as string),
         spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
         density: parseFloat(form.get('density') as string) || 1.24,
@@ -282,7 +283,7 @@ export default function MaterialDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Swatch hex={swatchHex(material.colorHex)} title={material.color || material.name} />
+            <Swatch hex={swatchHex(material.colorHex)} name={material.color || material.name} title={material.color || material.name} />
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{material.name}</h1>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">{[material.brand, material.type, material.color].filter(Boolean).join(' · ')}</p>

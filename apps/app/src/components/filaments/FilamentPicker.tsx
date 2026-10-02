@@ -143,7 +143,7 @@ export function FilamentPicker(props: FilamentPickerProps) {
                 )}
               >
                 {/* Decorative: the primary text beside it says the colour, so a screen reader hears it once. */}
-                <Swatch hex={swatchHex(row.colorHex)} title={label.primary} decorative />
+                <Swatch hex={swatchHex(row.colorHex)} name={row.color || row.name} title={label.primary} decorative />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-gray-900 dark:text-gray-100">{label.primary}</span>
                   <span className="block truncate text-xs text-gray-500 dark:text-gray-400">

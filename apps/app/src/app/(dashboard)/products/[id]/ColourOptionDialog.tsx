@@ -146,7 +146,7 @@ export function ColourOptionDialog({ product, colour, cost, open, loadMaterials,
                       <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                         Standard:
                         {s.standardMaterials.map(m => (
-                          <span key={m.id} className="inline-flex items-center gap-1"><Swatch hex={m.colorHex} title={m.name} />{m.name}</span>
+                          <span key={m.id} className="inline-flex items-center gap-1"><Swatch hex={m.colorHex} name={m.color || m.name} title={m.name} />{m.name}</span>
                         ))}
                       </p>
                     )}

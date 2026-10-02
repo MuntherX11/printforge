@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { identityFields, initialIdentity, otherModeFor, type EditIdentity } from '@printforge/types';
 import { FilamentBrandColour, toMaterialType, type Swatch } from '@/components/filament-swatch-picker';
 import { api } from '@/lib/api';
+import { ColourDotField, bareHex } from '@/components/filaments/ColourDot';
 
 interface Props {
   /** The filament as stored when the dialog opened. */
@@ -48,6 +49,8 @@ export function EditMaterialIdentity({ material }: Props) {
   const typeId = useId();
   /** False while the catalogue loads: the picker shows empty selects until then. */
   const [ready, setReady] = useState(false);
+  /** The Colour dot field: `touched` once the user sets or clears it here. */
+  const [dot, setDot] = useState<{ touched: boolean; hex: string }>({ touched: false, hex: '' });
 
   function onPicker(next: PickerChange) {
     if (initialising.current) return;
@@ -108,6 +111,8 @@ export function EditMaterialIdentity({ material }: Props) {
   }, []);
 
   const fields = identityFields(v);
+  // The dot follows the picker's hex until the user sets it; a set dot wins.
+  const dotHex = dot.touched ? dot.hex : bareHex(fields ? fields.colorHex : material.colorHex) ?? '';
   const stored = [material.brand, material.color].filter(Boolean).join(' · ');
 
   return (
@@ -129,10 +134,11 @@ export function EditMaterialIdentity({ material }: Props) {
           <>
             <input type="hidden" name="brand" value={fields.brand} />
             <input type="hidden" name="color" value={fields.color} />
-            <input type="hidden" name="colorHex" value={fields.colorHex} />
           </>
         )}
+        {(fields || dot.touched) && <input type="hidden" name="colorHex" value={dotHex} />}
       </div>
+      <ColourDotField value={dotHex} onChange={(hex) => setDot({ touched: true, hex })} brand={v.brand} colour={v.colour} />
     </>
   );
 }

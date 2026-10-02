@@ -390,6 +390,9 @@ export * from './material-edit';
 // BOM filament picker: ranking, pick → write, request plans (pure).
 export * from './filament-pick';
 
+// Colour words → RGB: the matching palette and the approximate dot (pure).
+export * from './colour-names';
+
 // ---- Non-printed parts (per-unit hardware: NFC tags, inserts, keyrings…) ----
 
 export type PartCategory =
