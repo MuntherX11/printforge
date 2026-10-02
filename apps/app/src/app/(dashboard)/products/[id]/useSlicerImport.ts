@@ -2,13 +2,16 @@
 
 import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
-import { CHUNK_THRESHOLD, splitAndStage, stageLargeFile } from '@/lib/chunked-upload';
+import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
+import { detectPlateUnits, gcodePlateFigures, type PlateFigures, type PlateUnitsDetection } from '@printforge/types';
 import { useToast } from '@/components/ui/toast';
 import { plural } from '@/lib/product-format';
-import type { ApiThreeMfAnalyzeResult, ProductDetail, SlicerImportResult, ThreeMfAnalysis } from '@/lib/types/api';
+import type { ApiGcodeAnalysis, ApiThreeMfAnalyzeResult, ProductDetail, SlicerImportResult, ThreeMfAnalysis } from '@/lib/types/api';
 import { errorText } from './options-ui';
 
 export type ImportResult = SlicerImportResult<ProductDetail>;
+/** The api's M1 file limit (MAX_IMPORT_FILES). */
+const MAX_GCODE_FILES = 20;
 type ToastFn = (type: 'success' | 'error' | 'warning', message: string) => void;
 
 function listed(messages: string[], max = 3): string {
@@ -43,11 +46,33 @@ export interface ThreeMfWizardState {
   analysis: ThreeMfAnalysis;
 }
 
+/** One uploaded G-code, staged and read before the import (owner: scan the plate for its units). */
+export interface GcodeFileCheck {
+  fileName: string;
+  stagedId: string;
+  detection: PlateUnitsDetection;
+  plate: PlateFigures;
+}
+
+export interface GcodeConfirmState {
+  files: GcodeFileCheck[];
+}
+
+/** M1 with every file already staged; `units` is keyed by the file's position. */
+export function postGcodeImport(productId: string, sizeOptionId: string | null, files: GcodeFileCheck[], units: Record<string, number>) {
+  const fd = new FormData();
+  fd.append('assembledUploadIds', JSON.stringify(files.map(f => f.stagedId)));
+  if (Object.keys(units).length) fd.append('units', JSON.stringify(units));
+  if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
+  return api.postForm<ImportResult>(`/products/${productId}/onboard-gcode`, fd);
+}
+
 /** `Import 3MF` (analyse, then the wizard) and `Upload G-code` (M1) for one BOM scope. */
 export function useSlicerImport(productId: string, sizeOptionId: string | null, onImported: () => void) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<'analyse' | 'upload' | null>(null);
   const [wizard, setWizard] = useState<ThreeMfWizardState | null>(null);
+  const [gcodeConfirm, setGcodeConfirm] = useState<GcodeConfirmState | null>(null);
 
   const startThreeMf = useCallback(async (file: File) => {
     setBusy('analyse');
@@ -72,25 +97,46 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
     }
   }, [toast]);
 
+  /**
+   * Each file is staged once and its object labels read (M6, the staged copy
+   * is kept); the import then consumes the staged copies. Plates of one
+   * object import straight away as before; anything else (several units,
+   * no labels, mixed models) goes through the confirm step first.
+   */
   const uploadGcode = useCallback(async (files: File[]) => {
     if (!files.length) return;
-    setBusy('upload');
-    try {
-      const { direct, assembledIds } = await splitAndStage(files);
-      const fd = new FormData();
-      for (const f of direct) fd.append('files', f);
-      if (assembledIds.length) fd.append('assembledUploadIds', JSON.stringify(assembledIds));
-      if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
-      const r = await api.postForm<ImportResult>(`/products/${productId}/onboard-gcode`, fd);
-      importToasts(r, toast);
-    } catch (err) {
-      toast('error', errorText(err, 'G-code import failed'));
-    } finally {
-      // The server may have committed before a network error: reload either way.
-      onImported();
-      setBusy(null);
+    if (files.length > MAX_GCODE_FILES) {
+      toast('error', `At most ${MAX_GCODE_FILES} files per import`);
+      return;
     }
+    setBusy('upload');
+    let checks: GcodeFileCheck[] = [];
+    try {
+      for (const file of files) {
+        const stagedId = await stageLargeFile(file);
+        const fd = new FormData();
+        fd.append('assembledUploadId', stagedId);
+        const a = await api.postForm<ApiGcodeAnalysis>('/file-parser/parse-gcode', fd);
+        checks.push({ fileName: file.name, stagedId, detection: detectPlateUnits(a), plate: gcodePlateFigures(a) });
+      }
+    } catch (err) {
+      toast('error', errorText(err, 'Couldn\'t read the G-code'));
+      checks = [];
+    }
+    if (checks.length && checks.some(c => c.detection.kind !== 'SINGLE')) {
+      setGcodeConfirm({ files: checks });
+    } else if (checks.length) {
+      try {
+        importToasts(await postGcodeImport(productId, sizeOptionId, checks, {}), toast);
+      } catch (err) {
+        toast('error', errorText(err, 'G-code import failed'));
+      } finally {
+        // The server may have committed before a network error: reload either way.
+        onImported();
+      }
+    }
+    setBusy(null);
   }, [productId, sizeOptionId, onImported, toast]);
 
-  return { busy, wizard, closeWizard: () => setWizard(null), startThreeMf, uploadGcode };
+  return { busy, wizard, closeWizard: () => setWizard(null), startThreeMf, uploadGcode, gcodeConfirm, closeGcodeConfirm: () => setGcodeConfirm(null) };
 }

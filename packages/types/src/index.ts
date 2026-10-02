@@ -1727,3 +1727,6 @@ export interface JobSurplusRow {
   creditOnComplete: number;
 }
 
+// Units on a sliced plate from its object labels (G-code upload, 3MF wizard).
+export * from './plate-units';
+

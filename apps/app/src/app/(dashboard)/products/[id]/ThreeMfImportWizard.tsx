@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { plateUnitsPrefill } from '@printforge/types';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -28,7 +29,8 @@ function initialChoices(state: ThreeMfWizardState): Record<number, PlateChoice> 
   return Object.fromEntries(state.analysis.plates.map(p => [p.plateIndex, {
     selected: true,
     name: p.name,
-    units: isSliced(p) && p.objectCount != null ? String(p.objectCount) : '',
+    // The labels' count only when it is one part's units (a mixed plate is left to the owner).
+    units: isSliced(p) ? plateUnitsPrefill(p) : '',
     addAs: NEW_COMPONENT,
   }]));
 }

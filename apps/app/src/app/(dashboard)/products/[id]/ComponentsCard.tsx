@@ -19,6 +19,7 @@ import { PlateLayoutsDialog } from './PlateLayoutsDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ColourLinksDialog, type ColourLinksFocus } from './ColourLinksDialog';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
+import { GcodeImportDialog } from './GcodeImportDialog';
 import { SlotFilamentDialog } from './SlotFilamentDialog';
 import { useSlicerImport } from './useSlicerImport';
 import { errorText } from './options-ui';
@@ -218,6 +219,8 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
             onClose={() => setDialog(null)} onSaved={() => void reload()} />
           <ThreeMfImportWizard productId={product.id} state={importer.wizard} sizeOptionId={sizeOptionId} targetLabel={label}
             targetComponents={components} onClose={importer.closeWizard} onImported={() => void reload()} />
+          <GcodeImportDialog productId={product.id} state={importer.gcodeConfirm} sizeOptionId={sizeOptionId} targetLabel={label}
+            onClose={importer.closeGcodeConfirm} onImported={() => void reload()} />
           <SlotFilamentDialog product={product} component={dialog?.kind === 'filament' ? target : null}
             colorIndex={dialog?.kind === 'filament' ? dialog.colorIndex : 0} open={dialog?.kind === 'filament'}
             scopeLabel={label} stock={stock} onClose={() => setDialog(null)} onSaved={() => void reload()} />
