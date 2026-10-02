@@ -6,7 +6,7 @@ import { AlertTriangle } from 'lucide-react';
 import { filamentLabel } from '@printforge/types';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Swatch, swatchHex } from '@/components/ui/swatch';
+import { FilamentColourDot } from '@/components/filaments/ColourDot';
 import { useFormatCurrency } from '@/lib/locale-context';
 import type { FilamentStockRow, FilamentStockSpool, StockStatus } from '@/lib/types/api';
 
@@ -84,10 +84,14 @@ interface FilamentsTableProps {
   spoolHits: Record<string, FilamentStockSpool[]>;
   /** Runs before opening a filament, so the list URL is current when the user presses Back. */
   onBeforeNavigate: () => void;
+  /** ADMIN/OPERATOR: a row's colour dot opens the colour editor. */
+  canEditColour: boolean;
+  /** A row's colour was saved (bare hex, or null when cleared). */
+  onColourSaved: (materialId: string, colorHex: string | null) => void;
 }
 
 /** The Filaments list table: the same 7 columns as before, the less important ones hidden on small screens. */
-export function FilamentsTable({ rows, spoolHits, onBeforeNavigate }: FilamentsTableProps) {
+export function FilamentsTable({ rows, spoolHits, onBeforeNavigate, canEditColour, onColourSaved }: FilamentsTableProps) {
   const router = useRouter();
   const formatCurrency = useFormatCurrency();
 
@@ -123,7 +127,7 @@ export function FilamentsTable({ rows, spoolHits, onBeforeNavigate }: FilamentsT
               <TableCell>
                 <div className="flex items-start gap-2">
                   <span className="pt-[3px]">
-                    <Swatch hex={swatchHex(m.colorHex)} title={label} />
+                    <FilamentColourDot material={m} title={label} canEdit={canEditColour} onSaved={(hex) => onColourSaved(m.id, hex)} />
                   </span>
                   <div className="min-w-0">
                     <Link

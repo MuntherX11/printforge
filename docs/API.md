@@ -88,6 +88,14 @@ Upload an XLSX/CSV file. Columns: name, type, color, brand, costPerGram, density
 
 **Content-Type:** `multipart/form-data` (field: `file`)
 
+#### POST /materials/:id/merge
+**Roles:** ADMIN. Body (allowlisted): `{ "targetMaterialId": "…", "confirm": true }`.
+Moves every reference of this filament (part filaments, multicolour slots, colour option
+filaments, job lines, job plate snapshots, printed-stock colour keys and their history,
+retired spools) to the target, then deletes this filament. Without `confirm` it is a dry run
+returning `{ merged: false, source, target, counts, warnings }`. 409 for a different material
+type or an active spool on this filament. Writes its own audit row; reprices the touched products.
+
 ### Spools
 
 #### POST /spools

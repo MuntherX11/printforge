@@ -182,7 +182,7 @@ describe('ProductionPlannerService.readiness', () => {
     expect(r.components[0]).toMatchObject({ unitsRequired: 10, plates: [{ unitsPerPlate: 12, plateCount: 1 }], surplus: 2, colourKey: key([0, M.red]), colourLabel: 'PLA Red' });
     const f = r.filament[0];
     expect(f).toMatchObject({ materialId: M.red, slicedMaterialId: M.black, gramsNeeded: 112.8, totalStock: 300, reserved: 250, free: 50, hasEnough: false });
-    expect(f.suggestedSpool).toEqual({ id: 'sr', pfid: 'PF-1', location: 'Shelf A', effectiveRemaining: 50 });
+    expect(f.suggestedSpool).toEqual({ id: 'sr', pfid: 'PF-1', location: 'Shelf A', effectiveRemaining: 50, materialId: M.red, materialName: 'PLA Red' });
     expect(f.spoolHasEnough).toBe(false);
     expect(r.ready).toBe(false);
     expect(r.productionReady).toBe(true);

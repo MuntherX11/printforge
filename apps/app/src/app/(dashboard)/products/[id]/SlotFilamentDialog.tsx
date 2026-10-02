@@ -122,7 +122,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
     <Dialog open={open} onClose={writer.saving ? () => undefined : onClose} title={`Filament — ${part}`} className="max-w-md">
       <div className="space-y-3">
         <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-          Now: <Swatch hex={swatchHex(slot.material?.colorHex)} title={now.primary} />
+          Now: <Swatch hex={swatchHex(slot.material?.colorHex)} name={slot.material ? slot.material.color || slot.material.name : null} title={now.primary} />
           <span className="font-medium">{now.primary}</span>
           <span className="text-xs text-gray-500 dark:text-gray-400">· {now.secondary ? `${now.secondary} · ` : ''}{formatGrams(slot.grams)} per unit</span>
         </p>
@@ -144,7 +144,7 @@ export function SlotFilamentDialog({ product, component: c, colorIndex, open, sc
         {writer.impact && picked && (
           <>
             <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-              Change to: <Swatch hex={swatchHex(picked.colorHex)} title={filamentLabel(picked).primary} />
+              Change to: <Swatch hex={swatchHex(picked.colorHex)} name={picked.color || picked.name} title={filamentLabel(picked).primary} />
               <span className="font-medium">{filamentLabel(picked).text}</span>
             </p>
             <ImpactList impact={writer.impact} />

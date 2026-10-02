@@ -10,12 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Loading } from '@/components/ui/loading';
 import { Swatch, swatchHex } from '@/components/ui/swatch';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import type { ApiMaterialDetail, ApiLocation, ApiSpool } from '@/lib/types/api';
 import type { ScannedFields } from '@/components/spool-label-scanner';
 import { formatDate } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
-import { Plus, Pencil, Trash2, ScanLine, QrCode, Image as ImageIcon } from 'lucide-react';
+import { Plus, Pencil, Trash2, ScanLine, QrCode, Image as ImageIcon, Merge } from 'lucide-react';
 import dynamic from 'next/dynamic';
 const SpoolLabelScanner = dynamic(
   () => import('@/components/spool-label-scanner').then(m => ({ default: m.SpoolLabelScanner })),
@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/toast';
 import { EditMaterialIdentity } from './EditMaterialIdentity';
 import { DeleteSpoolDialog } from './DeleteSpoolDialog';
+import { MergeMaterialDialog } from './MergeMaterialDialog';
 
 export default function MaterialDetailPage() {
   const formatCurrency = useFormatCurrency();
@@ -46,6 +47,9 @@ export default function MaterialDetailPage() {
   const [scannedFields, setScannedFields] = useState<ScannedFields | null>(null);
   const [showDeleteMaterial, setShowDeleteMaterial] = useState(false);
   const [deletingMaterial, setDeletingMaterial] = useState(false);
+  /** The 409 text when Delete was refused because the filament is in use (the dialog then offers Merge into…). */
+  const [deleteBlocked, setDeleteBlocked] = useState<string | null>(null);
+  const [showMerge, setShowMerge] = useState(false);
   const [showDeleteSpool, setShowDeleteSpool] = useState<string | null>(null);
   const [showDeactivateSpool, setShowDeactivateSpool] = useState<string | null>(null);
   const [deactivatingSpool, setDeactivatingSpool] = useState<string | null>(null);
@@ -108,7 +112,8 @@ export default function MaterialDetailPage() {
         type: form.get('type') as string,
         // Brand, colour and hex go only when the user changed them (see
         // EditMaterialIdentity); the server stores '' as null.
-        ...(form.has('color') ? { brand: form.get('brand') as string, color: form.get('color') as string, colorHex: form.get('colorHex') as string } : {}),
+        ...(form.has('color') ? { brand: form.get('brand') as string, color: form.get('color') as string } : {}),
+        ...(form.has('colorHex') ? { colorHex: form.get('colorHex') as string } : {}),
         spoolPrice: parseFloat(form.get('spoolPrice') as string),
         spoolWeightGrams: parseFloat(form.get('spoolWeightGrams') as string) || 1000,
         density: parseFloat(form.get('density') as string) || 1.24,
@@ -165,9 +170,15 @@ export default function MaterialDetailPage() {
       await api.delete(`/materials/${id}`);
       router.push('/inventory');
     } catch (err: unknown) {
-      toast('error', (err as Error).message);
+      if (err instanceof ApiError && err.status === 409) setDeleteBlocked(err.message);
+      else toast('error', (err as Error).message);
       setDeletingMaterial(false);
     }
+  }
+
+  function closeDeleteMaterial() {
+    setShowDeleteMaterial(false);
+    setDeleteBlocked(null);
   }
 
   function toggleSpoolSelection(spoolId: string) {
@@ -282,7 +293,7 @@ export default function MaterialDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Swatch hex={swatchHex(material.colorHex)} title={material.color || material.name} />
+            <Swatch hex={swatchHex(material.colorHex)} name={material.color || material.name} title={material.color || material.name} />
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{material.name}</h1>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">{[material.brand, material.type, material.color].filter(Boolean).join(' · ')}</p>
@@ -291,6 +302,11 @@ export default function MaterialDetailPage() {
           {(user?.role === 'ADMIN' || user?.role === 'OPERATOR') && (
             <Button variant="outline" onClick={() => setShowEditMaterial(true)}>
               <Pencil className="h-4 w-4 mr-2" /> Edit
+            </Button>
+          )}
+          {user?.role === 'ADMIN' && (
+            <Button variant="outline" onClick={() => setShowMerge(true)}>
+              <Merge className="h-4 w-4 mr-2" /> Merge into…
             </Button>
           )}
           {user?.role === 'ADMIN' && (
@@ -587,19 +603,38 @@ export default function MaterialDetailPage() {
         }}
       />
 
-      <Dialog open={showDeleteMaterial} onClose={() => setShowDeleteMaterial(false)} title="Delete Material">
-        <div className="space-y-4 pt-2">
-          <p className="text-sm text-gray-500">
-            Are you sure you want to delete this material and all its spools? This cannot be undone.
-          </p>
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="outline" onClick={() => setShowDeleteMaterial(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteMaterial} disabled={deletingMaterial}>
-              {deletingMaterial ? 'Deleting...' : 'Delete Material'}
-            </Button>
+      <Dialog open={showDeleteMaterial} onClose={closeDeleteMaterial} title="Delete Material">
+        {deleteBlocked ? (
+          <div className="space-y-4 pt-2">
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">{deleteBlocked}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              To get rid of it anyway, merge it into another filament of the same type: everything that uses it moves there.
+            </p>
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="outline" onClick={closeDeleteMaterial}>Cancel</Button>
+              <Button onClick={() => { closeDeleteMaterial(); setShowMerge(true); }}>
+                <Merge className="h-4 w-4 mr-2" /> Merge into…
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-gray-500">
+              Are you sure you want to delete this material and all its spools? This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="outline" onClick={closeDeleteMaterial}>Cancel</Button>
+              <Button variant="destructive" onClick={handleDeleteMaterial} disabled={deletingMaterial}>
+                {deletingMaterial ? 'Deleting...' : 'Delete Material'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Dialog>
+
+      {user?.role === 'ADMIN' && (
+        <MergeMaterialDialog material={material} open={showMerge} onClose={() => setShowMerge(false)} />
+      )}
 
       <DeleteSpoolDialog
         spoolId={showDeleteSpool}

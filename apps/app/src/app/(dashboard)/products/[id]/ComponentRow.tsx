@@ -89,7 +89,7 @@ export function ComponentRow(props: Props) {
             const stockRow = s.material ? props.stock?.get(s.material.id) : undefined;
             const chip = (
               <>
-                <Swatch hex={s.material?.colorHex} title={label.primary} />
+                <Swatch hex={s.material?.colorHex} name={s.material ? s.material.color || s.material.name : null} title={label.primary} />
                 <span className="text-gray-800 dark:text-gray-200">{label.primary}</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">{[label.secondary, formatGrams(s.grams)].filter(Boolean).join(' · ')}</span>
               </>

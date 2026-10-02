@@ -138,7 +138,7 @@ export function ColoursTable(props: Props) {
                     {slots.map(s => {
                       const a = c.assignments.find(x => x.colourSlotId === s.id);
                       return a
-                        ? <Swatch key={s.id} hex={a.material.colorHex} title={`${s.name}: ${a.material.name}`} />
+                        ? <Swatch key={s.id} hex={a.material.colorHex} name={a.material.color || a.material.name} title={`${s.name}: ${a.material.name}`} />
                         : <Swatch key={s.id} hollow title={`${s.name}: as sliced`} />;
                     })}
                   </span>

@@ -5,7 +5,7 @@ import { AuditService } from './audit.service';
 const AUDIT_METHODS = ['POST', 'PATCH', 'PUT', 'DELETE'];
 
 /** Routes whose service writes its own audit row inside its transaction (with the amounts): a generic row would duplicate it. Tested on the route pattern. */
-const SELF_AUDITED = /\/invoices\/[^/]+\/unpay$/;
+const SELF_AUDITED = /\/invoices\/[^/]+\/unpay$|\/materials\/[^/]+\/merge$/;
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
