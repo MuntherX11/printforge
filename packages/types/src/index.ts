@@ -169,11 +169,17 @@ export interface ApiResponse<T = unknown> {
 
 // ============ 3MF PARSER ============
 
+// A slot's slicer filament and how imports map it to a shop filament.
+export * from './slicer-filament';
+import type { FilamentSlotMatch, SlicerFilament } from './slicer-filament';
+
 export interface ThreeMfToolInfo {
   index: number;
   filamentGrams: number;
   colorHex?: string;
   materialType?: string;
+  /** The slot's filament profile, vendor and colour name (plate G-code header, else project_settings). */
+  filament?: SlicerFilament;
 }
 
 export interface ThreeMfPlateInfo {
@@ -196,6 +202,8 @@ export interface ThreeMfAnalysis {
   plates: ThreeMfPlateInfo[];
   /** The printer the project was sliced for (project_settings.config, else a plate's G-code); null = unknown. */
   printerModel?: string | null;
+  /** With ?matchFilaments=1: each used slot and the shop filament an import maps it to. Read-only. */
+  filamentMatches?: FilamentSlotMatch[];
 }
 
 export interface OnboardThreeMfDto {

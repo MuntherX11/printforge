@@ -2,7 +2,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import JSZip from 'jszip';
 import { GcodeParserService } from './gcode-parser.service';
 import { printerModelFromProjectSettings } from './printer-model';
-import { ThreeMfAnalysis, ThreeMfPlateInfo, ThreeMfToolInfo } from '@printforge/types';
+import { filamentsFromProjectSettings } from './slicer-filament';
+import { SlicerFilament, ThreeMfAnalysis, ThreeMfPlateInfo, ThreeMfToolInfo } from '@printforge/types';
 
 @Injectable()
 export class ThreeMfParserService {
@@ -24,7 +25,18 @@ export class ThreeMfParserService {
     };
 
     const projectSettings = zip.file('Metadata/project_settings.config');
-    if (projectSettings) analysis.printerModel = printerModelFromProjectSettings(await projectSettings.async('string'));
+    // The project's filament list, by slot: what a plate without its own G-code header names.
+    let projectFilaments: SlicerFilament[] = [];
+    if (projectSettings) {
+      const text = await projectSettings.async('string');
+      analysis.printerModel = printerModelFromProjectSettings(text);
+      projectFilaments = filamentsFromProjectSettings(text);
+    }
+    const withIdentity = (t: ThreeMfToolInfo): ThreeMfToolInfo => {
+      if (t.filament) return t;
+      const f = projectFilaments[t.index];
+      return f && (f.profile || f.vendor) ? { ...t, filament: f } : t;
+    };
 
     // Parse slice_info.config for per-plate stats
     const sliceInfoFile = zip.file('Metadata/slice_info.config');
@@ -108,6 +120,7 @@ export class ThreeMfParserService {
               filamentGrams: t.filamentGrams || 0,
               colorHex: t.colorHex,
               materialType: t.materialType,
+              ...(t.filament ? { filament: t.filament } : {}),
             }));
           }
 
@@ -124,6 +137,8 @@ export class ThreeMfParserService {
           if (gcodeAnalysis.slicer) analysis.slicer = analysis.slicer ?? gcodeAnalysis.slicer;
           if (gcodeAnalysis.printerModel) analysis.printerModel = analysis.printerModel ?? gcodeAnalysis.printerModel;
         }
+
+        plate.tools = plate.tools.map(withIdentity);
 
         if (pngFile) {
           const pngBuffer = await pngFile.async('nodebuffer');

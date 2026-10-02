@@ -1,0 +1,133 @@
+import { threeMf } from '../products/__fixtures__/slicer-files';
+import { GcodeParserService } from './gcode-parser.service';
+import { cleanProfile, cleanVendor, filamentsFromProjectSettings, profileColourName, slicerFilament, splitSlicerList } from './slicer-filament';
+import { ThreeMfParserService } from './threemf-parser.service';
+
+/**
+ * Filament identity from slicer files. The header lines are copied from the
+ * owner's own G-code and 3MF projects ("Box x 12.gcode", the Fish and Sardine
+ * keychains, Bambu/Orca projects).
+ */
+
+describe('slicer filament identity', () => {
+  it('splits quoted and plain slicer lists by position', () => {
+    expect(splitSlicerList('"eSUN PLA+ @System";"Creality Generic PLA @Hi-all"')).toEqual(['eSUN PLA+ @System', 'Creality Generic PLA @Hi-all']);
+    expect(splitSlicerList('eSUN;Generic;Generic')).toEqual(['eSUN', 'Generic', 'Generic']);
+    expect(splitSlicerList('Plamore')).toEqual(['Plamore']);
+    expect(splitSlicerList('"Prusament PLA"')).toEqual(['Prusament PLA']);
+  });
+
+  it('profile names lose the printer suffix and the project tag', () => {
+    expect(cleanProfile('eSUN PLA+ Fire Engine Red @BBL X1C')).toBe('eSUN PLA+ Fire Engine Red');
+    expect(cleanProfile('eSUN PLA Blue @Creality Ender-3 V3 0.4 nozzle(Nus print file (5).3mf)')).toBe('eSUN PLA Blue');
+    expect(cleanProfile('eSUN PLA+ @System(HUNTER X HUNTER Chocorobo V5 mini.3mf)')).toBe('eSUN PLA+');
+    expect(cleanProfile('Bambu PLA Basic red@BBL X1C - Kopieren')).toBe('Bambu PLA Basic red');
+    expect(cleanProfile('(BE THE RED FISH v3.0 engraved white reveal.3mf)')).toBeNull();
+    expect(cleanProfile('')).toBeNull();
+  });
+
+  it('Generic, (Undefined) and blank vendors are no brand', () => {
+    expect([cleanVendor('Generic'), cleanVendor('(Undefined)'), cleanVendor('  '), cleanVendor(undefined)]).toEqual([null, null, null, null]);
+    expect([cleanVendor('eSUN'), cleanVendor('Bambu Lab'), cleanVendor('Prusa Polymers')]).toEqual(['eSUN', 'Bambu Lab', 'Prusa Polymers']);
+  });
+
+  it('the colour name is the profile minus vendor, type and line words — only after a type word', () => {
+    const table: Array<[string, string | null, string | null, string | null]> = [
+      ['eSUN PLA+ Fire Engine Red', 'eSUN', 'PLA', 'Fire Engine Red'],
+      ['Bambu PLA Basic Beige', 'Bambu Lab', 'PLA', 'Beige'],
+      ['eSUN PLA Blue', 'eSUN', 'PLA', 'Blue'],
+      ['Esun PETG PETG Grey', 'Esun', 'PETG', 'Grey'],
+      ['Ankermake PLA White', 'Ankermake', 'PLA', 'White'],
+      ['Bambu PLA Basic red', 'Bambu Lab', 'PLA', 'Red'],
+      ['Bambulab PLA Red X1C', 'Bambu Lab', 'PLA', 'Red'],
+      ['Bambu PLA Matte Ivory White', 'Bambu Lab', 'PLA', 'Ivory White'],
+      ['Filamentum PLA Gold Happens', 'Filamentum', 'PLA', 'Gold Happens'],
+      ['Generic PLA Grey', null, 'PLA', 'Grey'],
+      ['eSUN PLA+', 'eSUN', 'PLA', null],
+      ['eSUN PLA+ Multi', 'eSUN', 'PLA', null],
+      ['Bambu PLA Basic', 'Bambu Lab', 'PLA', null],
+      ['Creality Generic PLA', null, 'PLA', null],
+      ['Hyper PLA', 'Creality', 'PLA', null],
+      ['Prusament PLA', 'Prusa Polymers', 'PLA', null],
+      ['Plamore', 'eSUN', 'PLA', null],
+      ['No Fan 3', 'eSUN', 'PLA', null],
+      ['Gold', 'eSUN', 'PLA', null],
+      ['Bambu PETG HF', 'Bambu Lab', 'PETG', null],
+      ['Bambu TPU 95A HF', 'Bambu Lab', 'TPU', null],
+    ];
+    for (const [profile, vendor, type, want] of table) expect([profile, profileColourName(profile, vendor, type)]).toEqual([profile, want]);
+  });
+
+  it('one slot: profile, vendor, type, hex and colour name; nothing → null', () => {
+    expect(slicerFilament('eSUN PLA+ Peach Pink @BBL X1C', 'eSUN', 'PLA', '#F5B6A5FF')).toEqual({
+      profile: 'eSUN PLA+ Peach Pink', vendor: 'eSUN', type: 'PLA', colorHex: 'F5B6A5', colorName: 'Peach Pink',
+    });
+    expect(slicerFilament(undefined, undefined, undefined, undefined)).toBeNull();
+  });
+
+  it('a 3MF project_settings.config lists every slot', () => {
+    const json = JSON.stringify({
+      filament_settings_id: ['Bambu PLA Basic @BBL X1C', 'eSUN PLA+ Fire Engine Red @BBL X1C', 'Generic PLA'],
+      filament_vendor: ['Bambu Lab', 'eSUN', 'Generic'],
+      filament_type: ['PLA', 'PLA', 'PLA'],
+      filament_colour: ['#FFFFFF', '#C12E1F', '#000000'],
+    });
+    expect(filamentsFromProjectSettings(json)).toEqual([
+      { profile: 'Bambu PLA Basic', vendor: 'Bambu Lab', type: 'PLA', colorHex: 'FFFFFF', colorName: null },
+      { profile: 'eSUN PLA+ Fire Engine Red', vendor: 'eSUN', type: 'PLA', colorHex: 'C12E1F', colorName: 'Fire Engine Red' },
+      { profile: 'Generic PLA', vendor: null, type: 'PLA', colorHex: '000000', colorName: null },
+    ]);
+    expect(filamentsFromProjectSettings('not json')).toEqual([]);
+  });
+});
+
+describe('parsers carry the identity on each tool', () => {
+  const parser = new GcodeParserService();
+
+  it('G-code header (Box x 12.gcode lines): five slots, Generic vendors are brandless', () => {
+    const text = [
+      '; generated by OrcaSlicer 2.3.0',
+      '; filament used [g] = 12.10, 3.20, 0.00, 0.00, 0.00',
+      '; filament_colour = #585858;#FBFBFA;#008800;#FFFFFF;#000000',
+      '; filament_settings_id = "eSUN PLA+ @System";"Creality Generic PLA @Hi-all";"Creality Generic PLA @Hi-all";"Creality Generic PLA @Hi-all";"Creality Generic PLA @Hi-all"',
+      '; filament_type = PLA;PLA;PLA;PLA;PLA',
+      '; filament_vendor = eSUN;Generic;Generic;Generic;Generic',
+    ].join('\n');
+    const a = parser.parse(text);
+    expect(a.filaments).toHaveLength(5);
+    expect(a.tools[0].filament).toEqual({ profile: 'eSUN PLA+', vendor: 'eSUN', type: 'PLA', colorHex: '585858', colorName: null });
+    expect(a.tools[1].filament).toEqual({ profile: 'Creality Generic PLA', vendor: null, type: 'PLA', colorHex: 'FBFBFA', colorName: null });
+  });
+
+  it('G-code header with a colour-named profile (Ender-3 V3 bookmark)', () => {
+    const a = parser.parse([
+      '; filament used [g] = 8.50',
+      '; filament_colour = #26A69A',
+      '; filament_settings_id = "eSUN PLA Blue @Creality Ender-3 V3 0.4 nozzle"',
+      '; filament_type = PLA',
+      '; filament_vendor = eSUN',
+    ].join('\n'));
+    expect(a.tools[0].filament).toMatchObject({ profile: 'eSUN PLA Blue', vendor: 'eSUN', colorName: 'Blue', colorHex: '26A69A' });
+  });
+
+  it('a G-code without profile or vendor lines has no identity (unchanged output)', () => {
+    const a = parser.parse('; filament used [g] = 8.50\n; filament_colour = #26A69A\n; filament_type = PLA\n');
+    expect(a.tools[0].filament).toBeUndefined();
+  });
+
+  it('a 3MF plate without embedded G-code takes the identity from project_settings, by slot', async () => {
+    const buf = await threeMf([{ index: 1, seconds: 600, weight: 20, filaments: [{ id: 2, type: 'PLA', color: '#C12E1F', grams: 20 }] }], {
+      projectSettings: {
+        filament_settings_id: ['Bambu PLA Basic @BBL X1C', 'eSUN PLA+ Fire Engine Red @BBL X1C'],
+        filament_vendor: ['Bambu Lab', 'eSUN'],
+        filament_type: ['PLA', 'PLA'],
+        filament_colour: ['#FFFFFF', '#C12E1F'],
+      },
+    });
+    const a = await new ThreeMfParserService(parser).parse(buf);
+    expect(a.plates[0].tools).toEqual([{
+      index: 1, filamentGrams: 20, colorHex: '#C12E1F', materialType: 'PLA',
+      filament: { profile: 'eSUN PLA+ Fire Engine Red', vendor: 'eSUN', type: 'PLA', colorHex: 'C12E1F', colorName: 'Fire Engine Red' },
+    }]);
+  });
+});

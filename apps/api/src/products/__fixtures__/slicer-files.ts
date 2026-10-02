@@ -17,6 +17,10 @@ export interface GcodeOpts {
   /** Klipper instance labels (EXCLUDE_OBJECT_DEFINE) */
   labels?: string[];
   changes?: number;
+  /** `; filament_settings_id = "a";"b"` (profile names, " @printer" suffix and all) */
+  settings?: string[];
+  /** `; filament_vendor = a;b` */
+  vendors?: string[];
 }
 
 export function gcode(o: GcodeOpts): Buffer {
@@ -35,6 +39,8 @@ export function gcode(o: GcodeOpts): Buffer {
   if (o.changes !== undefined) lines.push(`; total filament change = ${o.changes}`);
   if (o.colours) lines.push(`; filament_colour = ${o.colours.join(';')}`);
   if (o.types) lines.push(`; filament_type = ${o.types.join(';')}`);
+  if (o.settings) lines.push(`; filament_settings_id = ${o.settings.map((x) => `"${x}"`).join(';')}`);
+  if (o.vendors) lines.push(`; filament_vendor = ${o.vendors.join(';')}`);
   return Buffer.from(lines.join('\n') + '\n');
 }
 
@@ -52,9 +58,10 @@ export interface PlateSpec {
   filaments?: Array<{ id: number; type: string; color: string; grams: number }>;
 }
 
-export async function threeMf(plates: PlateSpec[], opts: { sliceInfo?: boolean } = {}): Promise<Buffer> {
+export async function threeMf(plates: PlateSpec[], opts: { sliceInfo?: boolean; projectSettings?: Record<string, unknown> } = {}): Promise<Buffer> {
   const zip = new JSZip();
   zip.file('3D/3dmodel.model', '<model/>');
+  if (opts.projectSettings) zip.file('Metadata/project_settings.config', JSON.stringify(opts.projectSettings));
   if (opts.sliceInfo !== false) {
     const xml = plates
       .filter((p) => p.seconds !== undefined || p.weight !== undefined || opts.sliceInfo === true)

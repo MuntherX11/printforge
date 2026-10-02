@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { detectPlateObjects, PlateObjects } from './object-labels';
 import { detectPrinterModel } from './printer-model';
+import type { SlicerFilament } from '@printforge/types';
+import { slicerFilaments, splitSlicerList } from './slicer-filament';
 
 export interface ToolInfo {
   index: number;
@@ -8,6 +10,8 @@ export interface ToolInfo {
   filamentGrams?: number;
   colorHex?: string;
   materialType?: string;
+  /** The slot's filament profile, vendor and colour name (filament_settings_id / filament_vendor). */
+  filament?: SlicerFilament;
 }
 
 export interface GcodeAnalysis extends PlateObjects {
@@ -27,6 +31,8 @@ export interface GcodeAnalysis extends PlateObjects {
   filamentColors: string[];
   /** The printer the file was sliced for (printer-model.ts); null = the file doesn't say. */
   printerModel: string | null;
+  /** Every slot's filament identity, by slot index; [] when the file names no profile or vendor. */
+  filaments: SlicerFilament[];
 }
 
 @Injectable()
@@ -63,6 +69,7 @@ export class GcodeParserService {
       tools: [],
       filamentColors: [],
       printerModel: detectPrinterModel(text),
+      filaments: [],
     };
 
     result.slicer = this.detectSlicer(searchLines);
@@ -76,6 +83,8 @@ export class GcodeParserService {
     let perToolCm3: number[] = [];
     let filamentColors: string[] = [];
     let filamentTypes: string[] = [];
+    let filamentProfiles: string[] = [];
+    let filamentVendors: string[] = [];
 
     for (const line of searchLines) {
       const trimmed = line.trim();
@@ -172,6 +181,12 @@ export class GcodeParserService {
         }
       }
 
+      // Filament identity: ; filament_settings_id = "eSUN PLA+ @BBL X1C";"…"  and  ; filament_vendor = eSUN;…
+      const filProfiles = comment.match(/^filament_settings_id\s*=\s*(.+)/i);
+      if (filProfiles) filamentProfiles = splitSlicerList(filProfiles[1]);
+      const filVendors = comment.match(/^filament_vendor\s*=\s*(.+)/i);
+      if (filVendors) filamentVendors = splitSlicerList(filVendors[1]);
+
       // Creality/other single-tool filament
       const crealityFil = comment.match(/Filament Usage:\s*([\d.]+)\s*mm/i);
       if (crealityFil) {
@@ -234,6 +249,8 @@ export class GcodeParserService {
       result.filamentUsedGrams = Math.round(volumeCm3 * 1.24 * 100) / 100;
     }
 
+    result.filaments = slicerFilaments({ profiles: filamentProfiles, vendors: filamentVendors, types: filamentTypes, colours: filamentColors });
+
     // Build per-tool info
     const toolCount = Math.max(perToolMm.length, perToolGrams.length, perToolCm3.length, filamentColors.length);
     if (toolCount > 0) {
@@ -244,6 +261,7 @@ export class GcodeParserService {
         if (perToolGrams[i] !== undefined) tool.filamentGrams = perToolGrams[i];
         if (filamentColors[i]) tool.colorHex = filamentColors[i];
         if (filamentTypes[i]) tool.materialType = filamentTypes[i].toUpperCase();
+        if (result.filaments[i]?.profile || result.filaments[i]?.vendor) tool.filament = result.filaments[i];
 
         // Convert mm to grams per-tool if needed
         if (tool.filamentMm && !tool.filamentGrams) {
