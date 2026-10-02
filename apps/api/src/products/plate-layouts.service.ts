@@ -7,8 +7,8 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { requiredNumber } from '../common/utils/validate-number';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
-import { adoptDefaultPrinter } from './plate-file-rules';
-import { ACTIVE_JOBS, TX_OPTS, unlinkAfterCommit, unreferencedAttachments } from './product-locks';
+import { adoptDefaultPrinter, fileInUseError, openJobUsingFiles, openJobUsingPlates } from './plate-file-rules';
+import { TX_OPTS, unlinkAfterCommit, unreferencedAttachments } from './product-locks';
 import { slicerAttachmentData, StoredFile, unlinkWritten, writeUploadFile } from './slicer-files';
 import {
   COLOR_CHANGES_BOUNDS, GRAMS_BOUNDS, MINUTES_BOUNDS, parseLayoutCreate, parseLayoutPatch, UNITS_BOUNDS,
@@ -279,21 +279,27 @@ export class PlateLayoutsService {
     return this.view(this.prisma, layoutId);
   }
 
-  /** M5: open job → 409; used by history → deactivated; else deleted with its file. */
-  async remove(productId: string, componentId: string, layoutId: string): Promise<{ deleted: true } | { deactivated: true }> {
+  /**
+   * M5. An open job planning the layout or printing its file → 409 naming the
+   * job. Used by finished jobs → deactivated (their plate rows keep pointing at
+   * it) but its file is deleted all the same; else deleted with its file.
+   */
+  async remove(productId: string, componentId: string, layoutId: string): Promise<{ deleted: true; fileDeleted: boolean } | { deactivated: true; fileDeleted: boolean }> {
     const out = await this.prisma.$transaction(async (tx: any) => {
       const { layout } = await this.ownedLayout(tx, productId, componentId, layoutId);
-      const open = await tx.productionJob.count({ where: { status: { in: ACTIVE_JOBS }, plates: { some: { layoutId } } } });
-      if (open > 0) throw new ConflictException('This layout is planned on an open job — finish or cancel the job first');
+      const open = (await openJobUsingPlates(tx, { layoutId })) ?? (await openJobUsingFiles(tx, [layout.attachmentId]));
+      if (open) throw fileInUseError(open, `The ×${layout.unitsPerPlate} plate`);
       const history = await tx.jobPlate.count({ where: { layoutId } });
       if (history > 0) {
-        await tx.plateLayout.update({ where: { id: layoutId }, data: { isActive: false } });
-        return { result: { deactivated: true as const }, unlink: [] as Array<string | null> };
+        await tx.plateLayout.update({ where: { id: layoutId }, data: { isActive: false, attachmentId: null, gcodeFilename: null } });
+      } else {
+        await tx.plateLayout.delete({ where: { id: layoutId } });
       }
-      await tx.plateLayout.delete({ where: { id: layoutId } });
       const orphans = await unreferencedAttachments(tx, [layout.attachmentId]);
       for (const o of orphans) await tx.attachment.delete({ where: { id: o.id } });
-      return { result: { deleted: true as const }, unlink: orphans.map((o) => o.abs) };
+      const fileDeleted = orphans.length > 0;
+      const result = history > 0 ? { deactivated: true as const, fileDeleted } : { deleted: true as const, fileDeleted };
+      return { result, unlink: orphans.map((o) => o.abs) };
     }, TX_OPTS);
     await unlinkAfterCommit(out.unlink);
     return out.result;

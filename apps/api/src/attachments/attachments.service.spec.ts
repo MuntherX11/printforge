@@ -51,11 +51,21 @@ describe('AttachmentsService', () => {
     it.each([
       ['ProductComponent.attachmentId / thumbnailAttachmentId', 'productComponent'],
       ['PlateLayout.attachmentId', 'plateLayout'],
-      ['JobPlate.attachmentId', 'jobPlate'],
     ] as const)('refuses an attachment referenced by %s (409)', async (_label, table) => {
       prisma.attachment.findUnique.mockResolvedValue({ id: 'a1', entityType: 'order', entityId: 'o1', storagePath: 'x' });
       (prisma[table].findFirst as jest.Mock).mockResolvedValue({ id: 'ref' });
       await expect(svc.remove('a1')).rejects.toThrow(new ConflictException('This file is used by a product or job'));
+      expect(prisma.attachment.delete).not.toHaveBeenCalled();
+    });
+
+    it("refuses a file an open job's plate prints, naming the job (409)", async () => {
+      prisma.attachment.findUnique.mockResolvedValue({ id: 'a1', entityType: 'order', entityId: 'o1', storagePath: 'x' });
+      prisma.jobPlate.findFirst.mockResolvedValue({ job: { id: 'j1', name: 'Box ×24', status: 'IN_PROGRESS' } } as any);
+      await expect(svc.remove('a1')).rejects.toThrow(
+        new ConflictException('This file is printed by job "Box ×24" (in progress) — finish or cancel that job first'),
+      );
+      const where = (prisma.jobPlate.findFirst.mock.calls[0] as any)[0].where;
+      expect(where).toEqual({ attachmentId: { in: ['a1'] }, job: { status: { in: ['QUEUED', 'IN_PROGRESS', 'PAUSED'] } } });
       expect(prisma.attachment.delete).not.toHaveBeenCalled();
     });
 

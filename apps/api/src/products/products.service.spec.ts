@@ -180,9 +180,9 @@ describe('ProductsService (§7.1 items 13, 29, 42)', () => {
 
     it('P14: blocked by an open job → 409; by printed stock > 0 → 409', async () => {
       const h = productsHarness([sardineRow()]);
-      const j = addJob(h.db, { status: 'IN_PROGRESS' });
+      const j = addJob(h.db, { status: 'IN_PROGRESS', name: 'Sardine ×12' });
       h.db.insert('jobPlate', { jobId: j.id, componentId: 'c4', attachmentId: null });
-      await expect(h.components.remove(P, 'c4')).rejects.toThrow('"Key" is used by 1 open jobs — finish or cancel them first');
+      await expect(h.components.remove(P, 'c4')).rejects.toThrow('"Key" is printed by job "Sardine ×12" (in progress) — finish or cancel that job first');
       h.db.insert('componentColourStock', { componentId: 'c5', colourKey: `0:${M.red}|1:${M.white}`, stockOnHand: 3 });
       await expect(h.components.remove(P, 'c5')).rejects.toThrow('"Band" has 3 printed units in stock — set its stock to 0 first');
       expect(h.db.t('productComponent')).toHaveLength(9);

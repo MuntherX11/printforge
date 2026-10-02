@@ -9,9 +9,10 @@ import {
   parseComponentCreate, parseComponentMaterials, parseComponentOrder, parseComponentPatch, parseStockSet,
 } from './product-input';
 import {
-  ACTIVE_JOBS, impactWarnings, lockOptions, mergeImpact, requireConfirm, TX_OPTS, unlinkAfterCommit, unreferencedAttachments,
+  impactWarnings, lockOptions, mergeImpact, requireConfirm, TX_OPTS, unlinkAfterCommit, unreferencedAttachments,
 } from './product-locks';
 import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
+import { fileInUseError, openJobUsingFiles, openJobUsingPlates } from './plate-file-rules';
 import { ProductsService } from './products.service';
 
 /**
@@ -290,10 +291,10 @@ export class ProductComponentsService {
     const comp = await this.owned(productId, componentId);
     const files: Array<string | null> = [];
     await this.prisma.$transaction(async (tx: any) => {
-      const open = await tx.productionJob.count({
-        where: { status: { in: ACTIVE_JOBS }, OR: [{ componentId }, { plates: { some: { componentId } } }] },
-      });
-      if (open > 0) throw new ConflictException(`"${comp.description}" is used by ${open} open jobs — finish or cancel them first`);
+      const layoutFiles = await tx.plateLayout.findMany({ where: { componentId }, select: { attachmentId: true } });
+      const open = (await openJobUsingPlates(tx, { componentId }))
+        ?? (await openJobUsingFiles(tx, [comp.attachmentId, ...layoutFiles.map((l: any) => l.attachmentId)]));
+      if (open) throw fileInUseError(open, `"${comp.description}"`);
       const row = await tx.productComponent.findUnique({ where: { id: componentId }, select: { stockOnHand: true } });
       const colour = await tx.componentColourStock.findMany({ where: { componentId, stockOnHand: { gt: 0 } }, select: { stockOnHand: true } });
       const units = Math.max(0, row?.stockOnHand ?? 0) + colour.reduce((s: number, r: any) => s + r.stockOnHand, 0);

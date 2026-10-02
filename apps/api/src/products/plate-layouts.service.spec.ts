@@ -159,22 +159,34 @@ describe('M4 / M5', () => {
     expect(await statusOf(svc.remove('p-other', 'c1', 'l1'))).toBe(404);
   });
 
-  it('M5: open job → 409; history → deactivated; otherwise deleted with its file', async () => {
+  it('M5: open job → 409 naming it; history → deactivated, its file deleted; otherwise deleted with its file', async () => {
     const { svc, h } = setup();
-    const open = addJob(h.db, { status: 'QUEUED', productId: P });
+    const open = addJob(h.db, { status: 'QUEUED', productId: P, name: 'Box run' });
     h.db.insert('jobPlate', { jobId: open.id, layoutId: 'l1', componentId: 'c1' });
     expect(await statusOf(svc.remove(P, 'c1', 'l1'))).toBe(409);
+    await expect(svc.remove(P, 'c1', 'l1')).rejects.toThrow('printed by job "Box run" (queued) — finish or cancel that job first');
 
     const done = addJob(h.db, { status: 'COMPLETED', productId: P });
     h.db.insert('jobPlate', { jobId: done.id, layoutId: 'l2', componentId: 'c2' });
-    await expect(svc.remove(P, 'c2', 'l2')).resolves.toEqual({ deactivated: true });
+    await expect(svc.remove(P, 'c2', 'l2')).resolves.toEqual({ deactivated: true, fileDeleted: false });
     expect(h.db.t('plateLayout').find((l: any) => l.id === 'l2').isActive).toBe(false);
+
+    // A finished job's plate doesn't keep the file: the layout is kept inactive, the file goes.
+    const kept = await svc.create(P, 'c4', { assembledUploadId: UPLOAD, unitsPerPlate: 7 });
+    const keptAtt = h.db.t('attachment').find((a: any) => a.id === kept.layout.file!.attachmentId);
+    const keptAbs = path.join(dir, keptAtt.storagePath);
+    h.db.insert('jobPlate', { jobId: done.id, layoutId: kept.layout.id, componentId: 'c4', attachmentId: keptAtt.id });
+    await expect(svc.remove(P, 'c4', kept.layout.id)).resolves.toEqual({ deactivated: true, fileDeleted: true });
+    expect(h.db.t('plateLayout').find((l: any) => l.id === kept.layout.id)).toMatchObject({ isActive: false, attachmentId: null, gcodeFilename: null });
+    expect(h.db.t('attachment').some((a: any) => a.id === keptAtt.id)).toBe(false);
+    expect(fs.existsSync(keptAbs)).toBe(false);
+    expect(h.db.t('jobPlate').find((p: any) => p.layoutId === kept.layout.id).attachmentId).toBe(keptAtt.id);
 
     const { layout } = await svc.create(P, 'c4', { assembledUploadId: UPLOAD });
     const att = h.db.t('attachment').find((a: any) => a.id === layout.file!.attachmentId);
     const abs = path.join(dir, att.storagePath);
     expect(fs.existsSync(abs)).toBe(true);
-    await expect(svc.remove(P, 'c4', layout.id)).resolves.toEqual({ deleted: true });
+    await expect(svc.remove(P, 'c4', layout.id)).resolves.toEqual({ deleted: true, fileDeleted: true });
     expect(h.db.t('plateLayout').some((l: any) => l.id === layout.id)).toBe(false);
     expect(h.db.t('attachment')).toHaveLength(0);
     expect(fs.existsSync(abs)).toBe(false);

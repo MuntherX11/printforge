@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { fileInUseError, openJobUsingFiles } from '../products/plate-file-rules';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -144,15 +145,19 @@ export class AttachmentsService {
     if (isProductEntity(attachment.entityType)) {
       throw new BadRequestException('Manage product files from the product page');
     }
-    const [component, layout, jobPlate] = await Promise.all([
+    // An open job's plate keeps its file (409 naming the job); finished, failed
+    // and cancelled jobs keep their plate row, whose download then says the
+    // file was deleted.
+    const [component, layout, openJob] = await Promise.all([
       this.prisma.productComponent.findFirst({
         where: { OR: [{ attachmentId: id }, { thumbnailAttachmentId: id }] },
         select: { id: true },
       }),
       this.prisma.plateLayout.findFirst({ where: { attachmentId: id }, select: { id: true } }),
-      this.prisma.jobPlate.findFirst({ where: { attachmentId: id }, select: { id: true } }),
+      openJobUsingFiles(this.prisma, [id]),
     ]);
-    if (component || layout || jobPlate) {
+    if (openJob) throw fileInUseError(openJob);
+    if (component || layout) {
       throw new ConflictException('This file is used by a product or job');
     }
 

@@ -12,6 +12,7 @@ import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { WatchFolderService } from '../file-parser/watch-folder.service';
 import { ProductImageBackfillService } from './product-image-backfill.service';
 import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
+import { PlateLayoutsController } from './plate-layouts.controller';
 import { ProductsController } from './products.controller';
 import { ProductsModule } from './products.module';
 import { VariantsController } from './variants.controller';
@@ -91,6 +92,20 @@ describe('ProductsModule routes', () => {
       expect(reflector.get(ROLES_KEY, handler)).toEqual(['ADMIN', 'OPERATOR']);
       expect(reflector.get(GUARDS_METADATA, handler)).toContain(RolesGuard);
     }
+  });
+
+  it('registers the plate file routes once each, for ADMIN and OPERATOR only', () => {
+    for (const r of [
+      'POST /products/:id/components/:componentId/plate-layouts/:layoutId/file',
+      'DELETE /products/:id/components/:componentId/plate-layouts/:layoutId/file',
+      'POST /products/:id/components/:componentId/file',
+      'DELETE /products/:id/components/:componentId/file',
+    ]) {
+      expect(routes.filter((x) => x === r)).toHaveLength(1);
+    }
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, PlateLayoutsController)).toEqual(['ADMIN', 'OPERATOR']);
+    expect(reflector.get(GUARDS_METADATA, PlateLayoutsController)).toContain(RolesGuard);
   });
 
   it('the removed routes are gone', () => {

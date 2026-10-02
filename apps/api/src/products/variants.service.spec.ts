@@ -386,7 +386,7 @@ describe('VariantsService (§7.1 items 14, 33, 35, 41)', () => {
       expect(h.db.t('componentStockMovement')).toHaveLength(0);
     });
 
-    it("a size without history → its components go, and their unreferenced files are unlinked after commit", async () => {
+    it("a size without history → its components go, and files no open job prints are unlinked after commit", async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-var-'));
       const old = process.env.UPLOAD_DIR;
       process.env.UPLOAD_DIR = tmp;
@@ -398,13 +398,18 @@ describe('VariantsService (§7.1 items 14, 33, 35, 41)', () => {
         const shared = h.db.insert('attachment', { entityType: 'product', entityId: P, storagePath: 'shared.gcode', filename: 'shared.gcode', originalName: 'shared.gcode', sizeBytes: 1 });
         h.db.t('productComponent').find((c: any) => c.id === 'c6').attachmentId = own.id;
         h.db.t('plateLayout').find((l: any) => l.id === 'l7').attachmentId = shared.id;
-        const j = addJob(h.db, { status: 'DONE' });
-        h.db.insert('jobPlate', { jobId: j.id, componentId: null, attachmentId: shared.id });
+        // A finished job's plate doesn't keep a file; an open job's plate does.
+        const done = addJob(h.db, { status: 'COMPLETED' });
+        h.db.insert('jobPlate', { jobId: done.id, componentId: null, attachmentId: own.id });
+        const open = addJob(h.db, { status: 'QUEUED' });
+        h.db.insert('jobPlate', { jobId: open.id, componentId: null, attachmentId: shared.id });
         await h.variants.remove(P, OPT.large);
         expect(h.db.t('productComponent').filter((c: any) => c.variantId === OPT.large)).toHaveLength(0);
         expect(h.db.t('attachment').map((a: any) => a.id)).toEqual([shared.id]);
         expect(fs.existsSync(path.join(tmp, 'lbox.gcode'))).toBe(false);
         expect(fs.existsSync(path.join(tmp, 'shared.gcode'))).toBe(true);
+        // The finished job's plate row stays, pointing at the deleted file.
+        expect(h.db.t('jobPlate').find((p: any) => p.jobId === done.id).attachmentId).toBe(own.id);
       } finally {
         process.env.UPLOAD_DIR = old;
         fs.rmSync(tmp, { recursive: true, force: true });

@@ -154,8 +154,10 @@ const logger = new Logger('ProductFiles');
 
 /**
  * Attachments no longer referenced by any component (file or thumbnail), plate
- * layout or job plate, among `ids`. Call inside the transaction after the
- * deletes; returns the rows to delete and their contained paths to unlink.
+ * layout or open job's plate, among `ids`. Call inside the transaction after
+ * the deletes; returns the rows to delete and their contained paths to unlink.
+ * Plates of finished, failed and cancelled jobs don't keep a file: their row
+ * stays and its download says the file was deleted (owner spec 2026-10-02).
  */
 export async function unreferencedAttachments(db: Db, ids: Array<string | null | undefined>): Promise<Array<{ id: string; abs: string | null }>> {
   const out: Array<{ id: string; abs: string | null }> = [];
@@ -164,7 +166,7 @@ export async function unreferencedAttachments(db: Db, ids: Array<string | null |
       db.productComponent.count({ where: { attachmentId: id } }),
       db.productComponent.count({ where: { thumbnailAttachmentId: id } }),
       db.plateLayout.count({ where: { attachmentId: id } }),
-      db.jobPlate.count({ where: { attachmentId: id } }),
+      db.jobPlate.count({ where: { attachmentId: id, job: { status: { in: ACTIVE_JOBS } } } }),
     ]);
     if (comp + thumb + layout + plate > 0) continue;
     const att = await db.attachment.findUnique({ where: { id }, select: { id: true, storagePath: true } });

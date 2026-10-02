@@ -1120,6 +1120,8 @@ export interface ComponentDetail {
   thumbnailUrl: string | null;
   plateLayouts: ComponentPlateLayout[];
   problems: Problem[];
+  /** The ×1 and every active ×N plate with cost, price, margin, printer and file (owner spec 2026-10-02). */
+  plates?: ComponentPlateRow[];
 }
 
 export interface PriceTierRow {
@@ -1505,6 +1507,8 @@ export interface ResolvedLayout {
 /** POST /jobs/preview (J2): the P20 shape with creditOnComplete filled, plus each component's layouts. */
 export interface JobPreview extends Readiness {
   layoutsByComponent: Record<string, ResolvedLayout[]>;
+  /** The printer the suggested plates' files were sliced for (the dialog's default). */
+  printer?: PlatePrinterSuggestion;
 }
 
 /** POST /jobs (J1) body fields this release adds (the rest are as before). */
@@ -1717,6 +1721,8 @@ export interface JobPlateDetail {
   plateGrams: number;
   gcodeFilename: string | null;
   downloadUrl: string | null;
+  /** The plate had a file that was deleted from the product since (finished jobs keep their plates). */
+  fileDeleted?: boolean;
 }
 
 /** J3 `surplusByComponent[]`. */
@@ -1731,4 +1737,8 @@ export interface JobSurplusRow {
 
 // Units on a sliced plate from its object labels (G-code upload, 3MF wizard).
 export * from './plate-units';
+
+// Plates, their files and printers on the product page, jobs and plans.
+export * from './plate-files';
+import type { ComponentPlateRow, PlatePrinterSuggestion } from './plate-files';
 

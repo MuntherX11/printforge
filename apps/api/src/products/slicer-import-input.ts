@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { optionalNumber, requiredNumber } from '../common/utils/validate-number';
+import { allowedBody, optionalNumber, requiredNumber } from '../common/utils/validate-number';
 import { asBody, stripHtml } from './product-input';
 
 /**
@@ -240,4 +240,13 @@ export function parseLayoutPatch(raw: unknown): LayoutPatchInput {
     out.isActive = b.isActive;
   }
   return out;
+}
+
+/** Attach a staged G-code to a plate that has no file (owner spec 2026-10-02 item 3). */
+export function parseFileAttach(raw: unknown): { assembledUploadId: string } {
+  const b = allowedBody(raw, ['assembledUploadId']);
+  if (b.assembledUploadId === undefined || b.assembledUploadId === null || b.assembledUploadId === '') {
+    throw new BadRequestException('"assembledUploadId" is required');
+  }
+  return { assembledUploadId: id(b.assembledUploadId, 'assembledUploadId') };
 }

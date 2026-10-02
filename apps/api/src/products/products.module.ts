@@ -12,6 +12,7 @@ import { ProductImagesController } from './product-images.controller';
 import { ProductImagesService } from './product-images.service';
 import { ProductImportsController } from './product-imports.controller';
 import { OptionConversionService } from './option-conversion.service';
+import { PlateFilesService } from './plate-files.service';
 import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { PlateLayoutsController } from './plate-layouts.controller';
 import { PlateLayoutsService } from './plate-layouts.service';
@@ -27,7 +28,7 @@ import { VariantsService } from './variants.service';
   providers: [
     ProductsService, ProductComponentsService, VariantsService, ColourSlotsService,
     ProductOnboardingService, ProductImagesService, ProductImageBackfillService, PlateLayoutsService, PlateLayoutBackfillService,
-    OptionConversionService,
+    OptionConversionService, PlateFilesService,
   ],
   exports: [ProductsService, ProductImagesService],
 })
