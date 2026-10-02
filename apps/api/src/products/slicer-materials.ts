@@ -1,4 +1,4 @@
-import { normText, type FilamentMatchHow, type FilamentSlotMatch, type SlicerFilament } from '@printforge/types';
+import { normText, SHADE_RGB, type FilamentMatchHow, type FilamentSlotMatch, type SlicerFilament } from '@printforge/types';
 import { COLOUR_RGB, deltaE, hexToRgb } from '../common/utils/colour';
 import { colourWords } from '../file-parser/slicer-filament';
 
@@ -41,6 +41,26 @@ export function normaliseHex(raw: unknown): string | null {
 }
 
 /** Nearest common colour word for a hex (legacy `color` names). */
+/**
+ * Colour word for NAMING a filament an import creates: the nearest of the
+ * common words and the shade names by Delta E (perceptual), so a sardine red
+ * #CC3A2F reads "Fire Engine Red" rather than the RGB-nearest "Brown".
+ * Matching keeps using hexToColorName, unchanged.
+ */
+export function nameColourForHex(hex: string): string {
+  const toHex = ([r, g, b]: readonly number[]) => [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  let best = hexToColorName(hex);
+  let dist = Infinity;
+  for (const [name, rgb] of [...Object.entries(COLOUR_RGB), ...Object.entries(SHADE_RGB)]) {
+    const d = deltaE(hex, toHex(rgb));
+    if (d !== null && d < dist) {
+      dist = d;
+      best = name;
+    }
+  }
+  return best;
+}
+
 export function hexToColorName(hex: string): string {
   const rgb = hexToRgb(hex) ?? [0, 0, 0];
   let best = 'Black';
@@ -209,7 +229,8 @@ export function newMaterialData(slot: SlotFilament, materials: MatchableMaterial
   }
   const key = brandKey(slot.vendor);
   const brand = key ? (materials.find((m) => brandKey(m.brand) === key)?.brand?.trim() || slot.vendor) : null;
-  const color = slot.colorName ?? word;
+  // Branded: name the colour perceptually (a sardine red is 'Fire Engine Red', not 'Brown').
+  const color = slot.colorName ?? (hex ? nameColourForHex(hex) : null);
   let name = slot.profile ?? `${String(slot.rawType ?? slot.type).trim() || slot.type}`;
   if (slot.vendor && !namesVendor(name, slot.vendor) && !(brand && has(name, brand))) name = `${slot.vendor} ${name}`;
   if (color && !has(name, color)) name = `${name} ${color}`;

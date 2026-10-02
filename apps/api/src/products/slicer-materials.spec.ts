@@ -147,3 +147,12 @@ describe('the import plan shown before an import', () => {
     expect(plan[0].material).toEqual({ id: 'esun-fer', name: 'PLA Red', type: 'PLA', brand: 'eSun', color: 'Fire Engine Red', colorHex: '91202B' });
   });
 });
+
+describe('nameColourForHex', () => {
+  it('names a sardine red by perceptual distance, not RGB distance', () => {
+    const { nameColourForHex } = require('./slicer-materials');
+    expect(nameColourForHex('CC3A2F')).toBe('Fire Engine Red');
+    expect(nameColourForHex('F2E9D8')).toMatch(/White|Beige|Ivory/);
+    expect(nameColourForHex('000000')).toBe('Black');
+  });
+});
