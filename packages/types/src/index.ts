@@ -387,6 +387,9 @@ export * from './safe-next';
 // Edit Material's brand/colour state and "Other…" mode (pure).
 export * from './material-edit';
 
+// Merge one filament into another: body keys, dry-run counts, summary (pure).
+export * from './material-merge';
+
 // BOM filament picker: ranking, pick → write, request plans (pure).
 export * from './filament-pick';
 
