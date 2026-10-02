@@ -2,7 +2,9 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { PrismaService } from '../common/prisma/prisma.service';
 import { allowedBody } from '../common/utils/validate-number';
 import { type ComponentCreateInput, parseComponentCreate, parseProductCreate } from '../products/product-input';
+import { adoptDefaultPrinter } from '../products/plate-file-rules';
 import { assertSkuFree } from '../products/product-locks';
+import { slicerAttachmentData, unlinkWritten, writeUploadFile, type StoredFile } from '../products/slicer-files';
 import { GcodeParserService } from './gcode-parser.service';
 import { StlEstimatorService } from './stl-estimator.service';
 import * as fs from 'fs';
@@ -254,12 +256,43 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
       if (!material) throw new NotFoundException('Material not found');
     }
 
+    // The G-code is kept as the component's print file (owner spec: every
+    // uploaded G-code is stored). A file that can't be read or stored is
+    // logged and the product is still created, as before.
+    const stored = component && imp.fileType === 'gcode' ? await this.storeFile(imp) : null;
+    try {
+      return await this.writeProduct(params, component, grams, minutes, imp, stored);
+    } catch (e) {
+      if (stored) await unlinkWritten([stored]);
+      throw e;
+    }
+  }
+
+  private async storeFile(imp: PendingImport): Promise<StoredFile | null> {
+    try {
+      return await writeUploadFile(await fs.promises.readFile(imp.filePath), 'gcode');
+    } catch (e) {
+      this.logger.warn(`Could not keep ${imp.filename} as a print file: ${(e as Error)?.message}`);
+      return null;
+    }
+  }
+
+  private writeProduct(
+    params: WatchImportInput, component: ComponentCreateInput | null, grams: number, minutes: number,
+    imp: PendingImport, stored: StoredFile | null,
+  ) {
     return this.prisma.$transaction(async (tx: any) => {
       const product = await tx.product.create({
         data: { name: params.name, sku: params.sku, estimatedGrams: grams, estimatedMinutes: minutes },
         select: { id: true },
       });
       if (component) {
+        const att = stored
+          ? await tx.attachment.create({
+              data: slicerAttachmentData(product.id, stored, imp.filename, imp.analysis?.printerModel ?? null),
+              select: { id: true },
+            })
+          : null;
         await tx.productComponent.create({
           data: {
             productId: product.id,
@@ -271,8 +304,11 @@ export class WatchFolderService implements OnModuleInit, OnModuleDestroy {
             quantity: component.quantity,
             sortOrder: 0,
             stockConfirmedAt: new Date(),
+            attachmentId: att?.id ?? null,
+            gcodeFilename: att ? imp.filename.slice(0, 200) : null,
           },
         });
+        if (att) await adoptDefaultPrinter(tx, product.id, [imp.analysis?.printerModel ?? null]);
       }
       return tx.product.findUnique({ where: { id: product.id }, include: { components: { include: { material: true } } } });
     });

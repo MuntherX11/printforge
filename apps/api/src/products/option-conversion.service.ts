@@ -271,7 +271,7 @@ export class OptionConversionService {
         const units = input.unitsPerPlate;
 
         const att = file && stored
-          ? await tx.attachment.create({ data: slicerAttachmentData(productId, stored, file.originalname), select: { id: true } })
+          ? await tx.attachment.create({ data: slicerAttachmentData(productId, stored, file.originalname, file.analysis.printerModel), select: { id: true } })
           : null;
         const layout = await tx.plateLayout.create({
           data: {

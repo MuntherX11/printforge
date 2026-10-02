@@ -194,6 +194,8 @@ export interface ThreeMfAnalysis {
   slicer: string | null;
   totalPlates: number;
   plates: ThreeMfPlateInfo[];
+  /** The printer the project was sliced for (project_settings.config, else a plate's G-code); null = unknown. */
+  printerModel?: string | null;
 }
 
 export interface OnboardThreeMfDto {

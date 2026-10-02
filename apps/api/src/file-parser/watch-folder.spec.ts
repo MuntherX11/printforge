@@ -119,6 +119,30 @@ describe('POST /watch-folder/:id/import body', () => {
     expect(await h.svc.importAsProduct(h.imp.id, { name: 'Bracket' })).toBeNull();
   });
 
+  it('the G-code is kept as the component file, with the printer it was sliced for (owner spec items 3, 6)', async () => {
+    const os = await import('os');
+    const fsx = await import('fs');
+    const pathx = await import('path');
+    const tmp = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'pf-watch-'));
+    const prev = process.env.UPLOAD_DIR;
+    process.env.UPLOAD_DIR = pathx.join(tmp, 'uploads');
+    try {
+      const h = setup({ filamentUsedGrams: 42.5, estimatedTimeSeconds: 3600, printerModel: 'Creality Hi' });
+      h.db.insert('printer', { id: 'pr-hi', name: 'Creality HI', model: null, isActive: true });
+      h.imp.filePath = pathx.join(tmp, 'bracket.gcode');
+      fsx.writeFileSync(h.imp.filePath, '; printer_model = Creality Hi\nG28\n');
+      const out: any = await h.svc.importAsProduct(h.imp.id, { name: 'Bracket', materialId: 'mat-1' });
+      const att = h.db.t('attachment')[0];
+      expect(att).toMatchObject({ entityType: 'product', entityId: out.id, originalName: 'bracket.gcode', slicedForPrinter: 'Creality Hi' });
+      expect(out.components[0]).toMatchObject({ attachmentId: att.id, gcodeFilename: 'bracket.gcode' });
+      expect(fsx.readFileSync(pathx.join(process.env.UPLOAD_DIR!, att.storagePath), 'utf8')).toContain('printer_model');
+      expect(h.db.t('product').find((p: any) => p.id === out.id).defaultPrinterId).toBe('pr-hi');
+    } finally {
+      process.env.UPLOAD_DIR = prev;
+      fsx.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('without a material the product is saved alone, as before', async () => {
     const h = setup({ estimatedGrams: 12, estimatedMinutes: 30 }, 'stl');
     const out: any = await h.svc.importAsProduct(h.imp.id, { name: 'Clip' });

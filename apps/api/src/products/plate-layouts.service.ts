@@ -1,11 +1,13 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import type { ComponentPlateLayout, Problem } from '@printforge/types';
 import { round3 } from '../catalog-core/cost-engine';
+import { PricingService } from '../catalog-core/pricing.service';
 import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { requiredNumber } from '../common/utils/validate-number';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
+import { adoptDefaultPrinter } from './plate-file-rules';
 import { ACTIVE_JOBS, TX_OPTS, unlinkAfterCommit, unreferencedAttachments } from './product-locks';
 import { slicerAttachmentData, StoredFile, unlinkWritten, writeUploadFile } from './slicer-files';
 import {
@@ -110,7 +112,18 @@ export class PlateLayoutsService {
     private readonly prisma: PrismaService,
     private readonly gcodeParser: GcodeParserService,
     private readonly chunkUploads: ChunkUploadsService,
+    @Optional() private readonly pricing?: PricingService,
   ) {}
+
+  /** A new pricing printer reprices (spec §3.8 triggers); a failure is logged, never thrown. */
+  async repriceAfterPrinter(productId: string, printer: { id: string } | null) {
+    if (!printer || !this.pricing) return;
+    try {
+      await this.pricing.recalcPricing(productId);
+    } catch (e) {
+      this.logger.warn(`Repricing ${productId} after setting its printer failed: ${(e as Error)?.message}`);
+    }
+  }
 
   /** 404 unless the component belongs to the product (§3.4 "Ownership"). */
   private async ownedComponent(db: any, productId: string, componentId: string) {
@@ -202,11 +215,13 @@ export class PlateLayoutsService {
     }
 
     let layoutId: string;
+    let printer: { id: string; name: string } | null = null;
     try {
       layoutId = await this.prisma.$transaction(async (tx: any) => {
         await this.ownedComponent(tx, productId, componentId);
         await this.assertNoActiveSize(tx, componentId, units, desc);
-        const att = await tx.attachment.create({ data: slicerAttachmentData(productId, stored, file.originalname), select: { id: true } });
+        const att = await tx.attachment.create({ data: slicerAttachmentData(productId, stored, file.originalname, a.printerModel), select: { id: true } });
+        printer = await adoptDefaultPrinter(tx, productId, [a.printerModel]);
         const layout = await tx.plateLayout.create({
           data: {
             componentId, name: input.name ?? `×${units}`, unitsPerPlate: units, plateMinutes: minutes, plateGrams: grams,
@@ -223,6 +238,7 @@ export class PlateLayoutsService {
       throw e;
     }
     await this.chunkUploads.discard(input.assembledUploadId);
+    await this.repriceAfterPrinter(productId, printer);
     return { layout: await this.view(this.prisma, layoutId), warnings };
   }
 

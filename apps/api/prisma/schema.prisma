@@ -880,6 +880,7 @@ model Attachment {
   invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
 
   photoMigratedAt DateTime? // backfill marker (photo copied, thumbnail linked, or skipped)
+  slicedForPrinter String? // product G-code: the printer model the file was sliced for (from its header); null = unknown
 
   @@index([entityType, entityId])
 }

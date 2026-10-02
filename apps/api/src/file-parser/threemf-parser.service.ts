@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import JSZip from 'jszip';
 import { GcodeParserService } from './gcode-parser.service';
+import { printerModelFromProjectSettings } from './printer-model';
 import { ThreeMfAnalysis, ThreeMfPlateInfo, ThreeMfToolInfo } from '@printforge/types';
 
 @Injectable()
@@ -19,7 +20,11 @@ export class ThreeMfParserService {
       slicer: null,
       totalPlates: 0,
       plates: [],
+      printerModel: null,
     };
+
+    const projectSettings = zip.file('Metadata/project_settings.config');
+    if (projectSettings) analysis.printerModel = printerModelFromProjectSettings(await projectSettings.async('string'));
 
     // Parse slice_info.config for per-plate stats
     const sliceInfoFile = zip.file('Metadata/slice_info.config');
@@ -115,8 +120,9 @@ export class ThreeMfParserService {
             plate.weightGrams = gcodeAnalysis.filamentUsedGrams;
           }
 
-          // Capture slicer name from any plate's G-code
+          // Capture slicer name (and the printer, when the project settings don't say) from any plate's G-code
           if (gcodeAnalysis.slicer) analysis.slicer = analysis.slicer ?? gcodeAnalysis.slicer;
+          if (gcodeAnalysis.printerModel) analysis.printerModel = analysis.printerModel ?? gcodeAnalysis.printerModel;
         }
 
         if (pngFile) {

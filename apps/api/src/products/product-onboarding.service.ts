@@ -12,6 +12,7 @@ import { ThreeMfParserService } from '../file-parser/threemf-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
 import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { componentSlotIndexes, duplicateLayout, plateLabelWarnings, slotsDifferWarning, slotsFor, toolsForComponent } from './plate-layouts.service';
+import { adoptDefaultPrinter, unmatchedPrinterWarnings } from './plate-file-rules';
 import { lockOptions } from './product-locks';
 import { slicerAttachmentData, StoredFile, thumbnailAttachmentData, unlinkWritten, writeUploadFile } from './slicer-files';
 import { GRAMS_BOUNDS, MINUTES_BOUNDS } from './slicer-import-input';
@@ -62,6 +63,8 @@ interface Item {
   labels: { objectCount: number | null; objectModels: Array<{ model: string; count: number }>; ignoredLabels: string[] };
   thumbnail: Buffer | null;
   plateIndex: number | null;
+  /** the printer the file was sliced for (its header, or the 3MF project) */
+  printerModel: string | null;
 }
 
 type Action = 'SKIP' | 'SINGLE' | 'PER_UNIT' | 'TARGET' | 'PLACEHOLDER';
@@ -103,7 +106,7 @@ export class ProductOnboardingService {
         gcode: file.buffer, gcodeFilename: fileName.slice(0, 200), sliced: grams > 0, grams,
         minutes: a.estimatedTimeSeconds ? Math.round(a.estimatedTimeSeconds / 60) : 0, tools,
         componentColorChanges: Math.max(0, tools.length - 1), layoutColorChanges: Math.max(0, a.totalFilamentChanges ?? 0),
-        labels: a, thumbnail: null, plateIndex: null,
+        labels: a, thumbnail: null, plateIndex: null, printerModel: a.printerModel ?? null,
       };
     });
     const multicolour = files.some((_, i) => items[i].tools.length > 1) ||
@@ -136,6 +139,7 @@ export class ProductOnboardingService {
         componentColorChanges: plate.toolChanges, layoutColorChanges: plate.toolChanges,
         labels: { objectCount: plate.objectCount ?? null, objectModels: plate.objectModels ?? [], ignoredLabels: plate.ignoredLabels ?? [] },
         thumbnail: b64 ? Buffer.from(b64, 'base64') : null, plateIndex: plate.plateIndex,
+        printerModel: analysis.printerModel ?? null,
       });
     }
     const out = await this.run(productId, items, dto, '3mf', false);
@@ -319,7 +323,7 @@ export class ProductOnboardingService {
     const decision = (key: string, colorIndex: number) => decisions.find((d) => d.componentKey === key && d.colorIndex === colorIndex);
 
     const attach = async (p: Planned) =>
-      p.file ? (await tx.attachment.create({ data: slicerAttachmentData(productId, p.file, p.item.sourceName), select: { id: true } })).id : null;
+      p.file ? (await tx.attachment.create({ data: slicerAttachmentData(productId, p.file, p.item.sourceName, p.item.printerModel), select: { id: true } })).id : null;
     const now = new Date();
 
     for (const s of specs) {
@@ -388,9 +392,17 @@ export class ProductOnboardingService {
     }
     warnings.push(...linkWarnings);
 
-    // The existing name-based default printer (G-code imports), kept but reported.
+    // The pricing printer, when the product has none: the printer the files were
+    // sliced for (owner spec item 6). Files that name no printer keep the old
+    // name-based guess for G-code imports, reported as before.
     let defaultPrinterAssigned: Response['defaultPrinterAssigned'] = null;
-    if (kind === 'gcode' && !product.defaultPrinterId && specs.length + layoutsCreated.length > 0) {
+    const imported = planned.filter((p) => p.action !== 'SKIP');
+    const models = imported.filter((p) => p.file).map((p) => p.item.printerModel);
+    if (!product.defaultPrinterId && specs.length + layoutsCreated.length > 0) {
+      defaultPrinterAssigned = await adoptDefaultPrinter(tx, productId, models);
+    }
+    warnings.push(...await unmatchedPrinterWarnings(tx, models));
+    if (kind === 'gcode' && !defaultPrinterAssigned && !models.some(Boolean) && !product.defaultPrinterId && specs.length + layoutsCreated.length > 0) {
       const printer = await tx.printer.findFirst({
         where: { name: { contains: multicolour ? 'HI' : 'Ender', mode: 'insensitive' }, isActive: true },
         select: { id: true, name: true },

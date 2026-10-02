@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { detectPlateObjects, PlateObjects } from './object-labels';
+import { detectPrinterModel } from './printer-model';
 
 export interface ToolInfo {
   index: number;
@@ -24,6 +25,8 @@ export interface GcodeAnalysis extends PlateObjects {
   toolCount: number | null;
   tools: ToolInfo[];
   filamentColors: string[];
+  /** The printer the file was sliced for (printer-model.ts); null = the file doesn't say. */
+  printerModel: string | null;
 }
 
 @Injectable()
@@ -59,6 +62,7 @@ export class GcodeParserService {
       toolCount: null,
       tools: [],
       filamentColors: [],
+      printerModel: detectPrinterModel(text),
     };
 
     result.slicer = this.detectSlicer(searchLines);

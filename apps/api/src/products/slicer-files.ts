@@ -33,8 +33,11 @@ export async function writeUploadFile(buffer: Buffer, ext: 'gcode' | 'png', file
   return { abs, storagePath, filename: name, sizeBytes: buffer.length };
 }
 
-/** Attachment data for a stored slicer file: server-set mime, never the multipart type. */
-export function slicerAttachmentData(productId: string, f: StoredFile, originalName: unknown) {
+/**
+ * Attachment data for a stored slicer file: server-set mime, never the multipart
+ * type. `slicedForPrinter` is the printer the file's header names (null = unknown).
+ */
+export function slicerAttachmentData(productId: string, f: StoredFile, originalName: unknown, slicedForPrinter: string | null = null) {
   return {
     entityType: 'product',
     entityId: productId,
@@ -43,6 +46,7 @@ export function slicerAttachmentData(productId: string, f: StoredFile, originalN
     mimeType: 'application/octet-stream',
     sizeBytes: f.sizeBytes,
     storagePath: f.storagePath,
+    slicedForPrinter: slicedForPrinter ? slicedForPrinter.slice(0, 120) : null,
   };
 }
 
