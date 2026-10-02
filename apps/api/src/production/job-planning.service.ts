@@ -1,11 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PLANNABLE_ORDER_STATUSES, type PlanRow, type Problem, type SurplusPolicy } from '@printforge/types';
-import { createHash } from 'crypto';
+import type { PlanRow, Problem, SurplusPolicy } from '@printforge/types';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from '../catalog-core/bom-resolver.service';
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
 import { computeLineProgress } from '../catalog-core/line-progress';
 import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
-import { PlanError, suggestPlan, validatePlan, type PlannedPlate } from '../catalog-core/plate-planner';
+import { suggestJobPlates } from '../catalog-core/job-plate-suggestion';
+import { PlanError, validatePlan, type PlannedPlate } from '../catalog-core/plate-planner';
 import { planFromBom, ProductionPlannerService, type OptionPlan } from '../catalog-core/production-planner.service';
 import { pickSpools, type SpoolRow } from '../catalog-core/spool-picker';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -14,6 +14,8 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { ProductStockService, suggestFromStock } from '../stock-ledger/product-stock.service';
 import { creditUnits, materialLines, plateRows, singlePlateFilename } from './job-builder';
 import { parsePlanSubmit, parsePreview, type PlanRowInput } from './job-input';
+import { applyPlatePrinters, assertPlannable, colourChangedWarning, bucketOf, NO_SLICED_DATA, planComponent, planVersionOf, plateFileOf } from './job-plan-rules';
+import { PlatePrinterLookup } from './plate-printers';
 import { lockOrderPlan } from './job-transitions';
 
 /**
@@ -46,38 +48,6 @@ export interface PlanResult {
   jobs: any[];
   allocations: Array<{ rowKey: string; fromStock: number }>;
   warnings: Problem[];
-}
-
-const NO_SLICED_DATA = (desc: string) => `"${desc}" has no sliced data — add its grams and minutes or a plate layout`;
-
-/**
- * Orders production can be planned for (J4/J5): PLANNABLE_ORDER_STATUSES, the
- * same list the order page shows Plan Production for. A cancelled order holds
- * no allocation (§3.6 "Release on order cancellation"), and a finished one has
- * nothing left to plan.
- */
-function assertPlannable(status: string) {
-  if (!(PLANNABLE_ORDER_STATUSES as ReadonlyArray<string>).includes(status)) {
-    throw new ConflictException(`This order is ${String(status).toLowerCase().replace(/_/g, ' ')} — production can't be planned for it`);
-  }
-}
-
-/** One printed-stock balance: rows of different lines that resolve to it share it. */
-const bucketOf = (componentId: string, colourKey: string) => `${componentId}|${colourKey}`;
-
-function planComponent(component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy, plates?: Array<{ layoutId: string | null; plateCount: number }>): OptionPlan {
-  const bom = { ...cacheBom, components: [component] };
-  return planFromBom(
-    bom,
-    {
-      quantity: 1,
-      unitsRequired: { [component.componentId]: R },
-      surplusPolicy: policy,
-      plates: plates?.map((p) => ({ componentId: component.componentId, layoutId: p.layoutId, plateCount: p.plateCount })),
-    },
-    config.materials,
-    ctx.planCache,
-  );
 }
 
 @Injectable()
@@ -170,7 +140,7 @@ export class JobPlanningService {
         const rowWarnings: Problem[] = [...lineWarnings];
         if (suggestion.warning) rowWarnings.push(suggestion.warning);
         rowWarnings.push(...colourWarnings.filter((w) => !w.componentId || w.componentId === c.componentId));
-        const changed = await this.colourChangedWarning(c, platesByItem.get(item.id) ?? [], moves, config.materials, extraMaterials);
+        const changed = await colourChangedWarning(this.prisma, c, platesByItem.get(item.id) ?? [], moves, config.materials, extraMaterials);
         if (changed) rowWarnings.push(changed);
 
         let plan: OptionPlan | null = null;
@@ -208,7 +178,7 @@ export class JobPlanningService {
           surplusPolicy: policy,
           layouts: c.layouts.map((l) => ({
             layoutId: l.layoutId, label: l.label, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
-            minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!(l.attachmentId || l.gcodeFilename),
+            minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!l.attachmentId,
           })),
           suggestedPlates: (pc?.plates ?? []).map((pl) => ({ layoutId: pl.layout.layoutId, label: pl.layout.label, unitsPerPlate: pl.layout.unitsPerPlate, plateCount: pl.plateCount })),
           unitsPrinted: pc?.unitsPrinted ?? 0,
@@ -237,6 +207,7 @@ export class JobPlanningService {
         out.push({ row, bom, component: c, sizeName, colourName, problem });
       }
     }
+    await applyPlatePrinters(this.prisma, out);
     return { order, planVersion: planVersionOf(out), rows: out, warnings };
   }
 
@@ -260,38 +231,6 @@ export class JobPlanningService {
       out.set(j.orderItemId, list);
     }
     return out;
-  }
-
-  /** §4.4.1 "Line colour changed": planned plates or net allocations in another colour key. */
-  private async colourChangedWarning(
-    c: ResolvedComponent,
-    plates: Array<{ componentId: string | null; colourKey: string; unitsRequired: number }>,
-    moves: Array<{ componentId: string; colourKey: string; delta: number; reason: string }>,
-    materials: ReadonlyMap<string, { name: string }>,
-    extra: Map<string, { name: string }>,
-  ): Promise<Problem | null> {
-    const byKey = new Map<string, number>();
-    for (const p of plates) if (p.componentId === c.componentId && p.colourKey !== c.colourKey) byKey.set(p.colourKey, (byKey.get(p.colourKey) ?? 0) + p.unitsRequired);
-    const net = new Map<string, number>();
-    for (const m of moves) if (m.componentId === c.componentId) net.set(m.colourKey, (net.get(m.colourKey) ?? 0) - m.delta);
-    for (const [k, n] of net) if (n > 0 && k !== c.colourKey) byKey.set(k, (byKey.get(k) ?? 0) + n);
-    if (!byKey.size) return null;
-    const [oldKey] = [...byKey.entries()].sort((a, b) => b[1] - a[1])[0];
-    const missing = oldKey.split('|').map((s) => s.slice(s.indexOf(':') + 1)).filter((id) => !materials.has(id) && !extra.has(id));
-    if (missing.length) {
-      const rows = await this.prisma.material.findMany({ where: { id: { in: missing } }, select: { id: true, name: true } });
-      for (const r of rows) extra.set(r.id, { name: r.name });
-    }
-    const lookup = (id: string) => materials.get(id) ?? extra.get(id);
-    let oldLabel = oldKey;
-    try { oldLabel = colourLabel(oldKey, lookup); } catch { /* keep the key */ }
-    const newLabel = c.colourKey ? colourLabel(c.colourKey, materials) : 'no filament';
-    const total = [...byKey.values()].reduce((s, n) => s + n, 0);
-    return {
-      code: 'LINE_COLOUR_CHANGED',
-      componentId: c.componentId,
-      message: `${total} units of "${c.description}" were planned in ${oldLabel} — the rest would print in ${newLabel}`,
-    };
   }
 
   // ------------------------------------------------------------------ J5
@@ -354,7 +293,7 @@ export class JobPlanningService {
           plates = validatePlan(component, toProduce, inp.plates.map((p) => ({ componentId: component.componentId, layoutId: p.layoutId, plateCount: p.plateCount })));
         } else {
           try {
-            plates = suggestPlan(toProduce, component.layouts, ctx.planCache);
+            plates = suggestJobPlates(toProduce, component.layouts, ctx.planCache).plates;
           } catch (e) {
             if (e instanceof PlanError) throw new BadRequestException(NO_SLICED_DATA(desc));
             throw e;
@@ -524,24 +463,23 @@ export class JobPlanningService {
     for (const c of bom.components) {
       layoutsByComponent[c.componentId] = c.layouts.map((l) => ({
         layoutId: l.layoutId, label: l.label, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
-        minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!(l.attachmentId || l.gcodeFilename),
+        minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!l.attachmentId,
       }));
     }
+    // The printer the suggested plates' files were sliced for (owner spec 2026-10-02 item 6).
+    const plates = readiness.components.flatMap((c) => {
+      const rc = bom.components.find((x) => x.componentId === c.componentId);
+      return c.plates.map((p) => ({ attachmentId: rc ? plateFileOf(rc, p.layoutId) : null, plateCount: p.plateCount }));
+    });
+    const lookup = await PlatePrinterLookup.load(this.prisma, plates.map((p) => p.attachmentId));
+    const { warning, ...printer } = lookup.suggest(plates, config.printer ? { id: config.printer.id, name: config.printer.name } : null);
     return {
       ...readiness,
+      warnings: warning ? [...readiness.warnings, warning] : readiness.warnings,
       components: readiness.components.map((c) => ({ ...c, creditOnComplete: creditUnits(credit, c.unitsRequired, c.surplus) })),
       layoutsByComponent,
+      printer,
     };
   }
 }
 
-/** First 16 hex of SHA-1 over the sorted row tuples (§4.4 J4). */
-export function planVersionOf(rows: ReadonlyArray<{ row: PlanRow; component: ResolvedComponent }>): string {
-  const tuples = rows
-    .map(({ row, component }) => JSON.stringify([
-      row.rowKey, row.remaining, row.onHand, row.alreadyPlanned, row.sizeOptionId, row.colourOptionId, row.colourKey,
-      component.slots.map((s) => [s.materialId, s.baseMaterialId !== s.materialId ? s.baseMaterialId : null]),
-    ]))
-    .sort();
-  return createHash('sha1').update(tuples.join('\n')).digest('hex').slice(0, 16);
-}

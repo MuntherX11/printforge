@@ -52,6 +52,8 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
   const [stockMode, setStockMode] = useState<JobStockMode | ''>('');
   const [policy, setPolicy] = useState<SurplusPolicy>(product.surplusPolicy);
   const [printerId, setPrinterId] = useState('');
+  // Until the user picks a printer, it follows the printer the plates' files were sliced for.
+  const [printerPicked, setPrinterPicked] = useState(false);
   const [printers, setPrinters] = useState<ApiPrinter[]>([]);
   const [printersError, setPrintersError] = useState(false);
   const [plans, setPlans] = useState<Plans | null>(null);
@@ -78,7 +80,7 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     setPair({ sizeKey: prefill.sizeKey, colourKey: prefill.colourKey });
     setQtyText(String(prefill.quantity));
     setPurpose('CUSTOMER'); setStockMode(''); setPolicy(product.surplusPolicy);
-    setPrinterId(product.defaultPrinterId ?? ''); setPlans(null); setError(null);
+    setPrinterId(product.defaultPrinterId ?? ''); setPrinterPicked(false); setPlans(null); setError(null);
     // The last session's plan never shows for this one.
     setPreview(NO_PREVIEW);
     fetchPrinters();
@@ -121,6 +123,11 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bodyKey, editedProblem]);
 
+  const suggested = preview.data?.printer;
+  useEffect(() => {
+    if (!printerPicked && suggested?.fromFile && suggested.printerId) setPrinterId(suggested.printerId);
+  }, [printerPicked, suggested?.fromFile, suggested?.printerId]);
+
   if (!open) return null;
   const p = preview.data;
   // Until the list loads (or when it fails) the pricing printer is still shown by name, so what is sent is what is shown.
@@ -128,7 +135,7 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     { value: '', label: 'No printer — assign later' },
     ...printers.filter(x => x.isActive).map(x => ({ value: x.id, label: x.name })),
     ...(printerId && !printers.some(x => x.isActive && x.id === printerId)
-      ? [{ value: printerId, label: printerId === product.defaultPrinterId ? product.defaultPrinter?.name ?? 'Pricing printer' : 'Selected printer' }]
+      ? [{ value: printerId, label: printerId === product.defaultPrinterId ? product.defaultPrinter?.name ?? 'Pricing printer' : printerId === suggested?.printerId ? suggested.printerName ?? 'Selected printer' : 'Selected printer' }]
       : []),
   ];
   const planOf = (componentId: string): PlanPlate[] =>
@@ -179,7 +186,7 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
           <Select label="Extras on the last plate" value={policy} onChange={e => setPolicy(e.target.value as SurplusPolicy)}
             options={POLICIES.map(v => ({ value: v, label: `${policyLabel(v)}${v === product.surplusPolicy ? ' (product setting)' : ''}` }))} />
           <div>
-            <Select label="Printer" value={printerId} onChange={e => setPrinterId(e.target.value)} options={printerOptions} />
+            <Select label="Printer" value={printerId} onChange={e => { setPrinterPicked(true); setPrinterId(e.target.value); }} options={printerOptions} />
             {printersError && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                 Couldn&apos;t load printers.{' '}

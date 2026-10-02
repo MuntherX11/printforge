@@ -23,6 +23,7 @@ import { assertOrderAcceptsJobs, ORDER_CANCELLED_NO_REQUEUE } from './job-transi
 import { notifyOrderCompletedIfAllDone } from './order-completed-notice';
 import { buildFilamentPlan, jobDetailExtras } from './job-presenter';
 import { JobSchedulingService } from './job-scheduling.service';
+import { defaultJobPrinter } from './plate-printers';
 
 const ACTIVE = ['QUEUED', 'IN_PROGRESS', 'PAUSED'];
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
@@ -179,7 +180,7 @@ export class JobsService {
           sizeOptionId,
           colourOptionId,
           variantId: sizeOptionId ?? colourOptionId,
-          printerId: dto.printerId !== undefined ? dto.printerId : config?.product.defaultPrinterId ?? null,
+          printerId: dto.printerId !== undefined ? dto.printerId : await defaultJobPrinter(tx, plates, config?.product.defaultPrinterId ?? null),
           assignedToId: dto.assignedToId ?? null,
           orderId: dto.orderId ?? null,
           orderItemId: dto.orderItemId ?? null,
@@ -262,7 +263,7 @@ export class JobsService {
     });
     if (!job) throw new NotFoundException('Production job not found');
     const ctx = new CatalogRequestContext();
-    const extras = await jobDetailExtras(job, this.resolver, ctx);
+    const extras = await jobDetailExtras(job, this.resolver, ctx, this.prisma);
     return {
       ...job,
       ...extras.detail,

@@ -34,7 +34,7 @@ export function JobPlatesCard({ plates, surplus, policy }: Props) {
               {p.downloadUrl ? (
                 <a href={p.downloadUrl} className="flex-shrink-0 text-sm text-blue-600 hover:underline dark:text-blue-400">Download</a>
               ) : (
-                <span className="flex-shrink-0 text-xs text-gray-400">No file</span>
+                <span className="flex-shrink-0 text-xs text-gray-400">{p.fileDeleted ? 'File deleted' : 'No file'}</span>
               )}
             </div>
           ))}

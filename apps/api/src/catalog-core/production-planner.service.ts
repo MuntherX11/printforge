@@ -5,7 +5,8 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from './bom-resolver.service';
 import { CatalogRequestContext } from './catalog-context';
 import { computeLineProgress, type ProgressJob, type ProgressMovement } from './line-progress';
-import { gramsForPlan, PlanCache, PlanError, suggestPlan, unitsOf, validatePlan, type PlanEdit, type PlannedPlate } from './plate-planner';
+import { noGcodeOnFile, suggestJobPlates } from './job-plate-suggestion';
+import { gramsForPlan, PlanCache, PlanError, unitsOf, validatePlan, type PlanEdit, type PlannedPlate } from './plate-planner';
 import { pickSpools, type SpoolRow } from './spool-picker';
 
 /**
@@ -85,6 +86,7 @@ export function planFromBom(
   cache: PlanCache = new PlanCache(),
 ): OptionPlan {
   const problems: Problem[] = [];
+  const warnings: Problem[] = [...bom.warnings];
   const components: PlannedComponent[] = [];
   const needs = new Map<string, FilamentNeed>();
   let totalMinutes = 0;
@@ -99,7 +101,10 @@ export function planFromBom(
       plates = validatePlan(c, R, edits);
     } else {
       try {
-        plates = suggestPlan(R, c.layouts, cache);
+        // Plates with a print file first (owner spec 2026-10-02 item 4).
+        const s = suggestJobPlates(R, c.layouts, cache);
+        plates = s.plates;
+        if (s.noFile) warnings.push({ code: 'NO_GCODE_ON_FILE', componentId: c.componentId, message: noGcodeOnFile(c.description) });
       } catch (e) {
         if (!(e instanceof PlanError)) throw e;
         problems.push({ code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: `"${c.description}" has no usable plate layout — slice it or enter its grams and minutes` });
@@ -132,7 +137,7 @@ export function planFromBom(
   return {
     bom, quantity: input.quantity, surplusPolicy: input.surplusPolicy, components,
     filamentNeeds: [...needs.values()].filter((n) => n.grams > 0),
-    totalMinutes, problems, warnings: [...bom.warnings],
+    totalMinutes, problems, warnings,
   };
 }
 

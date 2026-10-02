@@ -13,7 +13,7 @@ const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
  * credit per component, and the picking list.
  */
 
-export async function jobDetailExtras(job: any, resolver: BomResolverService, ctx: CatalogRequestContext) {
+export async function jobDetailExtras(job: any, resolver: BomResolverService, ctx: CatalogRequestContext, db?: any) {
   await resolver.preloadVariants([job.variantId, job.sizeOptionId, job.colourOptionId].filter(Boolean), ctx);
   if (job.orderItemId) await resolver.preloadOrderItems([job.orderItemId], ctx);
   const eff = resolver.effectiveOptions(job, ctx);
@@ -44,6 +44,12 @@ export async function jobDetailExtras(job: any, resolver: BomResolverService, ct
     }
   }
 
+  // A plate whose file was deleted from the product since (finished jobs keep their
+  // plates) says so instead of offering a download that 404s (owner spec 2026-10-02 item 5).
+  const fileIds = [...new Set<string>((job.plates ?? []).map((p: any) => p.attachmentId).filter(Boolean))];
+  const live = db && fileIds.length
+    ? new Set<string>((await db.attachment.findMany({ where: { id: { in: fileIds } }, select: { id: true } })).map((a: { id: string }) => a.id))
+    : new Set<string>(fileIds);
   const plates = (job.plates ?? []).map((p: any) => ({
     id: p.id,
     componentId: p.componentId,
@@ -55,7 +61,8 @@ export async function jobDetailExtras(job: any, resolver: BomResolverService, ct
     plateMinutes: p.plateMinutes,
     plateGrams: p.plateGrams,
     gcodeFilename: p.gcodeFilename,
-    downloadUrl: p.attachmentId ? `/api/attachments/${p.attachmentId}/download` : null,
+    downloadUrl: p.attachmentId && live.has(p.attachmentId) ? `/api/attachments/${p.attachmentId}/download` : null,
+    fileDeleted: !!p.attachmentId && !live.has(p.attachmentId),
   }));
 
   const groups = new Map<string | null, any[]>();
