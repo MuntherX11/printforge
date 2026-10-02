@@ -301,6 +301,7 @@ export class ProductionPlannerService {
       return {
         materialId: n.materialId,
         label: n.material.name,
+        color: n.material.color,
         colorHex: n.material.colorHex,
         slicedMaterialId: n.slicedMaterialId,
         gramsNeeded,
@@ -310,7 +311,11 @@ export class ProductionPlannerService {
         free: Math.round(f.free),
         hasEnough: f.free >= materialGrams,
         suggestedSpool: p.spool
-          ? { id: p.spool.id, pfid: p.spool.printforgeId ?? null, location: p.spool.location?.name ?? null, effectiveRemaining: Math.round(p.effectiveRemaining) }
+          ? {
+              id: p.spool.id, pfid: p.spool.printforgeId ?? null, location: p.spool.location?.name ?? null, effectiveRemaining: Math.round(p.effectiveRemaining),
+              // The spool's own filament: another one when it is a same-type substitute.
+              materialId: p.spool.materialId, materialName: p.spool.material?.name ?? null,
+            }
           : null,
         spoolHasEnough: p.hasEnough,
       };

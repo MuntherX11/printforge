@@ -11,7 +11,8 @@ import type { ProductDetail, Readiness } from '@/lib/types/api';
 import { ColourSelect, SizeSelect, pickerOptionsFromDetail, useOptionPair } from '@/components/products/OptionPickers';
 import { errorText } from './options-ui';
 import { parseWhole } from './bom-model';
-import { ComponentPlanLines, FilamentTable, PartsTable, ProblemList, ReadinessSummary } from './readiness-ui';
+import { PartsTable, ProblemList, ReadinessFilamentTable } from './readiness-ui';
+import { planLines, readinessStatus } from './readiness-model';
 import type { NewJobPrefill } from './NewJobDialog';
 
 interface Props {
@@ -23,6 +24,26 @@ interface Props {
 }
 
 const MAX_QTY = 100_000;
+const DETAILS_KEY = 'pf.readiness.details';
+
+const TONE = {
+  ok: 'text-green-700 dark:text-green-400',
+  short: 'text-amber-700 dark:text-amber-300',
+  blocked: 'text-red-600 dark:text-red-400',
+};
+
+/** "Show details", remembered on this browser; storage may be unavailable. */
+function useDetailsToggle(): [boolean, () => void] {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try { setOpen(window.localStorage.getItem(DETAILS_KEY) === '1'); } catch { /* storage blocked: closed */ }
+  }, []);
+  const toggle = () => setOpen(o => {
+    try { window.localStorage.setItem(DETAILS_KEY, o ? '0' : '1'); } catch { /* not remembered */ }
+    return !o;
+  });
+  return [open, toggle];
+}
 
 /** Section F (spec §5.2 F, P20): can we make N of this pair from what is on the shelf? */
 export function ReadinessCard({ product, costVersion, canEdit, onCreateJob }: Props) {
@@ -30,6 +51,7 @@ export function ReadinessCard({ product, costVersion, canEdit, onCreateJob }: Pr
   const pair = useOptionPair(options);
   const [qtyText, setQtyText] = useState('1');
   const [state, setState] = useState<{ data: Readiness | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true });
+  const [details, toggleDetails] = useDetailsToggle();
   const qty = parseWhole(qtyText, 1, MAX_QTY);
 
   useEffect(() => {
@@ -46,6 +68,9 @@ export function ReadinessCard({ product, costVersion, canEdit, onCreateJob }: Pr
   }, [product.id, pair.sizeKey, pair.colourKey, qty, costVersion]);
 
   const r = state.data;
+  const status = r ? readinessStatus(r) : null;
+  const plan = r ? planLines(r.components) : null;
+  const hasExtras = !!r && r.components.some(c => c.surplus > 0);
   return (
     <Card>
       <CardHeader>
@@ -61,21 +86,36 @@ export function ReadinessCard({ product, costVersion, canEdit, onCreateJob }: Pr
             <Input label="Quantity (units)" type="number" min={1} max={MAX_QTY} step={1} value={qtyText}
               onChange={e => setQtyText(e.target.value)} error={qty === null ? 'Whole number from 1 to 100,000' : undefined} />
           </div>
-          <p className="self-end pb-2 text-xs text-gray-500 dark:text-gray-400">
-            Extras on the last plate: {policyLabel(r?.surplusPolicy ?? product.surplusPolicy)} (product setting)
-          </p>
         </div>
 
         {state.error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{state.error}</p>}
         {!r && !state.error && <p className="text-sm text-gray-500 dark:text-gray-400">Checking…</p>}
-        {r && (
-          <div className={state.loading ? 'space-y-4 opacity-60' : 'space-y-4'}>
+        {r && status && plan && (
+          <div className={state.loading ? 'space-y-3 opacity-60' : 'space-y-3'}>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <p className={`text-sm font-medium ${TONE[status.tone]}`} aria-live="polite">{status.text}</p>
+              <button type="button" onClick={toggleDetails} aria-expanded={details}
+                className="text-sm text-brand-600 hover:underline dark:text-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded">
+                {details ? 'Hide details' : 'Show details'}
+              </button>
+            </div>
             <ProblemList problems={r.problems} tone="error" />
-            <ProblemList problems={r.warnings} tone="warning" />
-            <ComponentPlanLines components={r.components} />
-            <FilamentTable filament={r.filament} />
-            <PartsTable parts={r.parts} />
-            <ReadinessSummary readiness={r} />
+            {details && (
+              <div className="space-y-3">
+                <ProblemList problems={r.warnings} tone="warning" />
+                <ul className="space-y-0.5 text-sm text-gray-700 dark:text-gray-300">
+                  {plan.lines.map(line => <li key={line}>{line}</li>)}
+                  {plan.restOnce && <li>{plan.lines.length > 0 ? 'The other parts print once.' : 'Each part prints once.'}</li>}
+                </ul>
+                {hasExtras && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Extras on the last plate: {policyLabel(r.surplusPolicy ?? product.surplusPolicy)} (product setting)
+                  </p>
+                )}
+                <ReadinessFilamentTable filament={r.filament} />
+                <PartsTable parts={r.parts} />
+              </div>
+            )}
           </div>
         )}
 

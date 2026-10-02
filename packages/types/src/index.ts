@@ -1397,6 +1397,8 @@ export interface Readiness {
   filament: Array<{
     materialId: string;
     label: string;
+    /** the filament's colour name (the dot's approximation when there is no hex) */
+    color: string | null;
     colorHex: string | null;
     slicedMaterialId: string | null;
     /** this planned-identity line's grams */
@@ -1409,7 +1411,15 @@ export interface Readiness {
     /** "after open orders": free >= materialGramsNeeded */
     hasEnough: boolean;
     /** effectiveRemaining nets the grams of earlier lines that share the spool */
-    suggestedSpool: { id: string; pfid: string | null; location: string | null; effectiveRemaining: number } | null;
+    suggestedSpool: {
+      id: string;
+      pfid: string | null;
+      location: string | null;
+      effectiveRemaining: number;
+      /** the spool's own filament; differs from `materialId` when it is a same-type substitute */
+      materialId: string;
+      materialName: string | null;
+    } | null;
     /** "spool to use" */
     spoolHasEnough: boolean;
   }>;
