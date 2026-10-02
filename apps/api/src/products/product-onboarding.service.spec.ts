@@ -10,7 +10,7 @@ import { gcode, labels, threeMf } from './__fixtures__/slicer-files';
 import { ProductImportsController } from './product-imports.controller';
 import { COLOUR_TARGET, ProductOnboardingService, type ImportOptions } from './product-onboarding.service';
 import { parseGcodeImport, parseThreeMfImport } from './slicer-import-input';
-import { hexToColorName, matchMaterial, normaliseMaterialType } from './slicer-materials';
+import { hexToColorName, normaliseMaterialType, resolveSlot, slotFilament } from './slicer-materials';
 
 /** §7.1 item 16, item 26 (import), item 33 (import half) and the M1/M2 rows of item 37. */
 
@@ -57,21 +57,22 @@ describe('material matching (§3.12)', () => {
     for (const [raw, want] of table) expect([raw, normaliseMaterialType(raw)]).toEqual([raw, want]);
   });
 
-  it('hex match: exact first, then the nearest ΔE ≤ 10 of the same type, then the legacy name', () => {
+  it('a file without a vendor: exact hex first, then the nearest ΔE ≤ 10 of the same type; the legacy colour word reuses its filament', () => {
     const mats = [
-      { id: 'a', name: 'PLA Black', type: 'PLA', color: 'Black', colorHex: '111111' },
-      { id: 'b', name: 'PLA Charcoal', type: 'PLA', color: 'Grey', colorHex: '1A1A1A' },
-      { id: 'c', name: 'PETG Black', type: 'PETG', color: 'Black', colorHex: '161616' },
-      { id: 'd', name: 'PLA Red', type: 'PLA', color: 'Red', colorHex: null },
+      { id: 'a', name: 'PLA Black', type: 'PLA', brand: null, color: 'Black', colorHex: '111111' },
+      { id: 'b', name: 'PLA Charcoal', type: 'PLA', brand: null, color: 'Grey', colorHex: '1A1A1A' },
+      { id: 'c', name: 'PETG Black', type: 'PETG', brand: null, color: 'Black', colorHex: '161616' },
+      { id: 'd', name: 'PLA Red', type: 'PLA', brand: null, color: 'Red', colorHex: null },
     ];
-    expect(matchMaterial(mats, 'PLA', '#1a1a1a')?.id).toBe('b');
-    expect(matchMaterial(mats, 'PLA', '#131313')?.id).toBe('a');
-    expect(matchMaterial(mats, 'PETG', '#101010FF')?.id).toBe('c');
-    expect(matchMaterial(mats, 'PLA', '#FE0101')?.id).toBe('d');
+    const id = (type: string, hex: string | null) => resolveSlot(mats, slotFilament(type, hex)).material?.id ?? null;
+    expect(id('PLA', '#1a1a1a')).toBe('b');
+    expect(id('PLA', '#131313')).toBe('a');
+    expect(id('PETG', '#101010FF')).toBe('c');
+    expect(id('PLA', '#FE0101')).toBe('d');
     expect(hexToColorName('FE0101')).toBe('Red');
-    expect(matchMaterial(mats, 'PLA', '#00FF00')).toBeNull();
-    expect(matchMaterial(mats, 'PLA', null)?.id).toBe('a');
-    expect(matchMaterial(mats, 'TPU', null)).toBeNull();
+    expect(id('PLA', '#00FF00')).toBeNull();
+    expect(id('PLA', null)).toBe('a');
+    expect(id('TPU', null)).toBeNull();
   });
 
   it('an import matches an existing filament within ΔE 10 and creates none', async () => {
@@ -97,7 +98,7 @@ describe('material matching (§3.12)', () => {
     const { h, onboarding } = setup();
     h.db.insert('material', { id: 'm-green', name: 'Nylon Green', type: 'NYLON', brand: null, color: 'Green', colorHex: null, costPerGram: 0.02 });
     const findMany = h.db.material.findMany;
-    const SNAPSHOT = JSON.stringify({ id: true, name: true, type: true, color: true, colorHex: true });
+    const SNAPSHOT = JSON.stringify({ id: true, name: true, type: true, brand: true, color: true, colorHex: true });
     let stale = true;
     h.db.material.findMany = jest.fn(async (a: { where?: unknown; select?: unknown }) => {
       if (!stale || a?.where || JSON.stringify(a?.select) !== SNAPSHOT) return findMany(a);

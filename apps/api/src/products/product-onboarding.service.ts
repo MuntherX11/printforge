@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { filamentIdentityKey, type Problem, type SlicerImportResult } from '@printforge/types';
+import { filamentIdentityKey, type Problem, type SlicerFilament, type SlicerImportResult } from '@printforge/types';
 import { decideImportLinks, type ImportedSlot, type LinkComponent } from '../catalog-core/colour-link-proposal';
 import { round1 } from '../catalog-core/cost-engine';
 import { PricingService } from '../catalog-core/pricing.service';
@@ -16,7 +16,7 @@ import { adoptDefaultPrinter, unmatchedPrinterWarnings } from './plate-file-rule
 import { lockOptions } from './product-locks';
 import { slicerAttachmentData, StoredFile, thumbnailAttachmentData, unlinkWritten, writeUploadFile } from './slicer-files';
 import { GRAMS_BOUNDS, MINUTES_BOUNDS } from './slicer-import-input';
-import { matchMaterial, newMaterialData, normaliseMaterialType } from './slicer-materials';
+import { gcodeImportTools, MATERIAL_SNAPSHOT, resolveSlot, slotFilament } from './slicer-materials';
 
 /**
  * Slicer imports (spec §3.12): G-code files and 3MF plates become components,
@@ -44,7 +44,7 @@ export interface ImportOptions {
   targets: Map<number, string>;
 }
 
-interface Tool { index: number; grams: number; type: unknown; hex: unknown }
+interface Tool { index: number; grams: number; type: unknown; hex: unknown; filament?: SlicerFilament | null }
 
 interface Item {
   key: number;
@@ -97,10 +97,7 @@ export class ProductOnboardingService {
     const items: Item[] = files.map((file, i) => {
       const a = this.gcodeParser.parseHeader(file.buffer);
       const fileName = file.originalname || 'unknown.gcode';
-      const used = (a.tools ?? []).filter((t) => (t.filamentGrams || 0) > 0)
-        .map((t) => ({ index: t.index, grams: t.filamentGrams || 0, type: t.materialType ?? a.filamentType, hex: t.colorHex ?? null }));
-      const grams = a.filamentUsedGrams || used.reduce((s, t) => s + t.grams, 0);
-      const tools = used.length ? used : grams > 0 ? [{ index: 0, grams, type: a.filamentType, hex: a.filamentColors?.[0] ?? null }] : [];
+      const { grams, tools } = gcodeImportTools(a);
       return {
         key: i, ref: { fileName }, name: fileName.replace(/\.(gcode|gco|g)$/i, '').slice(0, 200) || 'Component', sourceName: fileName,
         gcode: file.buffer, gcodeFilename: fileName.slice(0, 200), sliced: grams > 0, grams,
@@ -135,7 +132,8 @@ export class ProductOnboardingService {
         key: plate.plateIndex, ref: { plateIndex: plate.plateIndex }, name, sourceName: `${name}.gcode`,
         gcode, gcodeFilename: gcode ? `${name}.gcode` : null, sliced, grams: plate.weightGrams,
         minutes: Math.round(plate.printSeconds / 60),
-        tools: plate.tools.filter((t) => t.filamentGrams > 0).map((t) => ({ index: t.index, grams: t.filamentGrams, type: t.materialType, hex: t.colorHex ?? null })),
+        tools: plate.tools.filter((t) => t.filamentGrams > 0)
+          .map((t) => ({ index: t.index, grams: t.filamentGrams, type: t.materialType, hex: t.colorHex ?? null, filament: t.filament ?? null })),
         componentColorChanges: plate.toolChanges, layoutColorChanges: plate.toolChanges,
         labels: { objectCount: plate.objectCount ?? null, objectModels: plate.objectModels ?? [], ignoredLabels: plate.ignoredLabels ?? [] },
         thumbnail: b64 ? Buffer.from(b64, 'base64') : null, plateIndex: plate.plateIndex,
@@ -251,17 +249,17 @@ export class ProductOnboardingService {
       sizeRow = { id: row.id, name: row.name };
     }
 
-    const materials: any[] = await tx.material.findMany({ select: { id: true, name: true, type: true, color: true, colorHex: true } });
+    const materials: any[] = await tx.material.findMany(MATERIAL_SNAPSHOT);
     let identityLocked = false;
     const materialFor = async (t: Tool): Promise<string> => {
-      const type = normaliseMaterialType(t.type);
-      const hit = matchMaterial(materials, type, t.hex);
-      if (hit) return hit.id;
-      const data = newMaterialData(t.type, type, t.hex);
+      // The file's own filament (vendor, profile, colour name) first; see resolveSlot.
+      const r = resolveSlot(materials, slotFilament(t.type, t.hex, t.filament));
+      if (!r.create) return r.material.id;
+      const data = r.create;
       // Safety spec §3: a coloured filament created since the snapshot above (or
       // a spacing variant of one) is reused, never duplicated. Waits for the
       // identity lock once per import; colourless filaments are created as before.
-      const identity = { type: data.type, brand: null, color: data.color };
+      const identity = { type: data.type, brand: data.brand, color: data.color };
       if (filamentIdentityKey(identity) !== null) {
         if (!identityLocked) {
           await waitForMaterialIdentity(tx);
@@ -270,12 +268,12 @@ export class ProductOnboardingService {
         const dup = await findDuplicateMaterial(tx, identity);
         if (dup) {
           if (!materials.some((x) => x.id === dup.id)) {
-            materials.push({ id: dup.id, name: dup.name, type: dup.type, color: dup.color, colorHex: dup.colorHex });
+            materials.push({ id: dup.id, name: dup.name, type: dup.type, brand: dup.brand, color: dup.color, colorHex: dup.colorHex });
           }
           return dup.id;
         }
       }
-      const m = await tx.material.create({ data, select: { id: true, name: true, type: true, color: true, colorHex: true } });
+      const m = await tx.material.create({ data, select: MATERIAL_SNAPSHOT.select });
       materials.push(m);
       createdMaterials.push({ id: m.id, name: m.name, colorHex: m.colorHex ?? null });
       return m.id;

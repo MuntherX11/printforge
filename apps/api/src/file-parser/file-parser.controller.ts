@@ -9,6 +9,11 @@ import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StaffGuard } from '../auth/guards/staff.guard';
 import { ThreeMfParserService } from './threemf-parser.service';
+import { PrismaService } from '../common/prisma/prisma.service';
+import { gcodePlanSlots, previewFilamentMatches, threeMfPlanSlots } from '../products/filament-preview';
+
+/** `?matchFilaments=1`: also map each used slot to a shop filament, as an import would (read-only). */
+const wantsMatches = (v?: string) => v === '1' || v === 'true';
 
 class ScrapeUrlDto {
   @IsString()
@@ -26,6 +31,7 @@ export class FileParserController {
     private urlScraper: UrlScraperService,
     private costingService: CostingService,
     private threeMfParser: ThreeMfParserService,
+    private prisma: PrismaService,
   ) {}
 
   /**
@@ -41,6 +47,7 @@ export class FileParserController {
     @Query('colorChanges') colorChanges?: string,
     @Query('infill') infill?: string,
     @Body('assembledUploadId') assembledId?: string,
+    @Query('matchFilaments') matchFilaments?: string,
   ) {
     // keep: analysis is a preflight — the staged file is consumed later by the
     // onboarding step, so the browser only uploads it once.
@@ -61,10 +68,11 @@ export class FileParserController {
     // import wizard uses to prefill "Units on this plate".
     if (is3mf) {
       const analysis = await this.threeMfParser.parse(file.buffer);
+      const filamentMatches = wantsMatches(matchFilaments) ? await previewFilamentMatches(this.prisma, threeMfPlanSlots(analysis)) : undefined;
       return {
         filename: file.originalname,
         fileSize: file.size,
-        analysis: { type: '3mf', ...analysis },
+        analysis: { type: '3mf', ...analysis, ...(filamentMatches ? { filamentMatches } : {}) },
       };
     }
 
@@ -77,6 +85,7 @@ export class FileParserController {
       gramsUsed = analysis.filamentUsedGrams || 0;
       printMinutes = analysis.estimatedTimeSeconds ? Math.round(analysis.estimatedTimeSeconds / 60) : 0;
       fileAnalysis = { type: 'gcode', ...analysis };
+      if (wantsMatches(matchFilaments)) fileAnalysis.filamentMatches = await previewFilamentMatches(this.prisma, gcodePlanSlots(analysis));
     } else {
       const infillPercent = infill ? parseInt(infill) : 20;
       const analysis = this.stlEstimator.analyze(file.buffer, 1.24, infillPercent);
@@ -118,14 +127,16 @@ export class FileParserController {
    */
   @Post('parse-gcode')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
-  async parseGcode(@UploadedFile() file: any, @Body('assembledUploadId') assembledId?: string) {
+  async parseGcode(@UploadedFile() file: any, @Body('assembledUploadId') assembledId?: string, @Query('matchFilaments') matchFilaments?: string) {
     if (!file && assembledId) file = await this.chunkUploads.consume(String(assembledId), 200 * 1024 * 1024, { keep: true });
     if (!file) throw new BadRequestException('No file uploaded');
     const name = (file?.originalname || '').toLowerCase();
     if (!name.endsWith('.gcode') && !name.endsWith('.gco') && !name.endsWith('.g')) {
       throw new BadRequestException('File must be a G-code file (.gcode, .gco, .g)');
     }
-    return this.gcodeParser.parseHeader(file.buffer);
+    const analysis = this.gcodeParser.parseHeader(file.buffer);
+    if (!wantsMatches(matchFilaments)) return analysis;
+    return { ...analysis, filamentMatches: await previewFilamentMatches(this.prisma, gcodePlanSlots(analysis)) };
   }
 
   @Post('analyze-stl')
