@@ -281,7 +281,7 @@ export function planFilamentSlots(materials: MatchableMaterial[], slots: PlanSlo
     };
     const r = resolveSlot(pool, slot);
     const out = (create: NewMaterialData): FilamentSlotMatch => ({
-      index: s.index, file, material: null, how: null,
+      index: s.index, file, materialType: slot.type, material: null, how: null,
       create: { name: create.name, brand: create.brand, color: create.color, colorHex: create.colorHex },
     });
     if (r.create) {
@@ -293,7 +293,7 @@ export function planFilamentSlots(materials: MatchableMaterial[], slots: PlanSlo
     const pending = created.get(r.material.id);
     if (pending) return out(pending);
     const m = r.material;
-    return { index: s.index, file, how: r.how, create: null, material: { id: m.id, name: m.name, type: m.type, brand: m.brand ?? null, color: m.color, colorHex: normaliseHex(m.colorHex) } };
+    return { index: s.index, file, materialType: slot.type, how: r.how, create: null, material: { id: m.id, name: m.name, type: m.type, brand: m.brand ?? null, color: m.color, colorHex: normaliseHex(m.colorHex) } };
   });
 }
 

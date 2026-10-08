@@ -10,12 +10,13 @@ import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import { findDuplicateMaterial, waitForMaterialIdentity } from '../inventory/material-identity';
 import { ThreeMfParserService } from '../file-parser/threemf-parser.service';
 import { isMultiColourComponent } from '../stock-ledger/colour-key';
+import { assertOverridesExist, chosenMaterial } from './filament-overrides';
 import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { componentSlotIndexes, duplicateLayout, plateLabelWarnings, slotsDifferWarning, slotsFor, toolsForComponent } from './plate-layouts.service';
 import { adoptDefaultPrinter, unmatchedPrinterWarnings } from './plate-file-rules';
 import { lockOptions } from './product-locks';
 import { slicerAttachmentData, StoredFile, thumbnailAttachmentData, unlinkWritten, writeUploadFile } from './slicer-files';
-import { GRAMS_BOUNDS, MINUTES_BOUNDS } from './slicer-import-input';
+import { GRAMS_BOUNDS, MINUTES_BOUNDS, type FilamentOverrides } from './slicer-import-input';
 import { gcodeImportTools, MATERIAL_SNAPSHOT, resolveSlot, slotFilament } from './slicer-materials';
 
 /**
@@ -42,6 +43,8 @@ export interface ImportOptions {
   sizeOptionId: string | null;
   units: Map<number, number>;
   targets: Map<number, string>;
+  /** The owner's own filament per file/plate key and slot: those slots skip matching and create nothing. */
+  filaments?: FilamentOverrides;
 }
 
 interface Tool { index: number; grams: number; type: unknown; hex: unknown; filament?: SlicerFilament | null }
@@ -186,6 +189,7 @@ export class ProductOnboardingService {
       const c = await this.prisma.productComponent.findUnique({ where: { id: componentId }, select: { productId: true, variantId: true } });
       if (!c || c.productId !== productId || (c.variantId ?? null) !== scope) throw new BadRequestException(FOREIGN_COMPONENT);
     }
+    await assertOverridesExist(this.prisma, opts.filaments);
     const planned = this.plan(items, opts, kind);
     const warnings: Problem[] = [];
 
@@ -216,7 +220,10 @@ export class ProductOnboardingService {
 
     let out: Response;
     try {
-      out = await this.prisma.$transaction((tx: any) => this.writeRows(tx, productId, scope, product, planned, kind, multicolour, warnings), IMPORT_TX);
+      out = await this.prisma.$transaction(
+        (tx: any) => this.writeRows(tx, productId, scope, product, planned, kind, multicolour, warnings, opts.filaments),
+        IMPORT_TX,
+      );
     } catch (e) {
       await unlinkWritten(written);
       throw e;
@@ -232,7 +239,7 @@ export class ProductOnboardingService {
   private async writeRows(
     tx: any, productId: string, scope: string | null,
     product: { defaultPrinterId: string | null; baseOptionLabel: string | null },
-    planned: Planned[], kind: 'gcode' | '3mf', multicolour: boolean, warnings: Problem[],
+    planned: Planned[], kind: 'gcode' | '3mf', multicolour: boolean, warnings: Problem[], overrides?: FilamentOverrides,
   ): Promise<Response> {
     const results: Response['results'] = [];
     const layoutsCreated: Response['layoutsCreated'] = [];
@@ -251,9 +258,13 @@ export class ProductOnboardingService {
 
     const materials: any[] = await tx.material.findMany(MATERIAL_SNAPSHOT);
     let identityLocked = false;
-    const materialFor = async (t: Tool): Promise<string> => {
+    const materialFor = async (it: Item, t: Tool): Promise<string> => {
+      const slot = slotFilament(t.type, t.hex, t.filament);
+      // The owner's own choice for this slot: no matching, nothing created.
+      const chosen = chosenMaterial(materials, overrides, it.key, t.index, slot, this.refLabel(it), warnings);
+      if (chosen) return chosen.id;
       // The file's own filament (vendor, profile, colour name) first; see resolveSlot.
-      const r = resolveSlot(materials, slotFilament(t.type, t.hex, t.filament));
+      const r = resolveSlot(materials, slot);
       if (!r.create) return r.material.id;
       const data = r.create;
       // Safety spec §3: a coloured filament created since the snapshot above (or
@@ -292,7 +303,7 @@ export class ProductOnboardingService {
       const tools = p.action === 'PLACEHOLDER' ? p.item.tools.slice(0, 1) : p.item.tools;
       const multi = p.action !== 'PLACEHOLDER' && tools.length >= 2;
       const slots: Array<{ colorIndex: number; materialId: string; grams: number }> = [];
-      for (const t of tools) slots.push({ colorIndex: multi ? t.index : 0, materialId: await materialFor(t), grams: t.grams });
+      for (const t of tools) slots.push({ colorIndex: multi ? t.index : 0, materialId: await materialFor(p.item, t), grams: t.grams });
       const materialId = multi ? null : slots[0]?.materialId ?? null;
       specs.push({ p, key, sortOrder: nextSort++, multi, materialId, slots });
       if (p.action !== 'PLACEHOLDER') {

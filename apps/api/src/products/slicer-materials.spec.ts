@@ -138,6 +138,9 @@ describe('the import plan shown before an import', () => {
       { index: 2, rawType: 'PLA', rawHex: '#F5B6A5', file: slicerFilament('eSUN PLA+ Peach Pink @BBL X1C', 'eSUN', 'PLA', '#F5B6A5') },
       { index: 3, rawType: 'PLA', rawHex: '#C02A22', file: null },
     ]);
+    // The type the import files each slot under, for the "choose my filament" picker.
+    expect(plan.map((m) => m.materialType)).toEqual(['PLA', 'PLA', 'PLA', 'PLA']);
+    expect(planFilamentSlots(SHOP, [{ index: 0, rawType: 'PETG-CF', rawHex: '#00FF00', file: null }])[0]).toMatchObject({ materialType: 'PETG', material: null });
     expect(plan.map(filamentMatchText)).toEqual([
       'eSUN PLA+ Fire Engine Red → your eSun PLA Fire Engine Red (exact)',
       'eSUN PLA+ Peach Pink → new filament eSUN PLA+ Peach Pink (cost 0 — set it after)',

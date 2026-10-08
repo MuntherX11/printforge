@@ -41,6 +41,8 @@ export interface FilamentSlotMatch {
   /** 0-based slot (tool) index. */
   index: number;
   file: SlicerFilament;
+  /** The material type the import files the slot under ('PLA+' → 'PLA'): what a "choose my filament" picker lists first. */
+  materialType?: string;
   material: FilamentMatchMaterial | null;
   how: FilamentMatchHow | null;
   /** The filament the import creates (cost 0 until set). */
@@ -92,3 +94,21 @@ export function filamentMatchText(m: FilamentSlotMatch): string {
   if (m.material) return `${from} → your ${shopFilamentLabel(m.material)} (${HOW_TEXT[m.how ?? 'NAME']})`;
   return `${from} → new filament ${m.create?.name ?? 'Filament'} (cost 0 — set it after)`;
 }
+
+/**
+ * The owner's own filament for a slot, chosen in the import dialog instead of
+ * the automatic match: '… → your eSun PLA Fire Engine Red (your choice)'.
+ */
+export function filamentChoiceText(file: SlicerFilament, chosen: { name: string; type: string; brand: string | null; color: string | null }): string {
+  return `${slicerFilamentLabel(file)} → your ${shopFilamentLabel(chosen)} (your choice)`;
+}
+
+/**
+ * Body field `filaments` of the slicer imports (M1, M2): file position
+ * (G-code) or plate number (3MF) → 0-based slot → the id of the filament to
+ * use. A listed slot skips matching and never creates a filament.
+ */
+export type ImportFilamentOverrides = Record<string, Record<string, string>>;
+
+/** Warning code: a chosen filament isn't the material type the file's slot prints (allowed, reported). */
+export const FILAMENT_TYPE_DIFFERS = 'FILAMENT_TYPE_DIFFERS';

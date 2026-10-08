@@ -20,6 +20,9 @@ export const GRAMS_BOUNDS = { min: 0.1, max: 100_000 } as const;
 export const COLOR_CHANGES_BOUNDS = { min: 0, max: 10_000, integer: true } as const;
 export const SORT_ORDER_BOUNDS = { min: 0, max: 10_000, integer: true } as const;
 export const LAYOUT_NAME_MAX = 60;
+/** Highest 0-based slot (tool) index a `filaments` override may name. */
+export const MAX_SLOT_INDEX = 255;
+export const MAX_FILAMENT_OVERRIDES = 500;
 
 /** A multipart JSON field: absent/'' → undefined; a string must be valid JSON. */
 export function jsonField(raw: unknown, field: string): unknown {
@@ -83,6 +86,37 @@ export function parseTargets(raw: unknown, allowed: (n: number) => boolean, what
   return out;
 }
 
+/** Slot → filament id of one file or plate. */
+export type SlotOverrides = Map<number, string>;
+/** File position (G-code) or plate number (3MF) → its slot overrides. */
+export type FilamentOverrides = Map<number, SlotOverrides>;
+
+/**
+ * `filaments`: `{ [key]: { [slot]: materialId } }` — the owner's own filament
+ * for a slot instead of the automatic match. Keys restricted to `allowed`;
+ * slots are 0-based, 0–255. That the ids exist is checked by the import.
+ */
+export function parseFilamentOverrides(raw: unknown, allowed: (n: number) => boolean, what: string): FilamentOverrides {
+  const out: FilamentOverrides = new Map();
+  const m = mapOf(raw, 'filaments');
+  if (!m) return out;
+  for (const [k, v] of Object.entries(m)) {
+    const key = keyOf(k, 'filaments', allowed, what);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw new BadRequestException(`"filaments[${k}]" must be an object`);
+    const slots: SlotOverrides = new Map();
+    for (const [s, materialId] of Object.entries(v as Body)) {
+      if (!/^\d{1,3}$/.test(s) || Number(s) > MAX_SLOT_INDEX) {
+        throw new BadRequestException(`"filaments[${k}]" keys must be slot numbers from 0 to ${MAX_SLOT_INDEX}`);
+      }
+      slots.set(Number(s), id(materialId, `filaments[${k}][${s}]`));
+    }
+    if (slots.size) out.set(key, slots);
+  }
+  const total = [...out.values()].reduce((n, s) => n + s.size, 0);
+  if (total > MAX_FILAMENT_OVERRIDES) throw new BadRequestException(`"filaments" may choose at most ${MAX_FILAMENT_OVERRIDES} slots`);
+  return out;
+}
+
 /** M1 `assembledUploadIds`: a JSON list of staged-upload ids (format checked again by ChunkUploadsService). */
 export function parseAssembledIds(raw: unknown): string[] {
   const v = jsonField(raw, 'assembledUploadIds');
@@ -125,6 +159,7 @@ export interface GcodeImportInput {
   assembledUploadIds: string[];
   units: Map<number, number>;
   targets: Map<number, string>;
+  filaments: FilamentOverrides;
 }
 
 /** M1 body. `fileCount` = multipart files + staged ids; unit/target keys must name one of them. */
@@ -140,6 +175,7 @@ export function parseGcodeImport(body: unknown, multipartCount: number): GcodeIm
     assembledUploadIds,
     units: parseUnits(b.units, isFile, what),
     targets: parseTargets(b.targets, isFile, what),
+    filaments: parseFilamentOverrides(b.filaments, isFile, what),
   };
 }
 
@@ -149,6 +185,7 @@ export interface ThreeMfImportInput {
   plateNames: Record<string, string>;
   units: Map<number, number>;
   targets: Map<number, string>;
+  filaments: FilamentOverrides;
 }
 
 /** M2 body (everything but the file). Unit/target keys must be selected plates. */
@@ -163,6 +200,7 @@ export function parseThreeMfImport(body: unknown): ThreeMfImportInput {
     plateNames: parsePlateNames(b.plateNames),
     units: parseUnits(b.units, isSelected, what),
     targets: parseTargets(b.targets, isSelected, what),
+    filaments: parseFilamentOverrides(b.filaments, isSelected, what),
   };
 }
 
