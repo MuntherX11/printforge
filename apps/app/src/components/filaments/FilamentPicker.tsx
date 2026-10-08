@@ -16,6 +16,8 @@ export interface FilamentPickerProps {
   onRetry: () => void;
   /** Material type listed first (the slot's current filament type). */
   preferType: string | null;
+  /** A slicer slot's colour: within the type, the closest colours come first. */
+  nearHex?: string | null;
   currentMaterialId: string | null;
   /** The row being saved: it shows "Saving…". */
   savingId: string | null;
@@ -33,12 +35,13 @@ function typeLabel(type: string): string {
  * Search the filaments and pick one: colour dot, colour (the name when there
  * is none), the name when it differs from the colour, brand · type, and grams
  * in stock per row (filamentLabel, the Filaments list's rule). Same type
- * first, then in stock, then name A–Z; out of stock rows are marked but can
+ * first, then (with `nearHex`) the closest colour, then in stock, then name
+ * A–Z; out of stock rows are marked but can
  * still be picked. Search follows the Filaments list rules (colour, name,
  * brand, type, location, hex, PF-ID).
  */
 export function FilamentPicker(props: FilamentPickerProps) {
-  const { rows, loading, error, preferType, currentMaterialId, savingId, disabled, onPick } = props;
+  const { rows, loading, error, preferType, nearHex, currentMaterialId, savingId, disabled, onPick } = props;
   const busy = disabled || savingId !== null;
   const [q, setQ] = useState('');
   const ownInput = useRef<HTMLInputElement>(null);
@@ -46,9 +49,9 @@ export function FilamentPicker(props: FilamentPickerProps) {
   const listRef = useRef<HTMLUListElement>(null);
 
   const choices = useMemo(
-    () => (rows ? rankFilamentChoices(rows, { q, preferType, currentMaterialId }) : [])
+    () => (rows ? rankFilamentChoices(rows, { q, preferType, currentMaterialId, nearHex }) : [])
       .map((choice) => ({ ...choice, label: filamentLabel(choice.row) })),
-    [rows, q, preferType, currentMaterialId],
+    [rows, q, preferType, currentMaterialId, nearHex],
   );
 
   // After the dialog's own first-focus; not on touch screens, where the keyboard would cover the list.

@@ -9,6 +9,7 @@
  * from ./index, so there is no runtime import cycle.
  */
 import type { FilamentStockRow, Problem } from './index';
+import { approxColourHex } from './colour-names';
 import { filamentQueryMatcher } from './filament-filter';
 
 // ---------------------------------------------------------------- writes
@@ -152,6 +153,12 @@ export interface FilamentChoiceQuery {
   /** The slot's current material type; its rows come first. null = no grouping. */
   preferType: string | null;
   currentMaterialId: string | null;
+  /**
+   * A slicer slot's colour ('8E2A14' or '#8E2A14'): within the same type the
+   * closest colours come first (an import's "choose my filament"). Omitted or
+   * not a hex = the plain order.
+   */
+  nearHex?: string | null;
 }
 
 export interface FilamentChoice {
@@ -165,25 +172,54 @@ function cmpId(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+type Rgb = [number, number, number];
+
+function rgbOf(hex: string | null | undefined): Rgb | null {
+  const m = /^#?([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec((hex ?? '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 /**
- * The filaments matching the search, same type as the slot first, then in
- * stock, then name A–Z, then id. The current filament keeps its place and is
- * flagged. Returns a new array; `rows` is not touched.
+ * How far a filament's colour is from `near` ("redmean", a cheap perceptual
+ * weighting of RGB; for ordering only). Its hex, else the approximate colour
+ * of its colour name; a filament with neither sorts after every coloured one.
+ */
+function colourGap(row: FilamentStockRow, near: Rgb): number {
+  const c = rgbOf(row.colorHex) ?? rgbOf(approxColourHex(row.color || row.name));
+  if (!c) return Number.MAX_SAFE_INTEGER;
+  const rMean = (c[0] + near[0]) / 2;
+  const [dr, dg, db] = [c[0] - near[0], c[1] - near[1], c[2] - near[2]];
+  return Math.round((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db);
+}
+
+/**
+ * The filaments matching the search, same type as the slot first, then (with
+ * `nearHex`) the closest colour, then in stock, then name A–Z, then id. The
+ * current filament keeps its place and is flagged. Returns a new array; `rows`
+ * is not touched.
  */
 export function rankFilamentChoices(rows: readonly FilamentStockRow[], query: FilamentChoiceQuery): FilamentChoice[] {
   const matches = filamentQueryMatcher(query.q, rows);
   const prefer = (query.preferType ?? '').trim().toUpperCase();
+  const near = rgbOf(query.nearHex);
   return rows
     .filter(matches)
     .map((row) => ({
-      row,
-      sameType: prefer !== '' && String(row.type) === prefer,
-      inStock: filamentInStock(row),
-      current: query.currentMaterialId !== null && row.id === query.currentMaterialId,
+      gap: near ? colourGap(row, near) : 0,
+      choice: {
+        row,
+        sameType: prefer !== '' && String(row.type) === prefer,
+        inStock: filamentInStock(row),
+        current: query.currentMaterialId !== null && row.id === query.currentMaterialId,
+      },
     }))
     .sort((a, b) =>
-      Number(b.sameType) - Number(a.sameType)
-      || Number(b.inStock) - Number(a.inStock)
-      || a.row.name.localeCompare(b.row.name, 'en', { sensitivity: 'base' })
-      || cmpId(a.row.id, b.row.id));
+      Number(b.choice.sameType) - Number(a.choice.sameType)
+      || a.gap - b.gap
+      || Number(b.choice.inStock) - Number(a.choice.inStock)
+      || a.choice.row.name.localeCompare(b.choice.row.name, 'en', { sensitivity: 'base' })
+      || cmpId(a.choice.row.id, b.choice.row.id))
+    .map((x) => x.choice);
 }

@@ -174,6 +174,25 @@ describe('rankFilamentChoices', () => {
     expect(order(catalog, 'PLA', 'nothing like this')).toEqual([]);
   });
 
+  it('with a slot colour (nearHex): the closest colour first within the type, a filament without a colour last', () => {
+    const red = row('red', { name: 'B Red', color: 'Fire Engine Red', colorHex: 'CC3A2F', totalStock: 0 });
+    const maroon = row('maroon', { name: 'A Maroon', color: 'Maroon', colorHex: '#7B1E1E' });
+    const blue = row('blue', { name: 'A Blue', color: 'Blue', colorHex: '2040C0' });
+    // No hex: placed by the approximate colour of its colour name.
+    const named = row('named', { name: 'Silk', color: 'Dark Red' });
+    const plain = row('plain', { name: 'AAA no colour' });
+    const petgRed = row('petg-red', { name: 'PETG Red', type: MaterialType.PETG, colorHex: '8E2A14' });
+    const rows = [plain, blue, petgRed, named, red, maroon];
+    const near = (nearHex: string | null) => rankFilamentChoices(rows, { q: '', preferType: 'PLA', currentMaterialId: null, nearHex }).map((c) => c.row.id);
+    expect(near('#8E2A14')).toEqual(['maroon', 'named', 'red', 'blue', 'plain', 'petg-red']);
+    expect(near('8e2a14ff')).toEqual(near('#8E2A14'));
+    // Not a colour: the plain order (in stock, then name).
+    expect(near(null)).toEqual(order(rows, 'PLA'));
+    expect(near('nope')).toEqual(order(rows, 'PLA'));
+    expect(Object.keys(rankFilamentChoices(rows, { q: '', preferType: 'PLA', currentMaterialId: null, nearHex: '8E2A14' })[0]).sort())
+      .toEqual(['current', 'inStock', 'row', 'sameType']);
+  });
+
   it('does not mutate its input', () => {
     const rows = [...mixed];
     const before = JSON.stringify(rows);
