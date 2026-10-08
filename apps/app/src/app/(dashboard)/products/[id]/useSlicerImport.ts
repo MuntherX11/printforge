@@ -3,7 +3,10 @@
 import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
 import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
-import { detectPlateUnits, gcodePlateFigures, isExactFilamentMatch, type FilamentSlotMatch, type PlateFigures, type PlateUnitsDetection } from '@printforge/types';
+import {
+  detectPlateUnits, gcodePlateFigures, isExactFilamentMatch,
+  type FilamentSlotMatch, type ImportFilamentOverrides, type PlateFigures, type PlateUnitsDetection,
+} from '@printforge/types';
 import { useToast } from '@/components/ui/toast';
 import { plural } from '@/lib/product-format';
 import type { ApiGcodeAnalysis, ApiThreeMfAnalyzeResult, ProductDetail, SlicerImportResult, ThreeMfAnalysis } from '@/lib/types/api';
@@ -60,11 +63,18 @@ export interface GcodeConfirmState {
   files: GcodeFileCheck[];
 }
 
-/** M1 with every file already staged; `units` is keyed by the file's position. */
-export function postGcodeImport(productId: string, sizeOptionId: string | null, files: GcodeFileCheck[], units: Record<string, number>) {
+/**
+ * M1 with every file already staged; `units` and `filaments` (the owner's own
+ * filament per slot) are keyed by the file's position.
+ */
+export function postGcodeImport(
+  productId: string, sizeOptionId: string | null, files: GcodeFileCheck[],
+  units: Record<string, number>, filaments: ImportFilamentOverrides = {},
+) {
   const fd = new FormData();
   fd.append('assembledUploadIds', JSON.stringify(files.map(f => f.stagedId)));
   if (Object.keys(units).length) fd.append('units', JSON.stringify(units));
+  if (Object.keys(filaments).length) fd.append('filaments', JSON.stringify(filaments));
   if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
   return api.postForm<ImportResult>(`/products/${productId}/onboard-gcode`, fd);
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { detectionPrefill, parsePlateUnits, perUnitFigures, plateUnitsProblem, type PlateUnitsDetection } from '@printforge/types';
+import { detectionPrefill, parsePlateUnits, perUnitFigures, plateUnitsProblem, type ImportFilamentOverrides, type PlateUnitsDetection } from '@printforge/types';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -10,7 +10,9 @@ import { cn } from '@/lib/utils';
 import { formatGrams, formatMinutes } from '@/lib/product-format';
 import { errorText } from './options-ui';
 import { FilamentMappingList } from './FilamentMappingList';
+import { SlotFilamentChooser, slotChooserTitle } from './SlotFilamentChooser';
 import { importToasts, postGcodeImport, type GcodeConfirmState, type GcodeFileCheck } from './useSlicerImport';
+import { chosenSlotIds, useSlotFilamentChoices } from './useSlotFilamentChoices';
 
 interface Props {
   productId: string;
@@ -49,8 +51,9 @@ function hintText(d: PlateUnitsDetection): string | null {
 /**
  * Upload G-code, confirm step (owner: "gcode uploaded should automatically be
  * scanned for the number of units on plate"). Each file lists its slots and
- * the filament each becomes (an existing one, or a new one at cost 0). Its
- * detected units are prefilled and editable; ×N imports one part per unit
+ * the filament each becomes (an existing one, or a new one at cost 0); the
+ * owner can put his own filament on any slot instead. Its detected units are
+ * prefilled and editable; ×N imports one part per unit
  * plus a ×N plate layout holding the file, or everything can go in as one
  * part with no plate.
  */
@@ -61,6 +64,7 @@ export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel,
   const [error, setError] = useState<string | null>(null);
   /** The request failed without a server rejection: it may have committed, so a retry could duplicate it. */
   const [maybeImported, setMaybeImported] = useState(false);
+  const slots = useSlotFilamentChoices(state);
 
   useEffect(() => {
     if (!state) return;
@@ -81,10 +85,16 @@ export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel,
     if (!state || maybeImported || (mode === 'units' && invalid)) return;
     const body: Record<string, number> = {};
     if (mode === 'units') parsed.forEach((u, i) => { if (u !== null && u > 1) body[String(i)] = u; });
+    // The owner's own filaments, per file position and slot (a skipped file sends none).
+    const filaments: ImportFilamentOverrides = {};
+    files.forEach((f, i) => {
+      const ids = f.plate.grams > 0 ? chosenSlotIds(slots.choices[i], f.filamentMatches.map(m => m.index)) : null;
+      if (ids) filaments[String(i)] = ids;
+    });
     setImporting(mode);
     setError(null);
     try {
-      importToasts(await postGcodeImport(productId, sizeOptionId, files, body), toast);
+      importToasts(await postGcodeImport(productId, sizeOptionId, files, body, filaments), toast);
       onImported();
       onClose();
     } catch (err) {
@@ -102,6 +112,15 @@ export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel,
     }
   }
 
+  // Choosing a slot's filament takes over the dialog; Escape, the X and Back return to the files.
+  if (slots.picking) {
+    return (
+      <Dialog open onClose={slots.close} title={slotChooserTitle(slots) ?? ''} className="max-w-2xl">
+        <SlotFilamentChooser slots={slots} fileName={many ? files[slots.picking.group]?.fileName : null} />
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open onClose={importing ? () => undefined : onClose} title={`Upload G-code onto ${targetLabel}`} className="max-w-2xl">
       <div className="space-y-3">
@@ -116,7 +135,16 @@ export function GcodeImportDialog({ productId, state, sizeOptionId, targetLabel,
                 <p className={cn('text-sm', f.detection.kind === 'MIXED' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200')}>
                   {detectedText(f.detection)} <span className="text-gray-800 dark:text-gray-200">{resultText(f, u)}</span>
                 </p>
-                {f.plate.grams > 0 && <FilamentMappingList matches={f.filamentMatches} />}
+                {f.plate.grams > 0 && (
+                  <FilamentMappingList
+                    matches={f.filamentMatches}
+                    group={i}
+                    choices={slots.choices[i]}
+                    onChoose={m => slots.open(i, m)}
+                    onUndo={index => slots.undo(i, index)}
+                    disabled={importing !== null || maybeImported}
+                  />
+                )}
                 {f.plate.grams > 0 && (
                   <div>
                     <label htmlFor={id} className="text-xs font-medium text-gray-700 dark:text-gray-300">Units on the plate</label>

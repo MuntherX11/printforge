@@ -1,18 +1,20 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { plateUnitsPrefill } from '@printforge/types';
+import { plateUnitsPrefill, type ImportFilamentOverrides } from '@printforge/types';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { ApiError, api } from '@/lib/api';
 import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
 import { formatGrams, formatMinutes, plural } from '@/lib/product-format';
-import type { ComponentDetail } from '@/lib/types/api';
+import type { ComponentDetail, ThreeMfPlateInfo } from '@/lib/types/api';
 import { PlatePreviewCard, NEW_COMPONENT, isSliced, unitsOf, type PlateChoice } from './PlatePreviewCard';
 import { errorText } from './options-ui';
 import { FilamentMappingList } from './FilamentMappingList';
+import { SlotFilamentChooser, slotChooserTitle } from './SlotFilamentChooser';
 import { importToasts, type ImportResult, type ThreeMfWizardState } from './useSlicerImport';
+import { chosenSlotIds, useSlotFilamentChoices } from './useSlotFilamentChoices';
 
 interface Props {
   productId: string;
@@ -39,8 +41,9 @@ function initialChoices(state: ThreeMfWizardState): Record<number, PlateChoice> 
 /**
  * 3MF import onto the BOM scope (spec §5.1, §3.12, M2): per plate, units on
  * the plate and whether it becomes a new component or a plate layout of an
- * existing one. The filaments the selected plates use are listed with the
- * filament each becomes. Errors show the server's text.
+ * existing one. The filaments of the selected plates that become components
+ * are listed with the filament each becomes; the owner can put his own
+ * filament on any of them instead. Errors show the server's text.
  */
 export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabel, targetComponents, onClose, onImported }: Props) {
   const { toast } = useToast();
@@ -49,6 +52,7 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
   const [error, setError] = useState<string | null>(null);
   /** The import request failed without a server rejection: it may have committed, so a retry could duplicate it. */
   const [maybeImported, setMaybeImported] = useState(false);
+  const slots = useSlotFilamentChoices(state);
 
   useEffect(() => {
     if (!state) return;
@@ -81,6 +85,10 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
 
   if (!state) return null;
 
+  /** The slots a plate gives a new component; a plate layout of an existing component keeps that component's filaments. */
+  const newSlots = (p: ThreeMfPlateInfo) =>
+    (!isSliced(p) || choices[p.plateIndex]?.addAs === NEW_COMPONENT ? p.tools.filter(t => t.filamentGrams > 0).map(t => t.index) : []);
+
   async function handleImport() {
     if (!state || selected.length === 0 || invalid || maybeImported) return;
     setImporting(true);
@@ -95,9 +103,13 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
       const units: Record<string, number> = {};
       const targets: Record<string, string> = {};
       const names: Record<string, string> = {};
+      // The owner's own filaments, per plate and slot.
+      const filaments: ImportFilamentOverrides = {};
       for (const p of selected) {
         const c = choices[p.plateIndex];
         names[String(p.plateIndex)] = c.name.trim() || p.name;
+        const ids = chosenSlotIds(slots.choices[0], newSlots(p));
+        if (ids) filaments[String(p.plateIndex)] = ids;
         if (!isSliced(p)) continue;
         const u = unitsOf(c);
         if (u !== null && !Number.isNaN(u) && (u > 1 || c.addAs !== NEW_COMPONENT)) units[String(p.plateIndex)] = u;
@@ -107,6 +119,7 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
       fd.append('plateNames', JSON.stringify(names));
       if (Object.keys(units).length) fd.append('units', JSON.stringify(units));
       if (Object.keys(targets).length) fd.append('targets', JSON.stringify(targets));
+      if (Object.keys(filaments).length) fd.append('filaments', JSON.stringify(filaments));
       if (sizeOptionId) fd.append('sizeOptionId', sizeOptionId);
       sent = true;
       const r = await api.postForm<ImportResult>(`/products/${productId}/onboard-3mf`, fd);
@@ -130,9 +143,17 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
   }
 
   const { analysis } = state;
-  // The slots the selected plates use, and the filament each becomes.
-  const usedSlots = new Set(selected.flatMap(p => p.tools.filter(t => t.filamentGrams > 0).map(t => t.index)));
+  // The slots the selected plates give new components, and the filament each becomes.
+  const usedSlots = new Set(selected.flatMap(newSlots));
   const filamentMatches = (analysis.filamentMatches ?? []).filter(m => usedSlots.has(m.index));
+  // Choosing a slot's filament takes over the dialog; Escape, the X and Back return to the plates.
+  if (slots.picking) {
+    return (
+      <Dialog open onClose={slots.close} title={slotChooserTitle(slots) ?? ''} className="max-w-2xl">
+        <SlotFilamentChooser slots={slots} />
+      </Dialog>
+    );
+  }
   return (
     <Dialog open onClose={importing ? () => undefined : onClose} title={`Import 3MF onto ${targetLabel}`} className="max-w-4xl">
       <div className="space-y-3">
@@ -143,7 +164,13 @@ export function ThreeMfImportWizard({ productId, state, sizeOptionId, targetLabe
           Selected: {plural(selected.length, 'plate')} · total {formatGrams(summary.grams)} · {formatMinutes(summary.seconds / 60)} ·
           adds {plural(summary.components, 'component')} and {plural(summary.layouts, 'plate layout')} (existing {summary.existing})
         </p>
-        <FilamentMappingList matches={filamentMatches} />
+        <FilamentMappingList
+          matches={filamentMatches}
+          choices={slots.choices[0]}
+          onChoose={m => slots.open(0, m)}
+          onUndo={index => slots.undo(0, index)}
+          disabled={importing || maybeImported}
+        />
         <div className="grid max-h-[55vh] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
           {plates.map(p => choices[p.plateIndex] && (
             <PlatePreviewCard
