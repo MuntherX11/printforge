@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
 import { CHUNK_THRESHOLD, stageLargeFile } from '@/lib/chunked-upload';
 import {
-  detectPlateUnits, gcodePlateFigures, isExactFilamentMatch,
+  detectPlateUnits, gcodePlateFigures,
   type FilamentSlotMatch, type ImportFilamentOverrides, type PlateFigures, type PlateUnitsDetection,
 } from '@printforge/types';
 import { useToast } from '@/components/ui/toast';
@@ -111,10 +111,12 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
 
   /**
    * Each file is staged once and its object labels read (M6, the staged copy
-   * is kept); the import then consumes the staged copies. Plates of one
-   * object whose filaments all match exactly import straight away as before;
-   * anything else (several units, no labels, mixed models, a new or
-   * nearest-colour filament) goes through the confirm step first.
+   * is kept); the import then consumes the staged copies. Every file that
+   * prints with at least one filament goes through the confirm step, so the
+   * owner can see each slot's filament and choose his own before anything
+   * lands on the bill of materials — slicer files often carry the slicer's
+   * default slot colours, so even an "exact" colour match can be the wrong
+   * filament. Only a file with no filament slots at all imports straight away.
    */
   const uploadGcode = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -136,9 +138,7 @@ export function useSlicerImport(productId: string, sizeOptionId: string | null, 
       toast('error', errorText(err, 'Couldn\'t read the G-code'));
       checks = [];
     }
-    // The confirm step also shows when a slot isn't an exact match, so a new or
-    // nearest-colour filament is seen before it lands on the bill of materials.
-    if (checks.length && checks.some(c => c.detection.kind !== 'SINGLE' || c.filamentMatches.some(m => !isExactFilamentMatch(m)))) {
+    if (checks.length && checks.some(c => c.detection.kind !== 'SINGLE' || c.filamentMatches.length > 0)) {
       setGcodeConfirm({ files: checks });
     } else if (checks.length) {
       try {
