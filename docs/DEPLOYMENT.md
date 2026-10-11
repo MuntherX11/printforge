@@ -112,10 +112,14 @@ On **docker-vm** nothing changes: the PrintForge checkout and its `.env` stay wh
 
 ### Deploying a release
 
-**1. On Vault**, in the canonical clone:
+**1. On Vault**, in the canonical clone. **Check out the commit you are releasing first**: the
+*images* are built from the ref you pass, but the *script itself* runs from the working tree, so a
+checkout still on the previous release silently builds only the components that release knew
+about (v2.18.0 shipped four of five images on the first try for exactly this reason):
 
 ```bash
-bash scripts/build-and-ship.sh origin/master
+git fetch origin && git checkout --detach origin/master   # or the release tag / branch
+bash scripts/build-and-ship.sh --tag vX.Y.Z origin/master
 ```
 
 The script:
@@ -271,7 +275,7 @@ are likely to need:
 | Vault | `--host HOST` / `DEPLOY_HOST` | ssh destination (default `docker-vm`) |
 | Vault | `--no-ship`, then `--ship-only` | build now, ship later (same `--tag` and ref) |
 | Vault | `--no-cache`, `--pull` | cold build / refresh base images |
-| Vault | `--rate 30m` | throttle the stream if `docker load` makes docker-vm's disk busy |
+| Vault | `--rate 30m` | throttle the stream if `docker load` makes docker-vm's disk busy (needs `pv` on Vault; not installed as of v2.18.0, and an unthrottled 1 GB ship kept docker-vm at 2–3 % iowait) |
 | Vault | `--compress` | gzip the stream (only helps on slow links) |
 | Vault | `REMOTE_DOCKER`, `SSH_OPTS` | how to reach Docker on the target |
 | docker-vm | `--prebuilt TAG` / `PREBUILT_TAG` | deploy shipped images, build nothing |
