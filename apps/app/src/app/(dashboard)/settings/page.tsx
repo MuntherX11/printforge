@@ -14,6 +14,7 @@ import { Upload, Send, Database, Download, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { AddonsManager } from '@/components/settings/addons-manager';
 import { FilamentBrandsManager } from '@/components/settings/filament-brands-manager';
+import { SlicerProfilesManager } from '@/components/settings/slicer-profiles';
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -378,6 +379,9 @@ export default function SettingsPage() {
       <FilamentBrandsManager />
 
       <AddonsManager />
+
+      {/* OrcaSlicer presets + sidecar health */}
+      <SlicerProfilesManager />
     </div>
   );
 }

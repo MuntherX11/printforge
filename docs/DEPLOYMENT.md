@@ -217,10 +217,45 @@ A build started on docker-vm by the old default mode runs inside dockerd's embed
 `sudo systemctl restart docker`, which also restarts every container (they come back through
 `restart: unless-stopped`). One more reason not to build on docker-vm.
 
+### Slicer image
+
+`printforge/slicer` (`docker/slicer/`) is a headless OrcaSlicer 2.4.2 sidecar: the pinned Linux
+AppImage, extracted at build time (no FUSE), Xvfb + Mesa so it can open its GL context off-screen,
+and a dependency-free Node 20 wrapper (`server.mjs`) that the API calls at `SLICER_URL`
+(`http://slicer:7788`). The API posts a model path inside the uploads volume plus the owner's
+presets; the sidecar flattens every `inherits` chain to its root over the bundled vendor profiles,
+strips host and shell keys (`post_process`, `printhost_*`, ...), runs `orca-slicer` and returns
+`plate_1.gcode`. One job at a time (`409` while busy), 300 s timeout (`SLICE_TIMEOUT_MS`), scratch
+on a 1 GB tmpfs that is wiped after every job.
+
+It is built on Vault and shipped by `scripts/build-and-ship.sh` exactly like the other four images
+(the AppImage is downloaded during the build, so Vault needs GitHub access), and `deploy.sh
+--prebuilt` retags it as `<project>-slicer`. Compose gives it 2 CPUs and 3 GB, `shm_size` 1g, the
+internal network only, no published port, and `pf-uploads` mounted read-only at `/uploads`. The
+base image is `ubuntu:24.04` rather than bookworm because the AppImage needs glibc 2.38+.
+
+Phase 0 checks (the Linux gate) run the CLI inside the container against files copied into the
+scratch tmpfs; the four reference runs from the PC, with the flattened presets written to
+`/scratch/p/{machine,process,filament}.json` first:
+
+```bash
+docker compose cp fish.stl slicer:/scratch/fish.stl        # likewise dress242.3mf, keychain.stl
+docker compose exec slicer sh -c 'xvfb-run -a $ORCA_BIN /scratch/fish.stl --load-settings "/scratch/p/machine.json;/scratch/p/process.json" --load-filaments /scratch/p/filament.json --clone-objects 12 --arrange 1 --slice 1 --exclude-object=1 --outputdir /scratch/out1 --debug 3 --logfile /scratch/out1.log'
+docker compose exec slicer sh -c 'xvfb-run -a $ORCA_BIN /scratch/dress242.3mf --repetitions 4 --slice 1 --exclude-object=1 --outputdir /scratch/out2 --debug 3 --logfile /scratch/out2.log'
+docker compose exec slicer sh -c 'xvfb-run -a $ORCA_BIN /scratch/dress242.3mf --load-filaments "/scratch/p/filament.json;/scratch/p/filament.json;/scratch/p/filament.json;/scratch/p/filament.json" --repetitions 40 --slice 1 --exclude-object=1 --outputdir /scratch/out3 --debug 3 --logfile /scratch/out3.log'
+docker compose exec slicer sh -c 'time xvfb-run -a $ORCA_BIN /scratch/keychain.stl --load-settings "/scratch/p/machine.json;/scratch/p/process.json" --load-filaments /scratch/p/filament.json --clone-objects 500 --arrange 1 --slice 1 --exclude-object=1 --outputdir /scratch/out4 --debug 3 --logfile /scratch/out4.log'
+```
+
+Each run must leave `plate_1.gcode` in its `--outputdir` with the expected number of
+`; printing object` labels (`grep -c '^; printing object' /scratch/out1/plate_1.gcode`); watch
+`docker stats` during the 40-repetition run (sets the memory limit) and the wall time of the
+500-clone run (sets the fill cap if it exceeds the 300 s timeout). Health: `docker compose exec
+api node -e "fetch('http://slicer:7788/health').then(r=>r.json()).then(console.log)"`.
+
 ### Housekeeping
 
 - **docker-vm:** shipped tags accumulate. Keep the last two or three for rollback and remove older
-  ones with `docker image rm printforge/api:<tag> printforge/app:<tag> printforge/nginx:<tag> printforge/db-backup:<tag>`.
+  ones with `docker image rm printforge/api:<tag> printforge/app:<tag> printforge/nginx:<tag> printforge/db-backup:<tag> printforge/slicer:<tag>`.
 - **Vault:** `docker buildx du --builder printforge-builder` shows the build cache,
   `docker buildx prune --builder printforge-builder` trims it, and old `printforge/*` tags can be
   removed with `docker image rm`.
@@ -402,6 +437,7 @@ Default resource limits in `docker-compose.yml`:
 | db | 1.0 | 512MB | Large dataset or complex queries |
 | worker | 0.5 | 256MB | Many background jobs |
 | bridge | 0.5 | 256MB | Many Moonraker printers |
+| slicer | 2.0 | 3GB | Large plates (40+ repetitions of a multi-part 3MF); see Slicer image |
 | redis | 0.5 | 128MB | Rarely needs adjustment |
 | nginx | 0.5 | 128MB | Rarely needs adjustment |
 

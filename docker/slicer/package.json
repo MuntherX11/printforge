@@ -1,0 +1,15 @@
+{
+  "name": "printforge-slicer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PrintForge OrcaSlicer sidecar: flattens presets and runs orca-slicer headlessly",
+  "type": "module",
+  "main": "server.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}

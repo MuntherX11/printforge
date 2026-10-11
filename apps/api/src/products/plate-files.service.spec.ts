@@ -95,6 +95,33 @@ describe('upload a G-code onto a plate', () => {
   });
 });
 
+describe('attachBuffer (the slice processor\'s path)', () => {
+  it('replace: true swaps the plate\'s file and keeps the old Attachment row even while an open job prints it; without replace → 409', async () => {
+    const { h, svc } = setup();
+    const { file } = await svc.attach(P, 'c1', 'l1', { assembledUploadId: UPLOAD });
+    const job = addJob(h.db, { status: 'IN_PROGRESS', name: 'Order 12 — Box' });
+    h.db.insert('jobPlate', { jobId: job.id, layoutId: 'l1', componentId: 'c1', attachmentId: file.attachmentId });
+    const again = Buffer.concat([gcode({ labels: labels('box', 12), minutes: 230, totalGrams: 110 }), Buffer.from('; printer_model = Creality Hi\n')]);
+    await expect(svc.attachBuffer(P, 'c1', 'l1', again, 'Box x 12 v2.gcode', {})).rejects.toThrow(HAS_FILE);
+    const out = await svc.attachBuffer(P, 'c1', 'l1', again, 'Box x 12 v2.gcode', { replace: true });
+    expect(out.file.attachmentId).not.toBe(file.attachmentId);
+    expect(layout(h, 'l1')).toMatchObject({ attachmentId: out.file.attachmentId, gcodeFilename: 'Box x 12 v2.gcode', objectCount: 12 });
+    expect(h.db.t('attachment').some((a: any) => a.id === file.attachmentId)).toBe(true);
+    expect(h.db.t('jobPlate').find((p: any) => p.jobId === job.id).attachmentId).toBe(file.attachmentId);
+    expect(out).toMatchObject({ slicedFor: 'Creality Hi', printer: { id: 'pr-hi', name: 'HI' }, warnings: [] });
+  });
+
+  it('the component\'s own file with replace reprices', async () => {
+    const { h, svc, recalc } = setup();
+    await svc.attach(P, 'c1', null, { assembledUploadId: UPLOAD });
+    recalc.mockClear();
+    const one = gcode({ labels: labels('box', 1), minutes: 34, totalGrams: 9.4 });
+    const out = await svc.attachBuffer(P, 'c1', null, one, 'Box.gcode', { replace: true });
+    expect(comp(h, 'c1')).toMatchObject({ attachmentId: out.file.attachmentId, gcodeFilename: 'Box.gcode' });
+    expect(recalc).toHaveBeenCalledWith(P);
+  });
+});
+
 describe('delete a plate file', () => {
   it('an open job printing it → 409 naming the job; nothing deleted', async () => {
     const { h, svc } = setup();

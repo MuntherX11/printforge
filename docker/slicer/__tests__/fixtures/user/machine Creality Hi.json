@@ -1,0 +1,15 @@
+{
+	"from": "User",
+	"inherits": "Creality Hi 0.4 nozzle",
+	"name": "Creality Hi",
+	"print_host": "192.168.100.33:4408",
+	"printer_extruder_id": [
+		"1"
+	],
+	"printer_extruder_variant": [
+		"Direct Drive Standard"
+	],
+	"printer_settings_id": "Creality Hi",
+	"time_lapse_gcode": "",
+	"version": "2.3.0.3"
+}

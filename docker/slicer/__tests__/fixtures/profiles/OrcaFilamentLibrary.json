@@ -1,0 +1,27 @@
+{
+	"name": "OrcaFilamentLibrary",
+	"version": "02.03.02.75",
+	"force_update": "0",
+	"description": "Orca filament library (test subset)",
+	"filament_list": [
+		{
+			"name": "fdm_filament_common",
+			"sub_path": "filament/base/fdm_filament_common.json"
+		},
+		{
+			"name": "fdm_filament_pla",
+			"sub_path": "filament/base/fdm_filament_pla.json"
+		},
+		{
+			"name": "eSUN PLA+ @base",
+			"sub_path": "filament/eSUN/eSUN PLA+ @base.json"
+		},
+		{
+			"name": "eSUN PLA+ @System",
+			"sub_path": "filament/eSUN/eSUN PLA+ @System.json"
+		}
+	],
+	"process_list": [],
+	"machine_model_list": [],
+	"machine_list": []
+}

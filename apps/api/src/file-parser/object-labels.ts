@@ -18,16 +18,49 @@ export interface PlateObjects {
   ignoredLabels: string[];
 }
 
-// Every placed instance carries its id and copy number:
-//   Klipper label:  sarindes_base_v2_id_3_copy_0
-//   Orca comment:   sarindes base v2 id:3 copy 0
-//   Prusa comment:  Shape-Box.stl id:0 copy 2
+// Two naming styles, by how the plate was arranged:
+//   GUI copies carry an id and copy number —
+//     Klipper label:  sarindes_base_v2_id_3_copy_0
+//     Orca comment:   sarindes base v2 id:3 copy 0
+//     Prusa comment:  Shape-Box.stl id:0 copy 2
+//   CLI clones (orca-slicer --clone N) are numbered name_1 … name_N —
+//     fish.stl_1, fish.stl_12
 const INSTANCE_SUFFIX = /[\s_]id[:_]?\d+[\s_]copy[\s_]?\d+\s*$/i;
+const CLONE_SUFFIX = /^(.*\S)_\d+$/;
 const MODEL_EXTENSION = /\.(stl|3mf|obj|step|stp)$/i;
 
 export function modelNameOf(label: string): string {
   const base = label.replace(INSTANCE_SUFFIX, '').replace(MODEL_EXTENSION, '').replace(/_/g, ' ').trim();
   return base || label;
+}
+
+/**
+ * The label without its CLI clone number (`fish.stl_12` → `fish.stl`), or null
+ * when it carries none. A GUI instance suffix ends in a copy number too
+ * (`…_copy_0`), so it is never read as a clone number.
+ */
+function cloneBaseOf(label: string): string | null {
+  if (INSTANCE_SUFFIX.test(label)) return null;
+  const m = label.match(CLONE_SUFFIX);
+  return m ? m[1] : null;
+}
+
+/**
+ * Model name of each label, with CLI clone numbers stripped BEFORE the model
+ * extension is (`fish.stl_1` → `fish.stl` → `fish`). A `_<digits>` tail is
+ * only a clone number when at least two labels on the plate share the
+ * stripped base: a lone `bracket_2` is a model called bracket_2.
+ */
+function modelNamesOf(labels: string[]): string[] {
+  const bases = new Map<string, number>();
+  for (const l of labels) {
+    const b = cloneBaseOf(l);
+    if (b !== null) bases.set(b, (bases.get(b) ?? 0) + 1);
+  }
+  return labels.map((l) => {
+    const b = cloneBaseOf(l);
+    return modelNameOf(b !== null && (bases.get(b) ?? 0) >= 2 ? b : l);
+  });
 }
 
 /**
@@ -61,10 +94,10 @@ function scanLines(buf: Buffer, needle: string, stopAt?: string): string[] {
   return out;
 }
 
+/** Instances per model. Grouping never changes the unit count: that stays the number of labels. */
 function group(labels: string[]): Array<{ model: string; count: number }> {
   const counts = new Map<string, number>();
-  for (const l of labels) {
-    const m = modelNameOf(l);
+  for (const m of modelNamesOf(labels)) {
     counts.set(m, (counts.get(m) ?? 0) + 1);
   }
   return Array.from(counts, ([model, count]) => ({ model, count }))

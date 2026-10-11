@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { FileCode, Plus, Upload } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,9 +22,11 @@ import { ColourLinksDialog, type ColourLinksFocus } from './ColourLinksDialog';
 import { ThreeMfImportWizard } from './ThreeMfImportWizard';
 import { GcodeImportDialog } from './GcodeImportDialog';
 import { SlotFilamentDialog } from './SlotFilamentDialog';
+import { SlicePlateDialog } from './SlicePlateDialog';
 import { useSlicerImport } from './useSlicerImport';
 import { errorText } from './options-ui';
 import { reorder } from './options-model';
+import { sourceOf } from './slice-ui';
 import { componentsInScope, materialIndex, perProductTotals, scopeLabel, scopeOptions, scopeSizeOptionId } from './bom-model';
 
 interface Props {
@@ -41,7 +43,8 @@ type BomDialog =
   | { kind: 'layouts'; componentId: string }
   | { kind: 'remove'; componentId: string }
   | { kind: 'links'; focus: ColourLinksFocus }
-  | { kind: 'filament'; componentId: string; colorIndex: number };
+  | { kind: 'filament'; componentId: string; colorIndex: number }
+  | { kind: 'slice'; componentId: string };
 
 function ImportButtons({ busy, onThreeMf, onGcode }: { busy: string | null; onThreeMf: (f: File) => void; onGcode: (f: File[]) => void }) {
   const cls = 'inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 px-3 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800';
@@ -80,6 +83,18 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
   const stockById = useMemo(() => new Map((stock.rows ?? []).map(r => [r.id, r] as const)), [stock.rows]);
   const find = (id: string) => components.find(c => c.id === id) ?? null;
   const target = dialog && 'componentId' in dialog ? find(dialog.componentId) : null;
+  // Bumped when a slice run is queued, so the part's runs list refetches.
+  const [runsVersion, setRunsVersion] = useState(0);
+  // Printer names for SLICED plates and 3MF sources; loaded once a part needs them.
+  const [printerNames, setPrinterNames] = useState<Map<string, string> | null>(null);
+  const needsPrinters = components.some(c => sourceOf(c) !== null || c.plateLayouts.some(l => l.printerId));
+  const { loadPrinters } = data;
+  useEffect(() => {
+    if (!needsPrinters || printerNames) return;
+    loadPrinters()
+      .then(list => setPrinterNames(new Map(list.map(p => [p.id, p.name] as const))))
+      .catch(() => undefined);
+  }, [needsPrinters, printerNames, loadPrinters]);
 
   async function move(id: string, dir: -1 | 1) {
     const next = reorder(components, id, dir);
@@ -187,7 +202,9 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
                       stock={canEdit ? stockById : null}
                       onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
                     />
-                    <PlateList productId={product.id} component={c} canEdit={canEdit} colSpan={canEdit ? 10 : 8} onChanged={() => void reload()} />
+                    <PlateList productId={product.id} component={c} canEdit={canEdit} isAdmin={data.isAdmin} printers={printerNames}
+                      runsKey={runsVersion} colSpan={canEdit ? 10 : 8} onChanged={() => void reload()}
+                      onSlice={() => { stock.refresh(); setDialog({ kind: 'slice', componentId: c.id }); }} />
                   </Fragment>
                 ))}
                 <TableRow>
@@ -227,6 +244,9 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
           <SlotFilamentDialog product={product} component={dialog?.kind === 'filament' ? target : null}
             colorIndex={dialog?.kind === 'filament' ? dialog.colorIndex : 0} open={dialog?.kind === 'filament'}
             scopeLabel={label} stock={stock} onClose={() => setDialog(null)} onSaved={() => void reload()} />
+          <SlicePlateDialog product={product} component={dialog?.kind === 'slice' ? target : null} open={dialog?.kind === 'slice'}
+            materials={materials} stock={stock} loadPrinters={loadPrinters}
+            onClose={() => setDialog(null)} onQueued={() => setRunsVersion(v => v + 1)} />
         </>
       )}
       <PlateLayoutsDialog product={product} component={dialog?.kind === 'layouts' ? target : null} open={dialog?.kind === 'layouts'}

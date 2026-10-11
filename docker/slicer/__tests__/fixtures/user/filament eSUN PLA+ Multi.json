@@ -1,0 +1,19 @@
+{
+    "compatible_printers": [
+        "Creality Hi 0.4 nozzle"
+    ],
+    "filament_settings_id": [
+        "eSUN PLA+ Multi"
+    ],
+    "from": "User",
+    "inherits": "eSUN PLA+ @System",
+    "is_custom_defined": "0",
+    "name": "eSUN PLA+ Multi",
+    "nozzle_temperature": [
+        "205"
+    ],
+    "nozzle_temperature_initial_layer": [
+        "215"
+    ],
+    "version": "2.3.1.10"
+}

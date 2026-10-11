@@ -34,6 +34,7 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
     components: many('productComponent', 'variantId'),
     product: one('product', 'productId'),
   },
+  sliceRun: { component: one('productComponent', 'componentId'), printer: one('printer', 'printerId') },
   productComponent: {
     material: one('material', 'materialId'),
     materials: many('componentMaterial', 'componentId'),
@@ -103,6 +104,8 @@ const MODELS = [
   'jobPart', 'user', 'location', 'customer', 'invoice', 'systemSetting', 'auditLog', 'filamentCatalog',
   // accounting specs
   'expense', 'expenseCategory', 'account', 'accountTransaction',
+  // slicer (v2.18)
+  'sliceRun', 'slicerProfile',
 ];
 
 const LOCK_TABLES: Record<string, string> = {

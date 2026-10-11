@@ -124,3 +124,29 @@ export function useWebSocket() {
 
   return state;
 }
+
+/**
+ * Listen to one event of the shared gateway socket (e.g. `slice-run`). The
+ * socket is opened on the first listener and closed when the last one leaves,
+ * like `useWebSocket`; the handler is read through a ref, so an inline arrow
+ * never re-subscribes.
+ */
+export function useSocketEvent<T>(event: string, handler: (data: T) => void): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  useEffect(() => {
+    refCount++;
+    const socket = getSocket();
+    const listener = (data: T) => handlerRef.current(data);
+    socket.on(event, listener);
+    return () => {
+      socket.off(event, listener);
+      refCount--;
+      if (refCount === 0 && sharedSocket) {
+        sharedSocket.disconnect();
+        sharedSocket = null;
+      }
+    };
+  }, [event]);
+}

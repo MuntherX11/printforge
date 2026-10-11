@@ -1,7 +1,8 @@
 import type {
-  CellCost, ColourOptionDetail, ColourSlotDetail, ComponentDetail, MaterialLite, ProductDetail, Problem, SizeConvertedTo, SizeOptionDetail,
-  UnlinkedSlot,
+  CellCost, ColourOptionDetail, ColourSlotDetail, ComponentDetail, ComponentSourceModel, MaterialLite, ProductDetail, Problem, SizeConvertedTo,
+  SizeOptionDetail, UnlinkedSlot,
 } from '@printforge/types';
+import { sourceModelOf } from './product-sources';
 import { resolveInConfig, standardMixedWarnings, type ResolvedBom } from '../catalog-core/bom-resolve';
 import { optionsOfKind, PRODUCT_CONFIG_INCLUDE, type ComponentRow, type OptionRow, type ProductConfig } from '../catalog-core/catalog-config';
 import { likelyColour } from '../catalog-core/colour-words';
@@ -36,7 +37,7 @@ export const DETAIL_INCLUDE = {
   },
 } as const;
 
-export interface AttachmentLite { id: string; originalName: string | null; filename: string; sizeBytes: number; slicedForPrinter?: string | null }
+export interface AttachmentLite { id: string; originalName: string | null; filename: string; sizeBytes: number; slicedForPrinter?: string | null; parsedMetadata?: unknown }
 
 /** An order line, quote line or job that names an option through this release's columns. */
 export interface OptionRef { sizeOptionId: string | null; colourOptionId: string | null }
@@ -98,9 +99,12 @@ class Resolutions {
   }
 }
 
+/** ComponentDetail plus the part's source model (v2.18; `source` is pending in @printforge/types' ComponentDetail). */
+type ComponentDetailWithSource = ComponentDetail & { source: ComponentSourceModel | null };
+
 function componentDetail(
   productId: string, raw: any, row: ComponentRow, config: ProductConfig, res: Resolutions, extras: DetailExtras, pricing: SizePricing,
-): ComponentDetail {
+): ComponentDetailWithSource {
   const mat = (id: string) => config.materials.get(id) ?? extras.extraMaterials.get(id);
   const baseKey = (() => { try { return baseColourKeyOf(row); } catch { return ''; } })();
   const label = (key: string) => { try { return colourLabel(key, (id) => mat(id)); } catch { return key; } };
@@ -181,6 +185,7 @@ function componentDetail(
     })),
     problems: (standard?.problems ?? []).filter((p) => p.componentId === row.id),
     plates,
+    source: sourceModelOf(raw, raw.sourceAttachmentId ? extras.attachments.get(raw.sourceAttachmentId) : null),
   };
 }
 

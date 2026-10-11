@@ -172,6 +172,7 @@ export interface ApiResponse<T = unknown> {
 // A slot's slicer filament and how imports map it to a shop filament.
 export * from './slicer-filament';
 import type { FilamentSlotMatch, SlicerFilament } from './slicer-filament';
+import type { ComponentSourceModel } from './slicer';
 
 export interface ThreeMfToolInfo {
   index: number;
@@ -1042,8 +1043,11 @@ export const StockMovementReason = {
 } as const;
 export type StockMovementReason = (typeof StockMovementReason)[keyof typeof StockMovementReason];
 
-export const PlateLayoutSource = { GCODE: 'GCODE', MANUAL: 'MANUAL', CALIBRATION: 'CALIBRATION' } as const;
+export const PlateLayoutSource = { GCODE: 'GCODE', MANUAL: 'MANUAL', CALIBRATION: 'CALIBRATION', SLICED: 'SLICED' } as const;
 export type PlateLayoutSource = (typeof PlateLayoutSource)[keyof typeof PlateLayoutSource];
+
+// In-app slicing: profiles, source models, slice runs (v2.18.0).
+export * from './slicer';
 
 /** A blocking problem or non-blocking warning. Codes and messages are exact (spec §3.2). */
 export interface Problem {
@@ -1092,7 +1096,9 @@ export interface ComponentPlateLayout {
   minutesPerUnit: number;
   gramsPerUnit: number;
   file: FileRef | null;
-  slots: Array<{ colorIndex: number; gramsUsed: number }>;
+  slots: Array<{ colorIndex: number; gramsUsed: number; materialId?: string | null }>;
+  /** SLICED layouts: the printer the plate was sliced for. */
+  printerId?: string | null;
 }
 
 /** One printed component as the product page sees it (spec §4.1.1). */
@@ -1127,6 +1133,8 @@ export interface ComponentDetail {
   /** stockConfirmedAt != null || stockOnHand === 0 */
   stockConfirmed: boolean;
   baseColourKey: string;
+  /** The STL or 3MF project the slicer slices from; null = none uploaded (v2.18.0). */
+  source?: ComponentSourceModel | null;
   /** Non-base keys: rows with a balance other than 0, plus keys active colours resolve to (0 when absent). */
   colourStock: Array<{ colourKey: string; label: string; stockOnHand: number; usedBy: string[] }>;
   perUnitEstimatedFrom: { layoutId: string; unitsPerPlate: number } | null;
@@ -1761,6 +1769,9 @@ export interface JobSurplusRow {
 
 // Units on a sliced plate from its object labels (G-code upload, 3MF wizard).
 export * from './plate-units';
+
+// "Fill the plate": copies to ask the slicer for from a part's bbox and the bed (pure).
+export * from './fill-plate';
 
 // Plates, their files and printers on the product page, jobs and plans.
 export * from './plate-files';

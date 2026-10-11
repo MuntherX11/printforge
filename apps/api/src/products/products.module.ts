@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { CatalogCoreModule } from '../catalog-core/catalog-core.module';
 import { ChunkUploadsModule } from '../chunk-uploads/chunk-uploads.module';
 import { CostingModule } from '../costing/costing.module';
 import { FileParserModule } from '../file-parser/file-parser.module';
 import { PartsModule } from '../parts/parts.module';
+import { SliceModule } from '../slice/slice.module';
 import { ColourSlotsController } from './colour-slots.controller';
 import { ColourSlotsService } from './colour-slots.service';
 import { ProductComponentsService } from './product-components.service';
@@ -17,19 +18,25 @@ import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { PlateLayoutsController } from './plate-layouts.controller';
 import { PlateLayoutsService } from './plate-layouts.service';
 import { ProductOnboardingService } from './product-onboarding.service';
+import { ProductSourcesController } from './product-sources.controller';
+import { ProductSourcesService } from './product-sources.service';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { VariantsController } from './variants.controller';
 import { VariantsService } from './variants.service';
 
 @Module({
-  imports: [CostingModule, FileParserModule, PartsModule, ChunkUploadsModule, CatalogCoreModule],
-  controllers: [ProductsController, ProductImagesController, VariantsController, ColourSlotsController, ProductImportsController, PlateLayoutsController],
+  // SliceModule imports this module for the plate services and is imported back for the validation slice (forwardRef both ways).
+  imports: [CostingModule, FileParserModule, PartsModule, ChunkUploadsModule, CatalogCoreModule, forwardRef(() => SliceModule)],
+  controllers: [
+    ProductsController, ProductImagesController, VariantsController, ColourSlotsController, ProductImportsController, PlateLayoutsController,
+    ProductSourcesController,
+  ],
   providers: [
     ProductsService, ProductComponentsService, VariantsService, ColourSlotsService,
     ProductOnboardingService, ProductImagesService, ProductImageBackfillService, PlateLayoutsService, PlateLayoutBackfillService,
-    OptionConversionService, PlateFilesService,
+    OptionConversionService, PlateFilesService, ProductSourcesService,
   ],
-  exports: [ProductsService, ProductImagesService],
+  exports: [ProductsService, ProductImagesService, ProductComponentsService, PlateLayoutsService, PlateFilesService],
 })
 export class ProductsModule {}

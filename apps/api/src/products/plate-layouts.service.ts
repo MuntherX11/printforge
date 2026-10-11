@@ -11,8 +11,21 @@ import { adoptDefaultPrinter, fileInUseError, openJobUsingFiles, openJobUsingPla
 import { TX_OPTS, unlinkAfterCommit, unreferencedAttachments } from './product-locks';
 import { slicerAttachmentData, StoredFile, unlinkWritten, writeUploadFile } from './slicer-files';
 import {
-  COLOR_CHANGES_BOUNDS, GRAMS_BOUNDS, MINUTES_BOUNDS, parseLayoutCreate, parseLayoutPatch, UNITS_BOUNDS,
+  COLOR_CHANGES_BOUNDS, GRAMS_BOUNDS, LAYOUT_NAME_MAX, MINUTES_BOUNDS, parseLayoutCreate, parseLayoutPatch, UNITS_BOUNDS,
 } from './slicer-import-input';
+
+/** What the slice processor knows about a plate it just sliced (v2.18). */
+export interface SlicedLayoutInput {
+  name: string;
+  unitsPerPlate: number;
+  plateMinutes: number;
+  plateGrams: number;
+  colorChanges: number;
+  objectCount: number | null;
+  printerId: string;
+  /** In colour-index order; `materialType` is the snapshot the replacement key compares. */
+  slots: Array<{ colorIndex: number; gramsUsed: number; materialId: string | null; materialType: string | null }>;
+}
 
 /**
  * Plate layouts of one component (spec §3.4, §4.3 M3–M5). A layout belongs to
@@ -240,6 +253,41 @@ export class PlateLayoutsService {
     await this.chunkUploads.discard(input.assembledUploadId);
     await this.repriceAfterPrinter(productId, printer);
     return { layout: await this.view(this.prisma, layoutId), warnings };
+  }
+
+  /**
+   * A layout the slicer container produced (v2.18, source SLICED). Its slots
+   * carry the filament they were sliced with and a snapshot of its type, so
+   * the replacement key — part, printer, units, slot types in order — survives
+   * a merged material. An active SLICED layout with the same key is
+   * deactivated (the new slice replaces it); hand-uploaded GCODE and MANUAL
+   * layouts of the same size are left alone (plan D14-B). The G-code itself is
+   * attached afterwards through PlateFilesService.attachBuffer. Returns the id.
+   */
+  async createSliced(componentId: string, input: SlicedLayoutInput): Promise<string> {
+    const key = input.slots.map((s) => s.materialType ?? 'PLA').join(',');
+    const name = input.name.slice(0, LAYOUT_NAME_MAX);
+    return this.prisma.$transaction(async (tx: any) => {
+      const same = await tx.plateLayout.findMany({
+        where: { componentId, source: 'SLICED', isActive: true, printerId: input.printerId, unitsPerPlate: input.unitsPerPlate },
+        include: { slots: true },
+      });
+      for (const l of same) {
+        const k = [...(l.slots ?? [])].sort((a: any, b: any) => a.colorIndex - b.colorIndex).map((s: any) => s.materialType ?? 'PLA').join(',');
+        if (k === key) await tx.plateLayout.update({ where: { id: l.id }, data: { isActive: false } });
+      }
+      const layout = await tx.plateLayout.create({
+        data: {
+          componentId, name, unitsPerPlate: input.unitsPerPlate, plateMinutes: input.plateMinutes, plateGrams: input.plateGrams,
+          colorChanges: input.colorChanges, source: 'SLICED', objectCount: input.objectCount, printerId: input.printerId, isActive: true,
+        },
+        select: { id: true },
+      });
+      for (const s of input.slots) {
+        await tx.plateLayoutSlot.create({ data: { layoutId: layout.id, colorIndex: s.colorIndex, gramsUsed: s.gramsUsed, materialId: s.materialId, materialType: s.materialType } });
+      }
+      return layout.id as string;
+    }, TX_OPTS);
   }
 
   /** Manual layouts split the plate grams across the component's own slots in its per-unit proportions. */

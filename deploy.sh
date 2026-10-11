@@ -14,7 +14,7 @@ Usage: sudo bash deploy.sh [--prebuilt <tag>]
                     push the schema, start everything and seed defaults. Fine for a
                     single-box install. NOT for docker-vm: building there starves it.
   --prebuilt <tag>  Deploy the images that scripts/build-and-ship.sh built on Vault
-                    and loaded here: printforge/{api,app,nginx,db-backup}:<tag>.
+                    and loaded here: printforge/{api,app,nginx,db-backup,slicer}:<tag>.
                     Nothing is built on this host. The compose services are retagged
                     to those images (api, worker and moonraker-bridge all run the api
                     image), the schema guard and prisma push run exactly as in the
@@ -26,7 +26,8 @@ Environment:
   PREBUILT_TAG=<tag>     same as --prebuilt <tag>
   PREBUILT_REPO=<name>   image name prefix (default: printforge)
   PREBUILT_SERVICE_MAP   compose service=image pairs (default: api=api worker=api
-                         moonraker-bridge=api app=app nginx=nginx db-backup=db-backup)
+                         moonraker-bridge=api app=app nginx=nginx db-backup=db-backup
+                         slicer=slicer)
   SKIP_DB_PUSH=1         leave the database schema untouched (code-only rollback)
   ALLOW_SCHEMA_DROP=1    allow a schema push that drops or alters columns/tables,
                          after reviewing the printed SQL
@@ -59,7 +60,7 @@ cd "$PROJECT_DIR"
 PREBUILT_REPO="${PREBUILT_REPO:-printforge}"
 # Compose service -> shipped image it runs. Every service compose would otherwise
 # build must be listed, or the prebuilt deploy refuses to start.
-PREBUILT_SERVICE_MAP="${PREBUILT_SERVICE_MAP:-api=api worker=api moonraker-bridge=api app=app nginx=nginx db-backup=db-backup}"
+PREBUILT_SERVICE_MAP="${PREBUILT_SERVICE_MAP:-api=api worker=api moonraker-bridge=api app=app nginx=nginx db-backup=db-backup slicer=slicer}"
 PREBUILT_SERVICES=()   # compose services switched to the shipped images
 PREBUILT_RESTORE=()    # "compose-image|previous-image-id", put back if we stop early
 PREBUILT_SWITCHED=0    # 1 once containers start moving to the new images
@@ -81,10 +82,10 @@ use_prebuilt_images() {
     prebuilt_fail "invalid image tag '$PREBUILT_TAG'"
   fi
 
-  # 1. All four images are here, built for this machine, from one commit.
+  # 1. All five images are here, built for this machine, from one commit.
   host_platform=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}') \
     || prebuilt_fail "cannot talk to the Docker daemon"
-  for component in api app nginx db-backup; do
+  for component in api app nginx db-backup slicer; do
     img="$PREBUILT_REPO/$component:$PREBUILT_TAG"
     info=$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null) \
       || prebuilt_fail "image $img is not on this host. Build and ship it from Vault: scripts/build-and-ship.sh --tag $PREBUILT_TAG <git-ref>"
@@ -100,7 +101,7 @@ use_prebuilt_images() {
       prebuilt_fail "images tagged $PREBUILT_TAG come from different commits (${rev:-unknown} vs ${label:-unknown}); ship them again"
     fi
   done
-  echo "  Images: $PREBUILT_REPO/{api,app,nginx,db-backup}:$PREBUILT_TAG (commit ${rev:-unknown})"
+  echo "  Images: $PREBUILT_REPO/{api,app,nginx,db-backup,slicer}:$PREBUILT_TAG (commit ${rev:-unknown})"
 
   # docker-compose.yml, this script and docker/go2rtc come from this checkout.
   checkout=$(git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)
@@ -125,9 +126,9 @@ use_prebuilt_images() {
   for entry in $PREBUILT_SERVICE_MAP; do
     svc="${entry%%=*}"
     component="${entry#*=}"
-    case " api app nginx db-backup " in
+    case " api app nginx db-backup slicer " in
       *" $component "*) ;;
-      *) prebuilt_fail "PREBUILT_SERVICE_MAP: '$entry' names no shipped image (api, app, nginx, db-backup)" ;;
+      *) prebuilt_fail "PREBUILT_SERVICE_MAP: '$entry' names no shipped image (api, app, nginx, db-backup, slicer)" ;;
     esac
     printf '%s\n' "$services" | grep -Fqx -- "$svc" || continue   # not in this compose file
     target="$project-$svc"
@@ -415,7 +416,7 @@ echo "  URL:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'l
 echo "  Login:    admin@printforge.local"
 echo "  Password: ${ADMIN_PASSWORD}"
 if [ -n "$PREBUILT_TAG" ]; then
-  echo "  Images:   ${PREBUILT_REPO}/{api,app,nginx,db-backup}:${PREBUILT_TAG}"
+  echo "  Images:   ${PREBUILT_REPO}/{api,app,nginx,db-backup,slicer}:${PREBUILT_TAG}"
 fi
 echo ""
 echo "  IMPORTANT: Save this password! Change it after first login."

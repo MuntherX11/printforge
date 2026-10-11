@@ -127,6 +127,7 @@ export class ProductsService {
     const attIds = new Set<string>();
     for (const c of raw.components ?? []) {
       if (c.attachmentId) attIds.add(c.attachmentId);
+      if (c.sourceAttachmentId) attIds.add(c.sourceAttachmentId);
       for (const l of c.plateLayouts ?? []) if (l.attachmentId) attIds.add(l.attachmentId);
     }
     const V = config.options.map((o) => o.id);
@@ -134,7 +135,7 @@ export class ProductsService {
     const refSelect = { sizeOptionId: true, colourOptionId: true };
     const [atts, orderRefs, quoteRefs, jobRefs, grid, printers] = await Promise.all([
       attIds.size
-        ? this.prisma.attachment.findMany({ where: { id: { in: [...attIds] } }, select: { id: true, originalName: true, filename: true, sizeBytes: true, slicedForPrinter: true } })
+        ? this.prisma.attachment.findMany({ where: { id: { in: [...attIds] } }, select: { id: true, originalName: true, filename: true, sizeBytes: true, slicedForPrinter: true, parsedMetadata: true } })
         : [],
       V.length ? this.prisma.orderItem.findMany({ where: refWhere, select: refSelect }) : [],
       V.length ? this.prisma.quoteItem.findMany({ where: refWhere, select: refSelect }) : [],

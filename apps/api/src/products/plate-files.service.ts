@@ -65,7 +65,7 @@ export class PlateFilesService {
     }
   }
 
-  /** Upload a G-code onto a plate that has no file. */
+  /** Upload a staged G-code onto a plate that has no file. */
   async attach(productId: string, componentId: string, layoutId: string | null, body: unknown): Promise<PlateFileResult> {
     const { assembledUploadId } = parseFileAttach(body);
     const t = await this.target(this.prisma, productId, componentId, layoutId);
@@ -74,7 +74,28 @@ export class PlateFilesService {
     const file = await this.chunkUploads.consume(assembledUploadId, MAX_GCODE_BYTES, { keep: true });
     const name = String(file.originalname || '');
     if (!/\.(gcode|gco|g)$/i.test(name)) throw new BadRequestException('File must be a G-code file (.gcode, .gco, .g)');
-    const a = this.gcodeParser.parseHeader(file.buffer);
+    const out = await this.attachBuffer(productId, componentId, layoutId, file.buffer, name, {});
+    await this.chunkUploads.discard(assembledUploadId);
+    return out;
+  }
+
+  /**
+   * Store G-code bytes as a plate's file: parse the header, write the file,
+   * create the Attachment and link it, adopt the sliced-for printer as the
+   * product's pricing printer when it has none, reprice. The slice processor
+   * (v2.18) calls this with the G-code the slicer container produced.
+   *
+   * `replace: true` allows a plate that already has a file: the old file is
+   * unlinked from the plate and its Attachment row kept (an open job may still
+   * print it — the 409 rule applies to deleting a file, not to replacing it).
+   */
+  async attachBuffer(
+    productId: string, componentId: string, layoutId: string | null, buffer: Buffer, originalName: string, opts: { replace?: boolean } = {},
+  ): Promise<PlateFileResult> {
+    const t = await this.target(this.prisma, productId, componentId, layoutId);
+    if (!opts.replace && (t.layout ? t.layout.attachmentId : t.component.attachmentId)) throw new ConflictException(HAS_FILE);
+    const name = String(originalName || '');
+    const a = this.gcodeParser.parseHeader(buffer);
     const units = t.layout ? t.layout.unitsPerPlate : 1;
     const label = `${t.component.description} ×${units}`;
     const warnings: Problem[] = plateLabelWarnings(label, a, null);
@@ -84,7 +105,7 @@ export class PlateFilesService {
 
     let stored: StoredFile;
     try {
-      stored = await writeUploadFile(file.buffer, 'gcode');
+      stored = await writeUploadFile(buffer, 'gcode');
     } catch (e) {
       this.logger.error(`Storing a plate G-code for component ${componentId} failed: ${(e as Error)?.message}`, (e as Error)?.stack);
       throw new BadRequestException(STORE_FAILED);
@@ -94,7 +115,7 @@ export class PlateFilesService {
     try {
       out = await this.prisma.$transaction(async (tx: any) => {
         const again = await this.target(tx, productId, componentId, layoutId);
-        if (again.layout ? again.layout.attachmentId : again.component.attachmentId) throw new ConflictException(HAS_FILE);
+        if (!opts.replace && (again.layout ? again.layout.attachmentId : again.component.attachmentId)) throw new ConflictException(HAS_FILE);
         const att = await tx.attachment.create({ data: slicerAttachmentData(productId, stored, name, a.printerModel), select: { id: true } });
         const gcodeFilename = (name || 'plate.gcode').slice(0, 200);
         if (again.layout) {
@@ -109,7 +130,6 @@ export class PlateFilesService {
       await unlinkWritten([stored]);
       throw e;
     }
-    await this.chunkUploads.discard(assembledUploadId);
     // A component file makes its grams slicer grams (no manual purge), and a new
     // pricing printer changes the price: both reprice (spec §3.8 triggers).
     if (!t.layout || out.printer) await this.reprice(productId);

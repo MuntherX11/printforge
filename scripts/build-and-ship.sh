@@ -14,7 +14,7 @@ Usage: scripts/build-and-ship.sh [options] <git-ref>
 
 Run this on Vault. It builds the PrintForge images for <git-ref> (branch, tag or
 commit) from a clean `git archive` export of that commit -- never from the working
-tree -- tags them <repo>/{api,app,nginx,db-backup}:<tag>, streams them to the
+tree -- tags them <repo>/{api,app,nginx,db-backup,slicer}:<tag>, streams them to the
 target with `docker save | ssh <host> docker load`, and checks they arrived.
 Nothing is ever built on the target. Then, on the target:
 
@@ -202,6 +202,7 @@ COMPONENTS=(
   "app|apps/app/Dockerfile|."
   "nginx|docker/nginx/Dockerfile|docker/nginx"
   "db-backup|docker/db-backup/Dockerfile|docker/db-backup"
+  "slicer|docker/slicer/Dockerfile|docker/slicer"
 )
 IMAGES=()
 for spec in "${COMPONENTS[@]}"; do

@@ -19,7 +19,10 @@ export interface StoredFile {
   sizeBytes: number;
 }
 
-export async function writeUploadFile(buffer: Buffer, ext: 'gcode' | 'png', filename?: string): Promise<StoredFile> {
+/** Server-set extension of a stored file: plate G-codes, plate renders, and (v2.18) a part's source model. */
+export type StoredExt = 'gcode' | 'png' | 'stl' | '3mf';
+
+export async function writeUploadFile(buffer: Buffer, ext: StoredExt, filename?: string): Promise<StoredFile> {
   const root = uploadDir();
   const now = new Date();
   const dateDir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;

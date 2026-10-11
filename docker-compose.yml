@@ -67,6 +67,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - SECRET_KEY=${SECRET_KEY}
+      - SLICER_URL=http://slicer:7788
     depends_on:
       db:
         condition: service_healthy
@@ -183,6 +184,38 @@ services:
         limits:
           cpus: "0.50"
           memory: 256M
+
+  # Headless OrcaSlicer sidecar: the API posts a model path (inside pf-uploads)
+  # plus flattened presets to /slice and gets plate_1.gcode back. Internal
+  # network only, no published port, uploads read-only, scratch on tmpfs.
+  # Memory limit comes from the Phase 0 gate (40-repetition 3MF on 2 CPUs).
+  slicer:
+    build:
+      context: ./docker/slicer
+      dockerfile: Dockerfile
+    environment:
+      - PORT=7788
+      - SLICE_TIMEOUT_MS=300000
+    volumes:
+      - pf-uploads:/uploads:ro
+    tmpfs:
+      - /scratch:size=1g,mode=1777
+    shm_size: 1g
+    networks:
+      - printforge-net
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:7788/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3072M
 
   db-backup:
     build:

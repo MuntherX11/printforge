@@ -95,6 +95,8 @@ model Material {
   productComponents  ProductComponent[]
   componentMaterials ComponentMaterial[]
   colourAssignments  ColourOptionSlot[]
+  slicerProfiles     SlicerProfile[]
+  layoutSlots        PlateLayoutSlot[]
 }
 
 enum MaterialType {
@@ -325,6 +327,9 @@ model ProductComponent {
   thumbnailAttachmentId        String? // 3MF plate render (staff-only, never a photo)
   platedMigratedAt             DateTime? // backfill marker for plated* -> PlateLayout
   perUnitEstimatedFromLayoutId String? // no FK. Set when per-unit grams/minutes were divided out of a xN plate at import; cleared by any grams/minutes edit
+  sourceAttachmentId           String? // the STL or 3MF project the slicer slices from (Attachment, entityType 'product'); no FK like attachmentId
+  sourceKind                   SourceModelKind?
+  sliceRuns                    SliceRun[]
   plateLayouts                 PlateLayout[]
   colourStock                  ComponentColourStock[]
   stockMovements               ComponentStockMovement[]
@@ -380,6 +385,9 @@ model Printer {
   productionJobs  ProductionJob[]
   defaultProducts Product[]
   maintenanceLogs MaintenanceLog[]
+  slicerProfiles  SlicerProfile[]
+  plateLayouts    PlateLayout[]
+  sliceRuns       SliceRun[]
 
   @@index([connectionType, isActive])
 }
@@ -1081,6 +1089,77 @@ enum PlateLayoutSource {
   GCODE
   MANUAL
   CALIBRATION
+  SLICED // produced by the slicer container from the part's source model
+}
+
+// ============ IN-APP SLICING (v2.18.0) ============
+//
+//  owner: Settings > Slicer imports Orca bundles  ->  SlicerProfile (raw preset JSON)
+//  owner: STL | 3MF project on a part             ->  ProductComponent.sourceAttachmentId
+//  staff: printer + filament per slot + quantity  ->  SliceRun QUEUED -> RUNNING -> DONE | FAILED
+//                                                      \-> PlateLayout(source SLICED, printerId, slots.materialId)
+
+enum SourceModelKind {
+  STL
+  THREEMF
+}
+
+enum SlicerProfileKind {
+  MACHINE
+  PROCESS
+  FILAMENT
+}
+
+enum SliceRunStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+// One Orca preset exactly as the owner exported it (.orca_printer / .orca_filament bundle).
+// Never flattened here: the slicer container resolves `inherits` against its own bundled
+// profiles at slice time, so an Orca upgrade never leaves stale merged JSON behind.
+model SlicerProfile {
+  id         String            @id @default(cuid())
+  kind       SlicerProfileKind
+  name       String
+  json       Json
+  printerId  String? // MACHINE: the printer it drives. PROCESS: the printer it is the default for.
+  printer    Printer?          @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  materialId String? // FILAMENT: the shop filament sliced with this preset
+  material   Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  isDefault  Boolean           @default(false)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([kind, name])
+  @@index([printerId])
+  @@index([materialId])
+}
+
+// A request to slice a plate. Status only (the owner wants no who-did-what); the result is an
+// ordinary PlateLayout. filamentMap: Record<"0"|"1"|"2"|"3", {materialId, name, type}> snapshotted
+// because a Material can be merged away and a Json column carries no FK.
+model SliceRun {
+  id             String           @id @default(cuid())
+  componentId    String
+  component      ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  printerId      String?
+  printer        Printer?         @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  unitsRequested Int // 1..500; "fill the plate" sends the bounding-box estimate
+  unitsSliced    Int?
+  filamentMap    Json
+  status         SliceRunStatus   @default(QUEUED)
+  error          String?
+  resultLayoutId String?
+  resultLayout   PlateLayout?     @relation(fields: [resultLayoutId], references: [id], onDelete: SetNull)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([status, createdAt])
+  @@index([componentId, createdAt])
 }
 
 // Bulk tiers of a SIZE option. The standard size keeps using PriceTier. Colours have no tiers.
@@ -1195,22 +1274,28 @@ model PlateLayout {
   attachmentId  String? // stored G-code (Attachment, entityType 'product')
   gcodeFilename String?
   objectCount   Int? // what the file's object labels said; null = no labels / manual
+  printerId     String? // SLICED: the printer it was sliced for (replacement key; PlateList printer column)
+  printer       Printer?          @relation(fields: [printerId], references: [id], onDelete: SetNull)
   isActive      Boolean           @default(true)
   sortOrder     Int               @default(0)
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   slots         PlateLayoutSlot[]
   jobPlates     JobPlate[]
+  sliceRuns     SliceRun[]
 
   @@index([componentId, isActive])
 }
 
 model PlateLayoutSlot {
-  id         String      @id @default(cuid())
-  layoutId   String
-  layout     PlateLayout @relation(fields: [layoutId], references: [id], onDelete: Cascade)
-  colorIndex Int
-  gramsUsed  Float
+  id           String        @id @default(cuid())
+  layoutId     String
+  layout       PlateLayout   @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+  colorIndex   Int
+  gramsUsed    Float
+  materialId   String? // SLICED: the filament the slot was sliced with (informational)
+  material     Material?     @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  materialType MaterialType? // snapshot so the replacement key survives a merged material
 
   @@unique([layoutId, colorIndex])
 }

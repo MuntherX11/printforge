@@ -1,0 +1,14 @@
+{
+	"from": "User",
+	"inherits": "0.20mm Standard @Creality Hi",
+	"name": "0.20mm Standard @Creality Hi - Copy",
+	"print_extruder_id": [
+		"1"
+	],
+	"print_extruder_variant": [
+		"Direct Drive Standard"
+	],
+	"print_settings_id": "0.20mm Standard @Creality Hi - Copy",
+	"version": "2.3.2.75",
+	"wipe_tower_no_sparse_layers": "1"
+}

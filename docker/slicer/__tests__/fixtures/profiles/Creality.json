@@ -1,0 +1,41 @@
+{
+	"name": "Creality",
+	"version": "02.03.02.75",
+	"force_update": "0",
+	"description": "Creality configurations (test subset)",
+	"machine_model_list": [
+		{
+			"name": "Creality Hi",
+			"sub_path": "machine/Creality Hi.json"
+		}
+	],
+	"process_list": [
+		{
+			"name": "fdm_process_common",
+			"sub_path": "process/fdm_process_common.json"
+		},
+		{
+			"name": "fdm_process_creality_common",
+			"sub_path": "process/fdm_process_creality_common.json"
+		},
+		{
+			"name": "0.20mm Standard @Creality Hi",
+			"sub_path": "process/0.20mm Standard @Creality Hi 0.4 nozzle.json"
+		}
+	],
+	"filament_list": [],
+	"machine_list": [
+		{
+			"name": "fdm_machine_common",
+			"sub_path": "machine/fdm_machine_common.json"
+		},
+		{
+			"name": "fdm_creality_common",
+			"sub_path": "machine/fdm_creality_common.json"
+		},
+		{
+			"name": "Creality Hi 0.4 nozzle",
+			"sub_path": "machine/Creality Hi 0.4 nozzle.json"
+		}
+	]
+}
