@@ -2,13 +2,13 @@
 
 import { useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Image as ImageIcon, Star, Trash2, Upload } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loading } from '@/components/ui/loading';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import type { ApiProductImage } from '@/lib/types/api';
 import { ConfirmDialog } from './ConfirmDialog';
+import { HowThisWorks, SectionHead } from './section-ui';
 
 interface Props {
   productId: string;
@@ -18,6 +18,8 @@ interface Props {
   canEdit: boolean;
   /** Reload the photo list (G1) after any change. */
   onChanged: () => Promise<void> | void;
+  /** Heading drawn by the tabs layout; the folded layout's row already says it. */
+  title?: string;
 }
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -36,8 +38,8 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-/** Section J (spec §5.2): customer-visible product photos only (never slicer plate renders). */
-export function ProductPhotosCard({ productId, images, loadError, canEdit, onChanged }: Props) {
+/** Photos (spec §5.2 J): customer-visible product photos only (never slicer plate renders). */
+export function PhotosBody({ productId, images, loadError, canEdit, onChanged, title }: Props) {
   const { toast } = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -110,8 +112,8 @@ export function ProductPhotosCard({ productId, images, loadError, canEdit, onCha
   let body: React.ReactNode;
   if (loadError && !images) {
     body = (
-      <p className="py-6 text-center text-sm text-red-600 dark:text-red-400">
-        Couldn&apos;t load photos — {loadError}.{' '}
+      <p className="text-sm text-red-600 dark:text-red-400">
+        Couldn&apos;t load photos: {loadError}.{' '}
         <button type="button" className="underline" onClick={() => void onChanged()}>Retry</button>
       </p>
     );
@@ -119,10 +121,9 @@ export function ProductPhotosCard({ productId, images, loadError, canEdit, onCha
     body = <Loading text="Loading photos…" />;
   } else if (images.length === 0) {
     body = (
-      <div className="flex flex-col items-center gap-2 py-8 text-center text-gray-500 dark:text-gray-400">
-        <ImageIcon className="h-8 w-8" aria-hidden="true" />
-        <p className="text-sm">No photos yet.</p>
-      </div>
+      <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+        <ImageIcon className="h-4 w-4" aria-hidden="true" /> No photos yet.
+      </p>
     );
   } else {
     body = (
@@ -169,26 +170,24 @@ export function ProductPhotosCard({ productId, images, loadError, canEdit, onCha
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="dark:text-gray-100">Photos</CardTitle>
+    <div className="space-y-3">
+      <SectionHead title={title}>
         {canEdit && (
           <>
             <input ref={fileInput} type="file" multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-              className="hidden" onChange={e => void handleFiles(e)} />
-            <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>
-              <Upload className="mr-2 h-4 w-4" aria-hidden="true" /> {uploading ? 'Uploading…' : 'Add photos'}
+              className="hidden" tabIndex={-1} aria-hidden="true" onChange={e => void handleFiles(e)} />
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}>
+              <Upload className="mr-1.5 h-4 w-4" aria-hidden="true" /> {uploading ? 'Uploading…' : 'Add photos'}
             </Button>
           </>
         )}
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {body}
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Photos are shown to staff and to signed-in customers in the shop. JPG, PNG or WebP, up to 10 MB each.
-          Slicer plate previews stay on their components and are never shown here.
-        </p>
-      </CardContent>
+      </SectionHead>
+      {body}
+      <p className="text-sm text-gray-600 dark:text-gray-400">Shown to staff and to signed-in customers in the shop.</p>
+      <HowThisWorks>
+        <p>JPG, PNG or WebP, up to 10 MB each. The first photo is the cover.</p>
+        <p>Slicer plate previews stay on their parts and are never shown here.</p>
+      </HowThisWorks>
 
       <ConfirmDialog
         open={deleting !== null}
@@ -201,6 +200,6 @@ export function ProductPhotosCard({ productId, images, loadError, canEdit, onCha
         onConfirm={() => void confirmDelete()}
         onClose={() => setDeleting(null)}
       />
-    </Card>
+    </div>
   );
 }

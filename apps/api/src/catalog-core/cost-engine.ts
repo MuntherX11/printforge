@@ -216,7 +216,8 @@ export function quantityBasis(bom: ResolvedBom, N: number, cache?: PlanCache): Q
       plan = suggestPlan(R, c.layouts, cache);
     } catch (e) {
       if (!(e instanceof PlanError)) throw e;
-      problems.push({ code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: `"${c.description}" has no usable plate layout — slice it or enter its grams and minutes` });
+      // A part that is not sliced yet already carries PART_NOT_MEASURED.
+      if (!c.pendingFirstSlice) problems.push({ code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: `"${c.description}" has no usable plate layout — slice it or enter its grams and minutes` });
     }
     plans.set(c.componentId, plan);
     const m = minutesForPlan(plan, R, 'CANCEL_ON_PRINTER');

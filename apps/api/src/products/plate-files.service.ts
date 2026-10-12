@@ -88,9 +88,14 @@ export class PlateFilesService {
    * `replace: true` allows a plate that already has a file: the old file is
    * unlinked from the plate and its Attachment row kept (an open job may still
    * print it — the 409 rule applies to deleting a file, not to replacing it).
+   *
+   * `alsoInTx` runs in the same transaction, after the file is linked: the
+   * caller's own row writes commit with the file or not at all (when it
+   * throws, the plate keeps its old file and the new one is unlinked).
    */
   async attachBuffer(
-    productId: string, componentId: string, layoutId: string | null, buffer: Buffer, originalName: string, opts: { replace?: boolean } = {},
+    productId: string, componentId: string, layoutId: string | null, buffer: Buffer, originalName: string,
+    opts: { replace?: boolean; alsoInTx?: (tx: any) => Promise<void> } = {},
   ): Promise<PlateFileResult> {
     const t = await this.target(this.prisma, productId, componentId, layoutId);
     if (!opts.replace && (t.layout ? t.layout.attachmentId : t.component.attachmentId)) throw new ConflictException(HAS_FILE);
@@ -124,6 +129,7 @@ export class PlateFilesService {
           await tx.productComponent.update({ where: { id: componentId }, data: { attachmentId: att.id, gcodeFilename } });
         }
         const printer = await adoptDefaultPrinter(tx, productId, [a.printerModel]);
+        if (opts.alsoInTx) await opts.alsoInTx(tx);
         return { attachmentId: att.id, printer };
       }, TX_OPTS);
     } catch (e) {

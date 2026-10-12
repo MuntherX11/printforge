@@ -101,7 +101,7 @@ export function CostBreakdownTable({ cost }: { cost: OptionCost }) {
             <TableCell className="font-semibold dark:text-gray-100">Price</TableCell>
             <TableCell className="text-gray-600 dark:text-gray-400">
               {cost.computedPrice !== null && !cost.priceUpToDate
-                ? `stored price — the current calculation is ${formatAmount(cost.computedPrice)}`
+                ? `stored price; the current calculation is ${formatAmount(cost.computedPrice)}`
                 : cost.computedPrice !== null ? 'cost × markup, per unit' : 'the size\'s price (colour doesn\'t change it)'}
             </TableCell>
             <TableCell className="text-right tabular-nums font-semibold dark:text-gray-100">

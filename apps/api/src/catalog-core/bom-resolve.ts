@@ -63,6 +63,8 @@ export interface ResolvedComponent {
   stockOnHand: number;
   stockConfirmedAt: Date | null;
   perUnitEstimated: boolean;
+  /** not sliced yet (PART_NOT_MEASURED): grams and minutes are placeholders, never planned or priced */
+  pendingFirstSlice: boolean;
 }
 
 export interface ResolvedPart {
@@ -99,7 +101,12 @@ interface SizeStage {
   warnings: Problem[];
 }
 
-const PRODUCTION_CODES = new Set(['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL']);
+const PRODUCTION_CODES = new Set(['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL', 'PART_NOT_MEASURED']);
+
+/** The blocking problem of a part made from its model whose first slice has not come back. */
+export const partNotMeasured = (componentId: string, description: string): Problem => ({
+  code: 'PART_NOT_MEASURED', componentId, message: `"${description}" has not been sliced yet`,
+});
 
 const UNKNOWN_MATERIAL = (id: string): MaterialLite => ({
   id, name: 'Unknown filament', type: 'OTHER', color: null, colorHex: null, brand: null, costPerGram: 0,
@@ -200,8 +207,11 @@ function sizeStage(config: ProductConfig, sizeOptionId: string | null): SizeStag
         problems.push({ code: 'SLOT_NO_MATERIAL', componentId: c.id, message: `"${d}" colour ${s.colorIndex + 1} has no filament set` });
       }
     }
-    if (!(gramsPerUnit > 0)) problems.push({ code: 'COMPONENT_ZERO_GRAMS', componentId: c.id, message: `"${d}" weighs 0 g — slice it or enter its grams` });
-    if (!(minutesPerUnit > 0)) problems.push({ code: 'COMPONENT_ZERO_MINUTES', componentId: c.id, message: `"${d}" has no print time — slice it or enter its minutes` });
+    const pending = c.pendingFirstSlice === true;
+    // Placeholder numbers are not a measurement: one blocking problem, so the cost is incomplete and no price is written.
+    if (pending) problems.push(partNotMeasured(c.id, d));
+    if (!pending && !(gramsPerUnit > 0)) problems.push({ code: 'COMPONENT_ZERO_GRAMS', componentId: c.id, message: `"${d}" weighs 0 g — slice it or enter its grams` });
+    if (!pending && !(minutesPerUnit > 0)) problems.push({ code: 'COMPONENT_ZERO_MINUTES', componentId: c.id, message: `"${d}" has no print time — slice it or enter its minutes` });
     if (c.perUnitEstimatedFromLayoutId) {
       const l = c.layouts.find((x) => x.id === c.perUnitEstimatedFromLayoutId);
       warnings.push({
@@ -209,7 +219,8 @@ function sizeStage(config: ProductConfig, sizeOptionId: string | null): SizeStag
         message: `"${d}" per-unit weight and time were estimated from its ×${l?.unitsPerPlate ?? '?'} plate — slice a single unit for an exact price`,
       });
     }
-    const { layouts, inactiveLayoutIds } = layoutsOf(c, d, slots, minutesPerUnit, gramsPerUnit);
+    // No implicit single-unit plate from placeholder numbers.
+    const { layouts, inactiveLayoutIds } = layoutsOf(c, d, slots, pending ? 0 : minutesPerUnit, pending ? 0 : gramsPerUnit);
     const baseKey = colourKeyOf(slots);
     const resolved: ResolvedComponent = {
       componentId: c.id, description: d, variantId: c.variantId, sortOrder: c.sortOrder, isMultiColor: multi,
@@ -217,6 +228,7 @@ function sizeStage(config: ProductConfig, sizeOptionId: string | null): SizeStag
       attachmentId: c.attachmentId, gcodeFilename: c.gcodeFilename, slots, layouts, inactiveLayoutIds,
       colourKey: baseKey, baseColourKey: baseKey, stockOnHand: c.stockOnHand, stockConfirmedAt: c.stockConfirmedAt,
       perUnitEstimated: !!c.perUnitEstimatedFromLayoutId,
+      pendingFirstSlice: pending,
     };
     return { row: c, resolved };
   });

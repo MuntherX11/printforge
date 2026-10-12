@@ -5,7 +5,6 @@ import { Download } from 'lucide-react';
 import type { ComponentPlateRow, PlateFileResult, SourceModelUploadResult } from '@printforge/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { stageLargeFile } from '@/lib/chunked-upload';
@@ -15,7 +14,8 @@ import { cn } from '@/lib/utils';
 import type { ComponentDetail } from '@/lib/types/api';
 import { LinkButton, errorText } from './options-ui';
 import { SliceRunsRow } from './SliceRunsRow';
-import { isSlicedRow, rowPrinterId, sliceErrorText, sourceOf, sourceSummary } from './slice-ui';
+import { plateRowPrinter } from './product-layout';
+import { isSlicedRow, sliceErrorText, sourceOf, sourceSummary } from './slice-ui';
 
 interface Props {
   productId: string;
@@ -27,23 +27,27 @@ interface Props {
   printers: ReadonlyMap<string, string> | null;
   /** Changing it refetches the part's slice runs (after a run was queued). */
   runsKey: unknown;
-  /** columns of the bill-of-materials table the row spans */
-  colSpan: number;
+  /** "Show costs per plate": adds Cost / unit, Price / unit and Margin. */
+  showCosts: boolean;
   onChanged: () => void;
   /** Opens "Slice a plate" for this part. */
   onSlice: () => void;
 }
 
-const HEAD = ['Plate', 'Units', 'Time', 'Filament (g)', 'Cost / unit', 'Price / unit', 'Margin', 'Printer', 'File'];
+const HEAD = ['Plate', 'Units', 'Time', 'Filament', 'Printer', 'File'];
+const COST_HEAD = ['Cost / unit', 'Price / unit', 'Margin'];
+const NUMERIC = new Set(['Units', 'Time', 'Filament', ...COST_HEAD]);
 
 /**
- * Every plate of one part under its bill-of-materials row (owner spec
- * 2026-10-02): the part's own ×1 and each active ×N layout, with time,
- * filament, cost and price per unit, margin, the printer the file was sliced
- * for and the file. Editors can upload a file onto a plate without one and
- * delete a plate's file; Manage still adds, edits and deletes plates.
+ * Every plate of one part, inside its opened row (owner spec 2026-10-02):
+ * the source model strip with "Slice a plate", the part's slice runs, then
+ * the part's own ×1 and each active ×N layout with time, filament, the
+ * printer the file was sliced for and the file. Cost and price per unit and
+ * the margin are extra columns behind "Show costs per plate". Editors can
+ * upload a file onto a plate without one and delete a plate's file; Manage
+ * still adds, edits and deletes plates.
  */
-export function PlateList({ productId, component: c, canEdit, isAdmin, printers, runsKey, colSpan, onChanged, onSlice }: Props) {
+export function PlateList({ productId, component: c, canEdit, isAdmin, printers, runsKey, showCosts, onChanged, onSlice }: Props) {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
   const [busy, setBusy] = useState<string | null>(null);
@@ -65,7 +69,7 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
       const assembledUploadId = await stageLargeFile(file);
       const out = await api.post<PlateFileResult>(urlOf(r), { assembledUploadId });
       const notes = out.warnings.map(w => w.message).join(' ');
-      toast(notes ? 'warning' : 'success', notes ? `File saved — ${notes}` : `File saved on ${label(r)}`);
+      toast(notes ? 'warning' : 'success', notes ? `File saved. ${notes}` : `File saved on ${label(r)}`);
       onChanged();
     } catch (err) {
       toast('error', errorText(err, 'Couldn\'t save the file'));
@@ -95,9 +99,9 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
     try {
       const assembledUploadId = await stageLargeFile(file);
       const out = await api.post<SourceModelUploadResult>(sourceUrl, { assembledUploadId });
-      if (out.notice) toast('warning', `Source saved — ${out.notice}`);
-      else if (out.validationRun) toast('success', `Source saved — checking ${out.source.filename} with a 1-unit slice`);
-      else toast('success', `Source saved — ${out.source.filename}`);
+      if (out.notice) toast('warning', `Source saved. ${out.notice}`);
+      else if (out.validationRun) toast('success', `Source saved. Checking ${out.source.filename} with a 1-unit slice`);
+      else toast('success', `Source saved: ${out.source.filename}`);
       setSourceVersion(v => v + 1);
       onChanged();
     } catch (err) {
@@ -125,82 +129,96 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
   const money = (n: number | null) => (n === null ? '—' : formatCurrency(n));
   const printerName = (id: string | null) => (id ? printers?.get(id) ?? null : null);
 
+  const head = showCosts ? [...HEAD.slice(0, 4), ...COST_HEAD, ...HEAD.slice(4)] : HEAD;
+  const cell = 'whitespace-nowrap py-1.5 pr-4';
+  const num = `${cell} text-right font-mono tabular-nums`;
+
   return (
-    <TableRow className="hover:bg-transparent dark:hover:bg-transparent">
-      <td colSpan={colSpan} className="px-4 pb-3 pt-0 dark:text-gray-300">
-        <div className="overflow-x-auto rounded-md border border-gray-100 dark:border-gray-800 sm:ml-10">
-          {canEdit && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 px-2 py-1.5 text-xs dark:border-gray-800">
-              <span className="text-gray-500 dark:text-gray-400">Source model:</span>
-              {source
-                ? <span className="min-w-0 break-all font-medium text-gray-800 dark:text-gray-200">{sourceSummary(source, printerName(source.printerId))}</span>
-                : <span className="text-gray-400">none</span>}
-              {isAdmin && (
-                <label className={cn('cursor-pointer font-medium text-brand-600 hover:underline dark:text-brand-400', busy !== null && 'pointer-events-none opacity-50')}>
-                  <input type="file" accept=".stl,.3mf" className="sr-only" disabled={busy !== null}
-                    aria-label={`${source ? 'Replace' : 'Upload'} the source model of ${c.description} (STL or 3MF project)`}
-                    onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadSource(f); }} />
-                  {busy === 'source' ? 'Uploading…' : source ? 'Replace' : 'Upload STL or 3MF'}
-                </label>
-              )}
-              {isAdmin && source && (confirm === 'source' ? (
-                <>
-                  <LinkButton tone="danger" disabled={busy !== null} onClick={() => void removeSource()}>Remove the source?</LinkButton>
-                  <LinkButton onClick={() => setConfirm(null)}>Keep</LinkButton>
-                </>
-              ) : (
-                <LinkButton tone="danger" disabled={busy !== null} title={`Remove the source model of ${c.description}`} onClick={() => setConfirm('source')}>Remove</LinkButton>
-              ))}
-              <span className="ml-auto" title={source ? undefined : 'Upload an STL or 3MF project first'}>
-                <Button size="sm" variant="outline" disabled={!source || busy !== null} onClick={onSlice}>Slice a plate</Button>
-              </span>
-            </div>
+    <div className="space-y-2 text-sm dark:text-gray-300">
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-gray-500 dark:text-gray-400">Source model:</span>
+          {source
+            ? <span className="min-w-0 break-all font-medium text-gray-800 dark:text-gray-200">{sourceSummary(source, printerName(source.printerId))}</span>
+            : <span className="text-gray-500 dark:text-gray-400">none</span>}
+          {isAdmin && (
+            <label className={cn('cursor-pointer rounded text-xs font-medium text-brand-600 hover:underline focus-within:ring-2 focus-within:ring-brand-500 dark:text-brand-400', busy !== null && 'pointer-events-none opacity-50')}>
+              <input type="file" accept=".stl,.3mf" className="sr-only" disabled={busy !== null}
+                aria-label={`${source ? 'Replace' : 'Upload'} the source model of ${c.description} (STL or 3MF project)`}
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadSource(f); }} />
+              {busy === 'source' ? 'Uploading…' : source ? 'Replace' : 'Upload STL or 3MF'}
+            </label>
           )}
-          <SliceRunsRow productId={productId} componentId={c.id} enabled={source !== null} canEdit={canEdit}
-            refreshKey={`${String(runsKey)}:${sourceVersion}`} onDone={onChanged} />
-          {rows.length > 0 && (
-          <table className="w-full text-xs">
+          {isAdmin && source && (confirm === 'source' ? (
+            <>
+              <LinkButton tone="danger" disabled={busy !== null} onClick={() => void removeSource()}>Remove the source?</LinkButton>
+              <LinkButton onClick={() => setConfirm(null)}>Keep</LinkButton>
+            </>
+          ) : (
+            <LinkButton tone="danger" disabled={busy !== null} title={`Remove the source model of ${c.description}`} onClick={() => setConfirm('source')}>Remove</LinkButton>
+          ))}
+          <span className="ml-auto" title={source ? undefined : 'Upload an STL or 3MF project first'}>
+            <Button size="sm" variant="outline" disabled={!source || busy !== null} onClick={onSlice}>Slice a plate</Button>
+          </span>
+        </div>
+      )}
+      <SliceRunsRow productId={productId} componentId={c.id} enabled={source !== null} canEdit={canEdit}
+        refreshKey={`${String(runsKey)}:${sourceVersion}`} onDone={onChanged} />
+      {rows.length > 0 && (
+        // `relative`: the visually hidden caption and file inputs are absolute, and must scroll with the table.
+        <div className="relative overflow-x-auto">
+          <table className="w-full text-sm">
             <caption className="sr-only">Plates of {c.description}</caption>
             <thead>
               <tr className="border-b text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
-                {HEAD.map(h => <th key={h} scope="col" className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}
+                {head.map(h => (
+                  <th key={h} scope="col" className={cn('whitespace-nowrap py-1.5 pr-4 text-xs font-medium', NUMERIC.has(h) && 'text-right')}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.map(r => {
                 const k = keyOf(r);
                 const sliced = isSlicedRow(r);
-                const slicedOn = sliced ? printerName(rowPrinterId(r, c.plateLayouts)) : null;
+                const printer = plateRowPrinter(r, c, printers);
                 return (
                   <tr key={k} className="border-b last:border-0 dark:border-gray-800">
-                    <td className="whitespace-nowrap px-2 py-1.5 font-medium text-gray-800 dark:text-gray-200">
+                    <td className={cn(cell, 'font-medium text-gray-800 dark:text-gray-200')}>
                       {r.name}
                       {sliced && <Badge variant="info" className="ml-1.5 px-1.5 py-0 text-[10px]">sliced</Badge>}
                     </td>
-                    <td className="px-2 py-1.5 tabular-nums">{r.unitsPerPlate}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{formatMinutes(r.plateMinutes)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{formatGrams(r.plateGrams)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{money(r.costPerUnit)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums" title={r.priceSource === 'TIER' ? `Bulk price from ${r.tierMinQty} units` : undefined}>
-                      {money(r.pricePerUnit)}
-                    </td>
-                    <td className={cn('whitespace-nowrap px-2 py-1.5 tabular-nums', r.marginPct !== null && r.marginPct < 0 && 'text-red-600 dark:text-red-400')}>
-                      {r.marginPct === null ? '—' : formatPct(r.marginPct)}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      {slicedOn
-                        ? <span className="whitespace-nowrap">{slicedOn}</span>
-                        : r.printer
-                        ? <span className="whitespace-nowrap">{r.printer.name}</span>
+                    <td className={num}>{r.unitsPerPlate}</td>
+                    {c.pendingFirstSlice === true && r.layoutId === null ? (
+                      <td className={num} colSpan={2}><span className="font-sans text-gray-600 dark:text-gray-400">not sliced yet</span></td>
+                    ) : (
+                      <>
+                        <td className={num}>{formatMinutes(r.plateMinutes)}</td>
+                        <td className={num}>{formatGrams(r.plateGrams)}</td>
+                      </>
+                    )}
+                    {showCosts && (
+                      <>
+                        <td className={num}>{money(r.costPerUnit)}</td>
+                        <td className={num} title={r.priceSource === 'TIER' ? `Bulk price from ${r.tierMinQty} units` : undefined}>
+                          {money(r.pricePerUnit)}
+                        </td>
+                        <td className={cn(num, r.marginPct !== null && r.marginPct < 0 && 'text-red-600 dark:text-red-400')}>
+                          {r.marginPct === null ? '—' : `${formatPct(r.marginPct)}${r.marginPct < 0 ? ' below cost' : ''}`}
+                        </td>
+                      </>
+                    )}
+                    <td className="py-1.5 pr-4">
+                      {printer
+                        ? <span className="whitespace-nowrap">{printer}</span>
                         : r.slicedFor
-                          ? <span className="text-amber-700 dark:text-amber-300">Sliced for {r.slicedFor} — no matching printer</span>
+                          ? <span className="text-amber-700 dark:text-amber-300">Sliced for {r.slicedFor}, no matching printer</span>
                           : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
+                    <td className="whitespace-nowrap py-1.5">
                       {r.file ? (
                         <span className="inline-flex items-center gap-2">
                           <a href={r.file.downloadUrl} download title={r.file.filename}
-                            className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline dark:text-brand-400">
+                            className="inline-flex items-center gap-1 rounded text-xs font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-brand-400">
                             <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download
                           </a>
                           {canEdit && (confirm === k ? (
@@ -213,14 +231,14 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
                           ))}
                         </span>
                       ) : canEdit ? (
-                        <label className={cn('cursor-pointer font-medium text-brand-600 hover:underline dark:text-brand-400', busy !== null && 'pointer-events-none opacity-50')}>
+                        <label className={cn('cursor-pointer rounded text-xs font-medium text-brand-600 hover:underline focus-within:ring-2 focus-within:ring-brand-500 dark:text-brand-400', busy !== null && 'pointer-events-none opacity-50')}>
                           <input type="file" accept=".gcode,.gco,.g" className="sr-only" disabled={busy !== null}
                             aria-label={`Upload a G-code for ${label(r)}`}
                             onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(r, f); }} />
-                          {busy === k ? 'Uploading…' : 'No file — upload one'}
+                          {busy === k ? 'Uploading…' : 'No file, upload one'}
                         </label>
                       ) : (
-                        <span className="text-gray-400">No file</span>
+                        <span className="text-gray-500 dark:text-gray-400">no file</span>
                       )}
                     </td>
                   </tr>
@@ -228,9 +246,8 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
               })}
             </tbody>
           </table>
-          )}
         </div>
-      </td>
-    </TableRow>
+      )}
+    </div>
   );
 }

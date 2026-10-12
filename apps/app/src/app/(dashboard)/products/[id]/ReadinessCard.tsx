@@ -1,38 +1,33 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Factory } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
-import { policyLabel } from '@/lib/product-format';
-import type { ProductDetail, Readiness } from '@/lib/types/api';
-import { ColourSelect, SizeSelect, pickerOptionsFromDetail, useOptionPair } from '@/components/products/OptionPickers';
-import { errorText } from './options-ui';
-import { parseWhole } from './bom-model';
+import { policyLabel, plural } from '@/lib/product-format';
+import type { ProductDetail } from '@/lib/types/api';
+import { ColourSelect, SizeSelect } from '@/components/products/OptionPickers';
 import { PartsTable, ProblemList, ReadinessFilamentTable } from './readiness-ui';
-import { planLines, readinessStatus } from './readiness-model';
+import { planLine, planLines, verdictOf } from './readiness-model';
+import { DisclosureButton, Pill, SectionHead } from './section-ui';
+import { MAX_READINESS_QTY, type ReadinessState } from './useReadiness';
 import type { NewJobPrefill } from './NewJobDialog';
 
 interface Props {
   product: ProductDetail;
-  /** Changes whenever the cost inputs change (refetch trigger). */
-  costVersion: string | null;
+  /** The page's readiness check (useReadiness): the pickers, the quantity and the answer. */
+  readiness: ReadinessState;
   canEdit: boolean;
+  /** Names the printer of a part's plate, for the plan line. */
+  printerOf: (componentId: string, layoutId: string | null) => string | null;
   onCreateJob: (prefill: NewJobPrefill) => void;
+  /** Heading drawn by the tabs layout; the folded layout's row already says it. */
+  title?: string;
 }
 
-const MAX_QTY = 100_000;
 const DETAILS_KEY = 'pf.readiness.details';
+const FIELD = 'h-10 rounded-md border bg-white px-3 text-sm dark:bg-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
 
-const TONE = {
-  ok: 'text-green-700 dark:text-green-400',
-  short: 'text-amber-700 dark:text-amber-300',
-  blocked: 'text-red-600 dark:text-red-400',
-};
-
-/** "Show details", remembered on this browser; storage may be unavailable. */
+/** "Show filaments and spools", remembered on this browser; storage may be unavailable. */
 function useDetailsToggle(): [boolean, () => void] {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -45,86 +40,80 @@ function useDetailsToggle(): [boolean, () => void] {
   return [open, toggle];
 }
 
-/** Section F (spec §5.2 F, P20): can we make N of this pair from what is on the shelf? */
-export function ReadinessCard({ product, costVersion, canEdit, onCreateJob }: Props) {
-  const options = useMemo(() => pickerOptionsFromDetail(product), [product]);
-  const pair = useOptionPair(options);
-  const [qtyText, setQtyText] = useState('1');
-  const [state, setState] = useState<{ data: Readiness | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true });
+/**
+ * "Make it" (was Production readiness, spec §5.2 F, P20): a quantity, one
+ * verdict, one plan line. The filament, spool and hardware tables and the
+ * warnings sit behind "Show filaments and spools"; problems that block the
+ * job are always shown.
+ */
+export function MakeItBody({ product, readiness, canEdit, printerOf, onCreateJob, title }: Props) {
+  const { options, pair, qtyText, setQtyText, qty, data: r, error, loading } = readiness;
   const [details, toggleDetails] = useDetailsToggle();
-  const qty = parseWhole(qtyText, 1, MAX_QTY);
-
-  useEffect(() => {
-    if (qty === null) return;
-    let live = true;
-    setState(s => ({ ...s, loading: true }));
-    const t = window.setTimeout(() => {
-      const q = new URLSearchParams({ sizeOptionId: pair.sizeKey, colourOptionId: pair.colourKey, qty: String(qty) });
-      api.get<Readiness>(`/products/${product.id}/readiness?${q}`)
-        .then(data => { if (live) setState({ data, error: null, loading: false }); })
-        .catch(err => { if (live) setState({ data: null, error: errorText(err, 'Couldn\'t check readiness'), loading: false }); });
-    }, 300);
-    return () => { live = false; window.clearTimeout(t); };
-  }, [product.id, pair.sizeKey, pair.colourKey, qty, costVersion]);
-
-  const r = state.data;
-  const status = r ? readinessStatus(r) : null;
+  const qtyId = useId();
+  const detailsId = useId();
+  const verdict = r ? verdictOf(r) : null;
   const plan = r ? planLines(r.components) : null;
   const hasExtras = !!r && r.components.some(c => c.surplus > 0);
+  const hasPickers = options.hasSizes || options.hasColours;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Production readiness</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="min-w-[10rem]"><SizeSelect options={options} value={pair.sizeKey} onChange={pair.setSizeKey} /></div>
+    <div className="space-y-3">
+      <SectionHead title={title} />
+      <div className="flex flex-wrap items-end gap-3">
+        {options.hasSizes && <div className="min-w-[10rem]"><SizeSelect options={options} value={pair.sizeKey} onChange={pair.setSizeKey} /></div>}
+        {options.hasColours && (
           <div className="min-w-[12rem]">
             <ColourSelect options={options} sizeKey={pair.sizeKey} value={pair.colourKey} onChange={pair.setColourKey} note={pair.note} />
           </div>
-          <div className="w-32">
-            <Input label="Quantity (units)" type="number" min={1} max={MAX_QTY} step={1} value={qtyText}
-              onChange={e => setQtyText(e.target.value)} error={qty === null ? 'Whole number from 1 to 100,000' : undefined} />
+        )}
+        <div className="space-y-1">
+          <label htmlFor={qtyId} className={hasPickers ? 'block text-sm font-medium text-gray-700 dark:text-gray-300' : 'sr-only'}>Quantity</label>
+          <div className="flex items-center gap-2">
+            <input id={qtyId} type="number" inputMode="numeric" min={1} max={MAX_READINESS_QTY} step={1} value={qtyText}
+              onChange={e => setQtyText(e.target.value)} aria-invalid={qty === null}
+              className={`${FIELD} w-24 font-mono tabular-nums ${qty === null ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'}`} />
+            <span className="text-sm text-gray-500 dark:text-gray-400">units</span>
           </div>
         </div>
-
-        {state.error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{state.error}</p>}
-        {!r && !state.error && <p className="text-sm text-gray-500 dark:text-gray-400">Checking…</p>}
-        {r && status && plan && (
-          <div className={state.loading ? 'space-y-3 opacity-60' : 'space-y-3'}>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <p className={`text-sm font-medium ${TONE[status.tone]}`} aria-live="polite">{status.text}</p>
-              <button type="button" onClick={toggleDetails} aria-expanded={details}
-                className="text-sm text-brand-600 hover:underline dark:text-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded">
-                {details ? 'Hide details' : 'Show details'}
-              </button>
-            </div>
-            <ProblemList problems={r.problems} tone="error" />
-            {details && (
-              <div className="space-y-3">
-                <ProblemList problems={r.warnings} tone="warning" />
-                <ul className="space-y-0.5 text-sm text-gray-700 dark:text-gray-300">
-                  {plan.lines.map(line => <li key={line}>{line}</li>)}
-                  {plan.restOnce && <li>{plan.lines.length > 0 ? 'The other parts print once.' : 'Each part prints once.'}</li>}
-                </ul>
-                {hasExtras && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Extras on the last plate: {policyLabel(r.surplusPolicy ?? product.surplusPolicy)} (product setting)
-                  </p>
-                )}
-                <ReadinessFilamentTable filament={r.filament} />
-                <PartsTable parts={r.parts} />
-              </div>
-            )}
-          </div>
-        )}
-
+        <div className="flex min-h-[40px] min-w-[12rem] flex-1 items-center" aria-live="polite">
+          {verdict && <Pill tone={verdict.tone}>{verdict.text}</Pill>}
+          {!r && !error && <span className="text-sm text-gray-500 dark:text-gray-400">Checking…</span>}
+        </div>
         {canEdit && qty !== null && (
-          <Button variant="outline" onClick={() => onCreateJob({ sizeKey: pair.sizeKey, colourKey: pair.colourKey, quantity: qty })}>
-            <Factory className="mr-2 h-4 w-4" aria-hidden="true" /> Create job for this
+          <Button variant="outline" className="ml-auto" onClick={() => onCreateJob({ sizeKey: pair.sizeKey, colourKey: pair.colourKey, quantity: qty })}>
+            <Factory className="mr-2 h-4 w-4" aria-hidden="true" /> Create job
           </Button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+      {qty === null && <p className="text-xs text-red-600 dark:text-red-400">Whole number from 1 to 100,000</p>}
+      {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      {r && plan && (
+        <div className={loading ? 'space-y-3 opacity-60' : 'space-y-3'}>
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+            <span>{planLine(r, printerOf)}</span>
+            <DisclosureButton open={details} onToggle={toggleDetails} controls={detailsId} show="Show filaments and spools" hide="Hide filaments and spools" />
+            {!details && r.warnings.length > 0 && <span className="text-amber-700 dark:text-amber-300">({plural(r.warnings.length, 'warning')})</span>}
+          </p>
+          <ProblemList problems={r.problems} tone="error" />
+          {details && (
+            <div id={detailsId} className="space-y-3">
+              <ProblemList problems={r.warnings} tone="warning" />
+              <ul className="space-y-0.5 text-sm text-gray-700 dark:text-gray-300">
+                {plan.lines.map(line => <li key={line}>{line}</li>)}
+                {plan.restOnce && <li>{plan.lines.length > 0 ? 'The other parts print once.' : 'Each part prints once.'}</li>}
+              </ul>
+              {hasExtras && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Extras on the last plate: {policyLabel(r.surplusPolicy ?? product.surplusPolicy)} (product setting)
+                </p>
+              )}
+              <ReadinessFilamentTable filament={r.filament} />
+              <PartsTable parts={r.parts} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

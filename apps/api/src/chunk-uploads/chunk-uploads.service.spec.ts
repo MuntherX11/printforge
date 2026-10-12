@@ -32,6 +32,26 @@ describe('ChunkUploadsService consume(keep) + discard', () => {
     await expect(svc.consume(id, 1000, { keep: true })).rejects.toThrow('Unknown or expired upload — start again');
   });
 
+  it('claim: of two requests for one upload exactly one gets it (409 for the other); release hands it back; discard ends it', async () => {
+    const id = await staged('model');
+    const results = await Promise.allSettled([svc.claim(id), svc.claim(id), svc.claim(id)]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const refused = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(refused).toHaveLength(2);
+    for (const r of refused) {
+      expect(r.reason.getStatus()).toBe(409);
+      expect(r.reason.message).toBe('This upload is already being used');
+    }
+    // A claimed upload can still be read by the request that holds it.
+    expect((await svc.consume(id, 1000, { keep: true })).buffer.toString()).toBe('model');
+    await svc.release(id);
+    await expect(svc.claim(id)).resolves.toBeUndefined();
+    await svc.discard(id);
+    await expect(svc.claim(id)).rejects.toThrow('Unknown or expired upload — start again');
+    await expect(svc.release(id)).resolves.toBeUndefined();
+    await expect(svc.claim('../etc')).rejects.toThrow('Invalid upload id');
+  });
+
   it('discarding a missing upload is not an error; a malformed id is a 400', async () => {
     await expect(svc.discard('0f8fe0a8-1111-4222-8333-944455556666')).resolves.toBeUndefined();
     await expect(svc.discard('../etc')).rejects.toThrow('Invalid upload id');

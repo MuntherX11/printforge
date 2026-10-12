@@ -71,6 +71,8 @@ export interface ComponentRow {
   stockOnHand: number;
   stockConfirmedAt: Date | null;
   perUnitEstimatedFromLayoutId: string | null;
+  /** made from its model and not sliced yet: its grams and minutes are placeholders */
+  pendingFirstSlice?: boolean;
   materials: ComponentSlotRow[];
   layouts: LayoutRow[];
   colourStock: Array<{ colourKey: string; stockOnHand: number }>;
@@ -180,6 +182,7 @@ export function toProductConfig(row: any): ProductConfig {
       stockOnHand: Number(c.stockOnHand ?? 0),
       stockConfirmedAt: c.stockConfirmedAt ?? null,
       perUnitEstimatedFromLayoutId: c.perUnitEstimatedFromLayoutId ?? null,
+      pendingFirstSlice: c.pendingFirstSlice === true,
       materials: [...(c.materials ?? [])]
         .sort((a: any, b: any) => a.colorIndex - b.colorIndex)
         .map((cm: any) => ({

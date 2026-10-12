@@ -36,7 +36,7 @@ export function SliceRunsRow({ productId, componentId, enabled, canEdit, refresh
   const [busy, setBusy] = useState<string | null>(null);
 
   if (!enabled) return null;
-  if (error && !runs) return <p className="px-2 py-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>;
+  if (error && !runs) return <p className="text-xs text-red-600 dark:text-red-400">{error}</p>;
   if (!runs || runs.length === 0) return null;
 
   async function retry(run: SliceRunDto) {
@@ -66,7 +66,7 @@ export function SliceRunsRow({ productId, componentId, enabled, canEdit, refresh
   }
 
   return (
-    <ul className="divide-y divide-gray-100 border-b border-gray-100 text-xs dark:divide-gray-800 dark:border-gray-800" aria-label="Slice runs">
+    <ul className="divide-y divide-gray-100 rounded-md border border-gray-100 text-xs dark:divide-gray-800 dark:border-gray-800" aria-label="Slice runs">
       {runs.slice(0, SHOWN).map(run => {
         const chip = runStatusChip(run.status);
         const failed = run.status === SliceRunStatus.FAILED;

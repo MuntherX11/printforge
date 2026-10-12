@@ -1,8 +1,9 @@
-import { Controller, Post, Body, Res, Req, HttpCode, HttpStatus, Get, UseGuards, Param } from '@nestjs/common';
+import { Controller, Post, Patch, Body, Res, Req, HttpCode, HttpStatus, Get, UseGuards, Param, Logger } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { IsEmail, IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
 import { JwtService } from '@nestjs/jwt';
+import type { UserPreferences } from '@printforge/types';
 import { AuthService } from './auth.service';
 import { TokenBlocklistService } from './token-blocklist.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -61,6 +62,10 @@ class CustomerLoginDto {
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+  /** The preferences fallback is logged once per process, not on every page load. */
+  private preferencesWarned = false;
+
   constructor(
     private authService: AuthService,
     private jwtService: JwtService,
@@ -110,8 +115,33 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: any) {
-    return user;
+  async me(@CurrentUser() user: any) {
+    // Customers share this route (the customer portal reads it); only staff carry preferences.
+    if (user?.userType !== 'staff') return user;
+    // The session must survive preferences that cannot be read (the column
+    // may not exist yet while a deploy is between the code and the schema):
+    // the defaults then, never a 500 that signs everyone out of the app.
+    let preferences: UserPreferences = {};
+    try {
+      preferences = await this.authService.getPreferences(user.id);
+    } catch (e) {
+      if (!this.preferencesWarned) {
+        this.preferencesWarned = true;
+        this.logger.warn(`Could not load user preferences, using the defaults: ${(e as Error)?.message}`);
+      }
+    }
+    return { ...user, preferences };
+  }
+
+  /**
+   * The signed-in staff user's own UI settings, so every staff role may write
+   * them (VIEWER included). The body is an interface, so it is allowlisted in
+   * the service (allowedBody) rather than by the ValidationPipe.
+   */
+  @Patch('me/preferences')
+  @UseGuards(JwtAuthGuard, StaffGuard)
+  updateMyPreferences(@CurrentUser() user: { id: string }, @Body() body: unknown): Promise<UserPreferences> {
+    return this.authService.updatePreferences(user.id, body);
   }
 
   // ============ CUSTOMER AUTH ============

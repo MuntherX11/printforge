@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -10,43 +9,38 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useFormatCurrency } from '@/lib/locale-context';
 import { bandLabel, formatAmount, formatPct } from '@/lib/product-format';
-import type { BulkFloor, PriceTierRow, ProductDetail } from '@/lib/types/api';
+import type { BulkFloor, ProductDetail } from '@/lib/types/api';
 import { errorText } from './options-ui';
+import { HowThisWorks, SectionHead } from './section-ui';
 import { STANDARD_KEY } from './options-model';
 import { scopeLabel, scopeOptions } from './bom-model';
 import {
-  basisLine, checkTiers, draftsOf, marginTone, newDraft, sameTiers, sortDrafts, tiersBody, type TierDraft,
+  basisLine, checkTiers, marginTone, newDraft, sameTiers, sortDrafts, tiersBody, type TierDraft,
 } from './bulk-pricing-model';
+import type { BulkTiersState } from './useBulkTiers';
 
 interface Props {
   product: ProductDetail;
+  /** The size being edited and its tiers as typed: page state (useBulkTiers), so unsaved tiers outlive this section. */
+  tiers: BulkTiersState;
   costVersion: string | null;
   canEdit: boolean;
   onSaved: () => void;
+  /** Heading drawn by the tabs layout; the folded layout's row already says it. */
+  title?: string;
 }
 
-const COPY = 'Staff-only. Applied automatically on New Order and New Quote lines. The quantity counts every line of this size on the order, whatever the colour (for example 15 Red + 10 Black = 25). Different sizes never count together. Customers never see tiers; the customer shop always charges the list price. Staff can still type a different line price — they\'ll see a warning below cost.';
 const TONE = { below: 'text-red-600 dark:text-red-400', thin: 'text-amber-700 dark:text-amber-300', ok: 'text-green-700 dark:text-green-400' };
 const cellInput = 'h-8 w-24 rounded-md border bg-white px-2 text-sm tabular-nums dark:bg-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
 
-/** Section H (spec §5.2 H): fixed unit prices per quantity band, per size; margins warn, never block. */
-export function BulkPricingCard({ product, costVersion, canEdit, onSaved }: Props) {
+/** Bulk pricing (spec §5.2 H): fixed unit prices per quantity band, per size; margins warn, never block. */
+export function BulkPricingBody({ product, tiers, costVersion, canEdit, onSaved, title }: Props) {
   const { toast } = useToast();
   const fmt = useFormatCurrency();
-  const [sizeKey, setSizeKey] = useState(STANDARD_KEY);
-  const saved: PriceTierRow[] = useMemo(
-    () => (sizeKey === STANDARD_KEY ? product.priceTiers : product.sizes.find(s => s.id === sizeKey)?.priceTiers ?? []),
-    [product, sizeKey],
-  );
-  const savedKey = JSON.stringify(saved.map(t => [t.minQty, t.unitPrice]));
-  const [rows, setRows] = useState<TierDraft[]>(() => draftsOf(saved));
+  const { sizeKey, setSizeKey, rows, setRows, saved } = tiers;
   const [floor, setFloor] = useState<{ data: BulkFloor | null; error: string | null }>({ data: null, error: null });
   const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setRows(draftsOf(saved)); }, [sizeKey, savedKey]);
-  useEffect(() => { if (!product.sizes.some(s => s.id === sizeKey)) setSizeKey(STANDARD_KEY); }, [product.sizes, sizeKey]);
 
   const listPrice = floor.data?.size.listPrice ?? null;
   const checks = checkTiers(rows, listPrice, fmt);
@@ -90,41 +84,45 @@ export function BulkPricingCard({ product, costVersion, canEdit, onSaved }: Prop
   const thin = f?.thinMarginPct ?? 20;
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Bulk pricing (staff only)</CardTitle>
-            {product.sizes.length > 0 && (
-              <select aria-label="Size" value={sizeKey} onChange={e => setSizeKey(e.target.value)}
-                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
-                {scopeOptions(product).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            )}
-            {canEdit && dirty && <Badge variant="warning">Unsaved changes</Badge>}
-          </div>
-          {canEdit && (
-            <Button variant="outline" size="sm" onClick={() => setRows(rs => [...rs, newDraft()])} disabled={rows.length >= 20}>
-              <Plus className="mr-1 h-4 w-4" /> Add tier
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-gray-600 dark:text-gray-400">{COPY}{product.sizes.length > 0 && ' Each size has its own tiers.'}</p>
+    <div className="space-y-3">
+      <SectionHead title={title}>
+        {product.sizes.length > 0 && (
+          <select aria-label="Size" value={sizeKey} onChange={e => setSizeKey(e.target.value)}
+            className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+            {scopeOptions(product).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
+        {canEdit && dirty && <Badge variant="warning">Unsaved changes</Badge>}
+        {canEdit && (
+          <Button variant="outline" size="sm" onClick={() => setRows(rs => [...rs, newDraft()])} disabled={rows.length >= 20}>
+            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add tier
+          </Button>
+        )}
+      </SectionHead>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Staff only: a lower unit price from a set quantity, applied on New Order and New Quote lines.
+      </p>
+      <HowThisWorks>
+        <p>
+          The quantity counts every line of this size on the order, whatever the colour (for example 15 Red + 10 Black = 25).
+          Different sizes never count together.{product.sizes.length > 0 && ' Each size has its own tiers.'}
+        </p>
+        <p>Customers never see tiers; the customer shop always charges the list price.</p>
+        <p>Staff can still type a different line price. They see a warning when it is below cost.</p>
+      </HowThisWorks>
         {floor.error && (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            Couldn&apos;t load the cost floor — <button type="button" className="font-medium underline" onClick={() => setRetry(n => n + 1)}>Retry</button>
+            Couldn&apos;t load the cost floor. <button type="button" className="font-medium underline" onClick={() => setRetry(n => n + 1)}>Retry</button>
           </p>
         )}
         {blocking.map((p, i) => <p key={i} className="text-sm text-red-600 dark:text-red-400">{p.message}</p>)}
         {unknown.map((p, i) => (
-          <p key={i} className="text-sm text-amber-700 dark:text-amber-300">{p.message} — set its cost per gram on the Filaments page; it is not in the worst case.</p>
+          <p key={i} className="text-sm text-amber-700 dark:text-amber-300">{p.message}. Set its cost per gram on the Filaments page; it is not in the worst case.</p>
         ))}
 
         {rows.length === 0 ? (
-          <p className="py-3 text-center text-sm text-gray-500 dark:text-gray-400">
-            No tiers — every quantity of {scopeLabel(product, sizeKey)} pays the list price{listPrice !== null ? ` (${fmt(listPrice)})` : ''}.
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No tiers: every quantity of {scopeLabel(product, sizeKey)} pays the list price{listPrice !== null ? ` (${fmt(listPrice)})` : ''}.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -199,14 +197,13 @@ export function BulkPricingCard({ product, costVersion, canEdit, onSaved }: Prop
         )}
 
         <div className="flex flex-wrap items-center gap-3">
-          {canEdit && <Button onClick={() => void save()} disabled={saving || !body || !dirty}>{saving ? 'Saving…' : 'Save tiers'}</Button>}
+          {canEdit && (rows.length > 0 || dirty) && <Button onClick={() => void save()} disabled={saving || !body || !dirty}>{saving ? 'Saving…' : 'Save tiers'}</Button>}
           {f?.unitCostAtOne != null && (
             <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
-              Cost per unit at qty 1 for {f.size.label}, standard colour: {fmt(f.unitCostAtOne)}{sizeKey === STANDARD_KEY ? ' (same as the Pricing card)' : ''}
+              Cost per unit at qty 1 for {f.size.label}, standard colour: {fmt(f.unitCostAtOne)}{sizeKey === STANDARD_KEY ? ' (same as under Pricing)' : ''}
             </span>
           )}
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

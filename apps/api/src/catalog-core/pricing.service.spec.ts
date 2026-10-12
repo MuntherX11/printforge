@@ -1,4 +1,5 @@
 import { BomResolverService } from './bom-resolver.service';
+import { resolveInConfig } from './bom-resolve';
 import { toProductConfig } from './catalog-config';
 import { CatalogRequestContext } from './catalog-context';
 import { costEngine } from './cost-engine';
@@ -39,6 +40,27 @@ function setup(opts: { rows?: FixtureRow[]; tiers?: Record<string, any[]>; vtier
 
 const R = (sizeOptionId: string | null, colourOptionId: string | null, quantity: number, extra: Partial<LineInput> = {}): LineInput =>
   ({ productId: PRODUCT_ID, sizeOptionId, colourOptionId, quantity, ...extra });
+
+describe('a part that is not sliced yet', () => {
+  it('PART_NOT_MEASURED replaces the zero grams / zero minutes problems, makes the cost incomplete and stops the price being written', () => {
+    const row = boxRow();
+    const part = row.components[0];
+    const config = toProductConfig({ ...row, components: [{ ...part, gramsUsed: 0.1, printMinutes: 0, plateLayouts: [], pendingFirstSlice: true }] });
+    const bom = resolveInConfig(config, null, null);
+    expect(bom.problems).toEqual([{ code: 'PART_NOT_MEASURED', componentId: part.id, message: `"${part.description}" has not been sliced yet` }]);
+    expect(bom.complete).toBe(false);
+    expect(bom.productionReady).toBe(false);
+    expect(bom.components[0].layouts).toEqual([]);
+    const cost = costEngine.unitCostAtOne(bom, SETTINGS, null);
+    expect(cost.complete).toBe(false);
+    expect(cost.perUnit).toBeNull();
+    // At a quantity the planner finds no layout: still one problem, not a second sentence about layouts.
+    expect(costEngine.costForQuantity(bom, 12, SETTINGS, null).problems.map((p) => p.code)).toEqual(['PART_NOT_MEASURED']);
+    // Without the mark the same numbers give the ordinary problem.
+    const plain = resolveInConfig(toProductConfig({ ...row, components: [{ ...part, gramsUsed: 0.1, printMinutes: 0, plateLayouts: [] }] }), null, null);
+    expect(plain.problems.map((p) => p.code)).toEqual(['COMPONENT_ZERO_MINUTES']);
+  });
+});
 
 describe('PricingService.resolveLines (§3.9 tier table)', () => {
   const staff = (lines: LineInput[], s = setup()) => s.svc.resolveLines(lines, { audience: 'STAFF' });

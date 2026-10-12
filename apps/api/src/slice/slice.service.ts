@@ -5,7 +5,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { matchPrinter } from '../file-parser/printer-match';
 import { StlEstimatorService } from '../file-parser/stl-estimator.service';
 import { containedUploadPath } from '../products/product-images.service';
-import { sourceMetaOf } from '../products/product-sources';
+import { sourceMetaOf, type SourceMeta } from '../products/product-sources';
 import { SlicerProfilesService } from '../slicer-profiles/slicer-profiles.service';
 import { PROJECT_FILL_UNITS, projectFillUnits } from './fill-units';
 import { parseSliceRequest } from './slice-request';
@@ -94,45 +94,15 @@ export class SliceService {
     const isProject = comp.sourceKind === 'THREEMF';
     const meta = sourceMetaOf(source.parsedMetadata);
 
-    // The printer: locked to the project's, else asked for, else the product's.
-    const printers = await this.prisma.printer.findMany({ where: { isActive: true }, select: { id: true, name: true, model: true, isActive: true } });
-    let printerId: string | null;
-    if (isProject) {
-      printerId = matchPrinter(meta.printerModel, printers)?.id ?? meta.printerId;
-      if (!printerId) {
-        throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: ${meta.printerModel ? `The project is set up for "${meta.printerModel}", which matches none of your printers` : 'The project does not name a printer'}`);
-      }
-    } else {
-      printerId = input.printerId ?? comp.product?.defaultPrinterId ?? null;
-      if (!printerId) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: Choose a printer — the product has no pricing printer`);
-    }
-    const printer = printers.find((p) => p.id === printerId);
-    if (!printer) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: That printer is not active`);
-    const machine = await this.profiles.machineFor(printer.id);
-    if (!machine) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: ${printer.name} has no machine profile — import one in Settings › Slicer`);
-    if (!isProject && !(await this.profiles.defaultProcessFor(printer.id))) {
-      throw new BadRequestException(`${SliceErrorCode.NO_PROCESS_PROFILE}: ${printer.name} has no default process profile — set one in Settings › Slicer`);
-    }
-
     // A filament per slot: the one asked for, else the part's own (validation).
-    const slotKeys: SlotKey[] = isProject && meta.slots.length ? meta.slots.map((s) => String(s.colorIndex) as SlotKey) : ['0'];
     const ownMaterial = (key: SlotKey): string | null => {
       if (isProject) return meta.slots.find((s) => String(s.colorIndex) === key)?.materialId ?? null;
       return comp.materialId ?? comp.materials.find((m: any) => m.colorIndex === 0)?.materialId ?? comp.materials[0]?.materialId ?? null;
     };
-    const wanted = slotKeys.map((key) => ({ key, materialId: input.materials[key] ?? ownMaterial(key) }));
-    const missing = wanted.find((w) => !w.materialId);
-    if (missing) throw new BadRequestException(`${SliceErrorCode.SLOT_UNMAPPED}: Slot ${Number(missing.key) + 1} has no filament`);
-    const materials = await this.prisma.material.findMany({ where: { id: { in: wanted.map((w) => w.materialId!) } }, select: { id: true, name: true, type: true } });
-    const filamentMap: SliceFilamentMap = {};
-    for (const w of wanted) {
-      const m = materials.find((x) => x.id === w.materialId);
-      if (!m) throw new BadRequestException(`${SliceErrorCode.SLOT_UNMAPPED}: Slot ${Number(w.key) + 1} names a filament that no longer exists`);
-      if (!(await this.profiles.filamentFor(m.id))) {
-        throw new BadRequestException(`${SliceErrorCode.NO_FILAMENT_PROFILE}: "${m.name}" has no filament profile — map one in Settings › Slicer`);
-      }
-      filamentMap[w.key] = { materialId: m.id, name: m.name, type: m.type };
-    }
+    const { printer, machine, filamentMap } = await this.preconditions({
+      isProject, meta, printerId: input.printerId, defaultPrinterId: comp.product?.defaultPrinterId ?? null,
+      materialFor: (key) => input.materials[key] ?? ownMaterial(key),
+    });
 
     const units = input.fill ? await this.fillUnits(isProject, source, machine, componentId, printer.id) : input.units!;
 
@@ -149,6 +119,66 @@ export class SliceService {
       include: RUN_INCLUDE,
     });
     return toRunDto(row);
+  }
+
+  /**
+   * Everything a run needs besides the part row, in the order `create` reports
+   * it: the printer (locked to the project's, else asked for, else the
+   * product's) and that it is active, its machine profile, its default process
+   * for an STL, and per slot a filament that exists and has a slicer preset (its
+   * own, or the main preset of its type). Throws 400 with the SliceErrorCode.
+   */
+  private async preconditions(q: {
+    isProject: boolean; meta: SourceMeta; printerId: string | null; defaultPrinterId: string | null; materialFor: (key: SlotKey) => string | null | undefined;
+  }): Promise<{ printer: { id: string; name: string }; machine: Record<string, unknown>; filamentMap: SliceFilamentMap }> {
+    const { isProject, meta } = q;
+    const printers = await this.prisma.printer.findMany({ where: { isActive: true }, select: { id: true, name: true, model: true, isActive: true } });
+    let printerId: string | null;
+    if (isProject) {
+      printerId = matchPrinter(meta.printerModel, printers)?.id ?? meta.printerId;
+      if (!printerId) {
+        throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: ${meta.printerModel ? `The project is set up for "${meta.printerModel}", which matches none of your printers` : 'The project does not name a printer'}`);
+      }
+    } else {
+      printerId = q.printerId ?? q.defaultPrinterId ?? null;
+      if (!printerId) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: Choose a printer — the product has no pricing printer`);
+    }
+    const printer = printers.find((p) => p.id === printerId);
+    if (!printer) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: That printer is not active`);
+    const machine = await this.profiles.machineFor(printer.id);
+    if (!machine) throw new BadRequestException(`${SliceErrorCode.NO_MACHINE_PROFILE}: ${printer.name} has no machine profile — import one in Settings › Slicer`);
+    if (!isProject && !(await this.profiles.defaultProcessFor(printer.id))) {
+      throw new BadRequestException(`${SliceErrorCode.NO_PROCESS_PROFILE}: ${printer.name} has no default process profile — set one in Settings › Slicer`);
+    }
+
+    const slotKeys: SlotKey[] = isProject && meta.slots.length ? meta.slots.map((s) => String(s.colorIndex) as SlotKey) : ['0'];
+    const wanted = slotKeys.map((key) => ({ key, materialId: q.materialFor(key) ?? null }));
+    const missing = wanted.find((w) => !w.materialId);
+    if (missing) throw new BadRequestException(`${SliceErrorCode.SLOT_UNMAPPED}: Slot ${Number(missing.key) + 1} has no filament`);
+    const materials = await this.prisma.material.findMany({ where: { id: { in: wanted.map((w) => w.materialId!) } }, select: { id: true, name: true, type: true } });
+    const filamentMap: SliceFilamentMap = {};
+    for (const w of wanted) {
+      const m = materials.find((x) => x.id === w.materialId);
+      if (!m) throw new BadRequestException(`${SliceErrorCode.SLOT_UNMAPPED}: Slot ${Number(w.key) + 1} names a filament that no longer exists`);
+      if (!(await this.profiles.filamentFor(m.id))) {
+        throw new BadRequestException(`${SliceErrorCode.NO_FILAMENT_PROFILE}: "${m.name}" has no slicer preset, and there is no main preset for ${m.type}. Set one in Settings › Slicer`);
+      }
+      filamentMap[w.key] = { materialId: m.id, name: m.name, type: m.type };
+    }
+    return { printer: { id: printer.id, name: printer.name }, machine, filamentMap };
+  }
+
+  /**
+   * The checks `create` makes for a 1-unit run, for a model that is not a part
+   * yet (a part made from its model): nothing is read from a component row and
+   * nothing is written. Throws the same 400s as `create`.
+   */
+  async assertSliceable(q: {
+    kind: 'STL' | 'THREEMF'; meta: SourceMeta; printerId: string | null; defaultPrinterId: string | null; materials: Partial<Record<SlotKey, string>>;
+  }): Promise<void> {
+    await this.preconditions({
+      isProject: q.kind === 'THREEMF', meta: q.meta, printerId: q.printerId, defaultPrinterId: q.defaultPrinterId, materialFor: (key) => q.materials[key] ?? null,
+    });
   }
 
   /**

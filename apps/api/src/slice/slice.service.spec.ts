@@ -23,7 +23,7 @@ describe('create: validation', () => {
     await expect(service.create(P, 'c1', body())).rejects.toThrow('NO_PROCESS_PROFILE: K1 has no default process profile');
     profiles.processes.set(K1, { name: 'p' });
     profiles.filaments.delete(M.black);
-    await expect(service.create(P, 'c1', body())).rejects.toThrow('NO_FILAMENT_PROFILE: "PLA Black" has no filament profile');
+    await expect(service.create(P, 'c1', body())).rejects.toThrow('NO_FILAMENT_PROFILE: "PLA Black" has no slicer preset, and there is no main preset for PLA. Set one in Settings › Slicer');
     profiles.filaments.set(M.black, { name: 'f' });
     await expect(service.create(P, 'c1', body({ materials: { '0': 'm-gone' } }))).rejects.toThrow('SLOT_UNMAPPED: Slot 1 names a filament that no longer exists');
     expect(await statusOf(service.create(P, 'c1', body({ materials: { '0': 'm-gone' } })))).toBe(400);
@@ -51,6 +51,39 @@ describe('create: validation', () => {
     expect(await statusOf(service.create(P, 'c1', body({ evil: 1 })))).toBe(400);
     expect(await statusOf(service.create(P, 'c-none', body()))).toBe(404);
     expect(await statusOf(service.create('p-other', 'c1', body()))).toBe(404);
+  });
+});
+
+describe('assertSliceable: the same checks for a model that is not a part yet', () => {
+  const none = { printerModel: null, printerId: null, slots: [] };
+  const stlOn = (o: Record<string, unknown> = {}) => ({ kind: 'STL' as const, meta: none, printerId: K1 as string | null, defaultPrinterId: null as string | null, materials: { '0': M.black } as Record<string, string>, ...o });
+
+  it('passes with every profile in place and writes nothing', async () => {
+    const x = sliceHarness();
+    await expect(x.service.assertSliceable(stlOn())).resolves.toBeUndefined();
+    expect(x.db.t('sliceRun')).toHaveLength(0);
+  });
+
+  it('400 with the message create gives: printer, machine, default process (STL only), slot, filament preset', async () => {
+    const x = sliceHarness();
+    const name = x.db.t('printer').find((p: any) => p.id === K1).name;
+    await expect(x.service.assertSliceable(stlOn({ printerId: null }))).rejects.toThrow('NO_MACHINE_PROFILE: Choose a printer — the product has no pricing printer');
+    await expect(x.service.assertSliceable(stlOn({ printerId: null, defaultPrinterId: HI }))).resolves.toBeUndefined();
+    await expect(x.service.assertSliceable(stlOn({ printerId: 'pr-gone' }))).rejects.toThrow('NO_MACHINE_PROFILE: That printer is not active');
+    await expect(x.service.assertSliceable(stlOn({ materials: {} }))).rejects.toThrow('SLOT_UNMAPPED: Slot 1 has no filament');
+    await expect(x.service.assertSliceable(stlOn({ materials: { '0': 'm-gone' } }))).rejects.toThrow('SLOT_UNMAPPED: Slot 1 names a filament that no longer exists');
+    x.profiles.filaments.delete(M.black);
+    await expect(x.service.assertSliceable(stlOn())).rejects.toThrow('NO_FILAMENT_PROFILE: "PLA Black" has no slicer preset, and there is no main preset for PLA. Set one in Settings › Slicer');
+    x.profiles.filaments.set(M.black, { name: 'Generic PLA' });
+    x.profiles.processes.delete(K1);
+    await expect(x.service.assertSliceable(stlOn())).rejects.toThrow(`NO_PROCESS_PROFILE: ${name} has no default process profile — set one in Settings › Slicer`);
+    // A project carries its own process, and is locked to its printer whatever is asked for.
+    const project = { kind: 'THREEMF' as const, meta: { printerModel: 'Creality K1', printerId: K1, slots: [{ colorIndex: 0 }, { colorIndex: 1 }] as any }, printerId: HI, defaultPrinterId: null, materials: { '0': M.black, '1': M.red } as Record<string, string> };
+    await expect(x.service.assertSliceable(project)).resolves.toBeUndefined();
+    await expect(x.service.assertSliceable({ ...project, materials: { '0': M.black } })).rejects.toThrow('SLOT_UNMAPPED: Slot 2 has no filament');
+    x.profiles.machines.delete(K1);
+    await expect(x.service.assertSliceable(project)).rejects.toThrow(`NO_MACHINE_PROFILE: ${name} has no machine profile — import one in Settings › Slicer`);
+    await expect(x.service.assertSliceable(project)).rejects.toMatchObject({ status: 400 });
   });
 });
 

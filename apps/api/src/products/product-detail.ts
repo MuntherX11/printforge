@@ -174,6 +174,7 @@ function componentDetail(
     baseColourKey: baseKey,
     colourStock: [...stock.entries()].map(([colourKey, v]) => ({ colourKey, label: label(colourKey), stockOnHand: v.stockOnHand, usedBy: v.usedBy })),
     perUnitEstimatedFrom: est ? { layoutId: est.id, unitsPerPlate: est.unitsPerPlate } : null,
+    pendingFirstSlice: row.pendingFirstSlice === true,
     file,
     thumbnailUrl: raw.thumbnailAttachmentId ? `/api/products/${productId}/components/${row.id}/thumbnail` : null,
     plateLayouts: layouts.map((l: any) => ({

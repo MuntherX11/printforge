@@ -7,7 +7,8 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { GcodeParserService } from '../file-parser/gcode-parser.service';
 import { PlateFilesService } from '../products/plate-files.service';
 import { PlateLayoutsService, slotsFor } from '../products/plate-layouts.service';
-import { ProductComponentsService } from '../products/product-components.service';
+import { rescaleSlotGrams } from '../products/product-components.service';
+import { GRAMS, MINUTES } from '../products/product-input';
 import { containedUploadPath } from '../products/product-images.service';
 import { SlicerProfilesService } from '../slicer-profiles/slicer-profiles.service';
 import { EventsGateway } from '../websocket/events.gateway';
@@ -25,10 +26,12 @@ import { filamentMapOf } from './slice.service';
  *  - N units → a PlateLayout SLICED named "x{units} · {printer}" with the
  *    filament and type per slot, replacing an active SLICED layout with the
  *    same part + printer + units + slot types;
- *  - 1 unit (the validation run) → the part's own file, and its grams and
- *    minutes through the component update path so the product reprices; a
- *    multicolour part also gets each colour's grams (a colour the slicer did
- *    not use is 0) and its filament-change count.
+ *  - 1 unit (the validation run) → the part's own file, its grams and minutes
+ *    and its filament-change count; a multicolour part also gets each colour's
+ *    grams (a colour the slicer did not use is 0). The numbers are checked
+ *    first, then every row is written in ONE transaction together with the
+ *    file link, so a failure leaves the part exactly as it was. It clears
+ *    `pendingFirstSlice`, and the product reprices after the commit.
  *
  * Project parts may have several bodies per unit, so their unit count is the
  * label count divided by the validation run's (bodies-per-unit rule).
@@ -72,7 +75,6 @@ export class SliceProcessor implements OnModuleInit {
     private readonly profiles: SlicerProfilesService,
     private readonly layouts: PlateLayoutsService,
     private readonly plateFiles: PlateFilesService,
-    private readonly components: ProductComponentsService,
     @Optional() private readonly gateway?: EventsGateway,
   ) {}
 
@@ -190,7 +192,7 @@ export class SliceProcessor implements OnModuleInit {
       const m = materials.find((x) => x.id === choice.materialId);
       if (!m) throw new RunFailed(SliceErrorCode.SLOT_UNMAPPED, `Slot ${Number(k) + 1}: "${choice.name}" no longer exists (merged or deleted)`);
       const raw = await this.profiles.filamentFor(m.id);
-      if (!raw) throw new RunFailed(SliceErrorCode.NO_FILAMENT_PROFILE, `"${m.name}" has no filament profile`);
+      if (!raw) throw new RunFailed(SliceErrorCode.NO_FILAMENT_PROFILE, `"${m.name}" has no slicer preset, and there is no main preset for ${m.type}`);
       filaments.push({ raw, density: String(m.density ?? 1.24) });
     }
     const siblings = (await this.prisma.slicerProfile.findMany({ select: { json: true } })).map((p) => ({ raw: p.json as Record<string, unknown> }));
@@ -218,17 +220,31 @@ export class SliceProcessor implements OnModuleInit {
 
     // The validation run: the part's own ×1 file and per-unit numbers.
     if (run.unitsRequested === 1) {
-      await this.plateFiles.attachBuffer(comp.productId, comp.id, null, out.gcode, filename, { replace: true });
-      // Per colour only when the file reports grams per tool; without them the
-      // update below spreads the total over the colours as they stand.
-      if (comp.isMultiColor && tools.length) {
-        const bySlot = new Map(slots.map((s) => [s.colorIndex, s.gramsUsed]));
-        for (const m of comp.materials) {
-          await this.prisma.componentMaterial.updateMany({ where: { componentId: comp.id, colorIndex: m.colorIndex }, data: { gramsUsed: bySlot.get(m.colorIndex) ?? 0 } });
-        }
-      }
-      await this.prisma.productComponent.update({ where: { id: comp.id }, data: { colorChanges } });
-      await this.components.update(comp.productId, comp.id, { gramsUsed: grams, printMinutes: Math.max(minutes, 0) });
+      // Checked before any write: a number the part cannot hold fails the run with nothing changed.
+      if (!Number.isFinite(grams) || grams > GRAMS.max) throw new RunFailed('BAD_GRAMS', `The sliced file reports ${grams} g, more than a part can weigh (${GRAMS.max} g)`);
+      if (!Number.isFinite(minutes) || minutes > MINUTES.max) throw new RunFailed('BAD_TIME', `The sliced file reports ${minutes} min, more than a part can take (${MINUTES.max} min)`);
+      // A part weighs at least what the edit form accepts; a lighter slice is stored at that minimum.
+      const gramsUsed = Math.max(grams, GRAMS.min);
+      const multi = comp.isMultiColor && comp.materials.length > 0;
+      // Per colour when the file reports grams per tool; without them the total
+      // is spread over the colours as they stand. Either way they sum to the total.
+      const bySlot = tools.length ? new Map(slots.map((s) => [s.colorIndex, s.gramsUsed])) : null;
+      // One transaction with the file link: the file, the numbers, the colours and the mark, or none of them.
+      await this.plateFiles.attachBuffer(comp.productId, comp.id, null, out.gcode, filename, {
+        replace: true,
+        alsoInTx: async (tx) => {
+          await tx.productComponent.update({
+            where: { id: comp.id },
+            data: { gramsUsed, printMinutes: minutes, colorChanges, perUnitEstimatedFromLayoutId: null, pendingFirstSlice: false },
+          });
+          if (!multi) return;
+          const current: Array<{ colorIndex: number; gramsUsed: number }> = await tx.componentMaterial.findMany({ where: { componentId: comp.id }, select: { colorIndex: true, gramsUsed: true } });
+          const measured = current.map((m) => ({ colorIndex: m.colorIndex, gramsUsed: bySlot ? bySlot.get(m.colorIndex) ?? 0 : m.gramsUsed }));
+          for (const s of rescaleSlotGrams(measured, gramsUsed)) {
+            await tx.componentMaterial.updateMany({ where: { componentId: comp.id, colorIndex: s.colorIndex }, data: { gramsUsed: s.gramsUsed } });
+          }
+        },
+      });
       return { unitsSliced: labels, layoutId: null };
     }
 

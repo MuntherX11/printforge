@@ -1,6 +1,7 @@
 // PrintForge slicer sidecar: a tiny HTTP wrapper around headless orca-slicer.
 //
 //   GET  /health                      -> { ok, orcaVersion, busy }
+//   GET  /profiles/:kind?q=&limit=    -> { presets: [{ name, vendor }] } bundled presets a user can pick
 //   GET  /profiles/:kind/:name        -> bundled system preset JSON (404 if unknown)
 //   POST /profiles/check              -> { ok, unresolved: [names], details }
 //   POST /slice                       -> plate_1.gcode bytes (X-Plate-Files) | { error, exitCode, logTail }
@@ -19,6 +20,16 @@ import { loadSystemIndex } from './system-index.mjs';
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const MAX_FILAMENTS = 16;
 const LOG_TAIL_LINES = 60;
+const LIST_DEFAULT_LIMIT = 50;
+const LIST_MAX_LIMIT = 200;
+
+/** `limit` query value -> 1..200; 50 when absent or not a positive integer. */
+export function parseListLimit(value) {
+  if (value === null || value === undefined || !/^\d+$/.test(String(value))) return LIST_DEFAULT_LIMIT;
+  const n = Number(value);
+  if (n < 1) return LIST_DEFAULT_LIMIT;
+  return Math.min(n, LIST_MAX_LIMIT);
+}
 
 export class HttpError extends Error {
   constructor(status, message, extra = {}) {
@@ -218,6 +229,12 @@ export function createApp(deps) {
     sendJson(res, 200, raw);
   }
 
+  function handleProfileList(res, kind, query) {
+    if (!PRESET_KINDS.includes(kind)) throw new HttpError(404, 'unknown preset kind');
+    const presets = index.list(kind, { q: query.get('q') ?? '', limit: parseListLimit(query.get('limit')) });
+    sendJson(res, 200, { presets });
+  }
+
   async function handleProfilesCheck(req, res) {
     const body = await readJsonBody(req);
     if (!Array.isArray(body.presets)) throw new HttpError(400, 'presets must be an array');
@@ -320,6 +337,8 @@ export function createApp(deps) {
     try {
       if (req.method === 'GET' && parts.length === 1 && parts[0] === 'health') {
         sendJson(res, 200, { ok: true, orcaVersion, busy });
+      } else if (req.method === 'GET' && parts.length === 2 && parts[0] === 'profiles') {
+        handleProfileList(res, parts[1], url.searchParams);
       } else if (req.method === 'GET' && parts.length === 3 && parts[0] === 'profiles') {
         await handleProfileGet(res, parts[1], parts[2]);
       } else if (req.method === 'POST' && parts.length === 2 && parts[0] === 'profiles' && parts[1] === 'check') {

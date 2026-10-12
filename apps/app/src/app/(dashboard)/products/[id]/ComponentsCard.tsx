@@ -1,10 +1,8 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCode, Plus, Upload } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast';
 import { useFilamentStock } from '@/components/filaments/useFilamentStock';
 import { api } from '@/lib/api';
@@ -12,8 +10,8 @@ import { formatGrams, formatMinutes } from '@/lib/product-format';
 import type { ProductDetail } from '@/lib/types/api';
 import type { ProductPageData } from './useProduct';
 import { BOM_SECTION_ID } from './useBomScope';
-import { ComponentRow } from './ComponentRow';
-import { PlateList } from './PlateList';
+import { PartRow } from './PartRow';
+import { SectionHead } from './section-ui';
 import { AddFromModelDialog } from './AddFromModelDialog';
 import { EditComponentDialog } from './EditComponentDialog';
 import { PlateLayoutsDialog } from './PlateLayoutsDialog';
@@ -24,9 +22,10 @@ import { GcodeImportDialog } from './GcodeImportDialog';
 import { SlotFilamentDialog } from './SlotFilamentDialog';
 import { SlicePlateDialog } from './SlicePlateDialog';
 import { useSlicerImport } from './useSlicerImport';
+import type { PartSlices } from './usePartSlices';
+import { sourceOf } from './slice-ui';
 import { errorText } from './options-ui';
 import { reorder } from './options-model';
-import { sourceOf } from './slice-ui';
 import { componentsInScope, materialIndex, perProductTotals, scopeLabel, scopeOptions, scopeSizeOptionId } from './bom-model';
 
 interface Props {
@@ -35,6 +34,20 @@ interface Props {
   /** Controlled by the page (useBomScope): 'standard' or a size id. */
   scope: string;
   onScopeChange: (scope: string) => void;
+  /**
+   * 'full' offers Import 3MF, Upload G-code and Add from model; 'overview'
+   * (the tabs layout's first tab) only the Add from model link.
+   */
+  variant: 'full' | 'overview';
+  /** Heading drawn by the tabs layout, with the add buttons beside it. Without one the buttons go under the list. */
+  title?: string;
+  /** Printer id → name (the page loads it once a part needs it); null until loaded. */
+  printers: ReadonlyMap<string, string> | null;
+  /** "Show costs per plate", page state shared by every part. */
+  showCosts: boolean;
+  onShowCosts: (show: boolean) => void;
+  /** Slicing state per part (the page's `slice-run` subscription), for the chip on a closed row. */
+  slices: PartSlices;
 }
 
 type BomDialog =
@@ -71,20 +84,26 @@ function AddFromModelButton({ variant, disabled, onFile }: { variant: 'outline' 
     <>
       <input ref={input} type="file" accept=".stl,.3mf" className="hidden" tabIndex={-1} aria-hidden="true" disabled={disabled}
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
-      <Button variant={variant} size="sm" disabled={disabled} onClick={() => input.current?.click()}>
-        {variant === 'outline' && <Plus className="mr-1 h-4 w-4" />} Add from model
+      <Button variant={variant} size="sm" disabled={disabled} title="Pick an STL or 3MF; PrintForge slices one unit"
+        className={variant === 'ghost' ? 'text-brand-600 dark:text-brand-400' : undefined} onClick={() => input.current?.click()}>
+        {variant === 'outline' && <Plus className="mr-1 h-4 w-4" aria-hidden="true" />} Add from model
       </Button>
     </>
   );
 }
 
-/** Section D (spec §5.2 D): the printed components of one size. */
-export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
+/**
+ * Parts and plates (was the bill of materials, spec §5.2 D): the printed
+ * parts of one size, one row each, opened in place. Every row starts closed
+ * and nothing about which are open is remembered.
+ */
+export function PartsBody({ data, product, scope, onScopeChange, variant, title, printers, showCosts, onShowCosts, slices }: Props) {
   const { toast } = useToast();
   const { canEdit, isAdmin } = data;
   const [dialog, setDialog] = useState<BomDialog | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
   const reload = data.reloadCost;
   const sizeOptionId = scopeSizeOptionId(scope);
   const label = scopeLabel(product, scope);
@@ -99,16 +118,18 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
   const target = dialog && 'componentId' in dialog ? find(dialog.componentId) : null;
   // Bumped when a slice run is queued, so the part's runs list refetches.
   const [runsVersion, setRunsVersion] = useState(0);
-  // Printer names for SLICED plates and 3MF sources; loaded once a part needs them.
-  const [printerNames, setPrinterNames] = useState<Map<string, string> | null>(null);
-  const needsPrinters = components.some(c => sourceOf(c) !== null || c.plateLayouts.some(l => l.printerId));
   const { loadPrinters } = data;
-  useEffect(() => {
-    if (!needsPrinters || printerNames) return;
-    loadPrinters()
-      .then(list => setPrinterNames(new Map(list.map(p => [p.id, p.name] as const))))
-      .catch(() => undefined);
-  }, [needsPrinters, printerNames, loadPrinters]);
+
+  // The latest run of every part shown that has a source model: one request per part, asked once.
+  const { watch } = slices;
+  const sourcedKey = components.filter(c => sourceOf(c) !== null).map(c => c.id).join(',');
+  useEffect(() => { if (sourcedKey) watch(sourcedKey.split(',')); }, [sourcedKey, watch]);
+
+  const toggle = (id: string) => setOpenIds(prev => {
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
 
   async function move(id: string, dir: -1 | 1) {
     const next = reorder(components, id, dir);
@@ -118,7 +139,7 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
       await api.put(`/products/${product.id}/components/order`, { sizeOptionId, componentIds: next.map(c => c.id) });
       await reload();
     } catch (err) {
-      toast('error', errorText(err, 'Couldn\'t reorder the components'));
+      toast('error', errorText(err, 'Couldn\'t reorder the parts'));
     } finally {
       setBusy(false);
     }
@@ -134,117 +155,107 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
       setDialog(null);
       await reload();
     } catch (err) {
-      setRemoveError(errorText(err, 'Couldn\'t remove the component'));
+      setRemoveError(errorText(err, 'Couldn\'t remove the part'));
     } finally {
       setBusy(false);
     }
   }
 
+  const fromModel = (v: 'outline' | 'ghost') => isAdmin
+    ? <AddFromModelButton variant={v} disabled={dialog !== null} onFile={file => setDialog({ kind: 'fromModel', file })} />
+    : null;
+  const imports = <ImportButtons busy={importer.busy} onThreeMf={f => void importer.startThreeMf(f)} onGcode={f => void importer.uploadGcode(f)} />;
+  // With parts: the tabs layout's Overview only links to Add from model; everywhere else all three.
+  const addButtons = !canEdit || components.length === 0 ? null : variant === 'overview'
+    ? fromModel('ghost')
+    : <>{fromModel('outline')}{imports}</>;
+
   return (
-    <div id={BOM_SECTION_ID} className="scroll-mt-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>Bill of materials — printed components</CardTitle>
-              {product.sizes.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label htmlFor="bom-scope" className="text-sm text-gray-600 dark:text-gray-400">Showing:</label>
-                  <select id="bom-scope" value={scope} onChange={e => onScopeChange(e.target.value)}
-                    className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
-                    {scopeOptions(product).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Each size has its own components and stock</span>
-                </div>
-              )}
-            </div>
-            {canEdit && components.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                <ImportButtons busy={importer.busy} onThreeMf={f => void importer.startThreeMf(f)} onGcode={f => void importer.uploadGcode(f)} />
-                {isAdmin && <AddFromModelButton variant="outline" disabled={dialog !== null} onFile={file => setDialog({ kind: 'fromModel', file })} />}
-              </div>
+    <div id={BOM_SECTION_ID} className="scroll-mt-4 space-y-3">
+      <SectionHead title={title}>{title ? addButtons : null}</SectionHead>
+      {product.sizes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="bom-scope" className="text-sm text-gray-600 dark:text-gray-400">Showing</label>
+          <select id="bom-scope" value={scope} onChange={e => onScopeChange(e.target.value)}
+            className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+            {scopeOptions(product).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <span className="text-xs text-gray-500 dark:text-gray-400">Each size has its own parts and stock</span>
+        </div>
+      )}
+
+      {components.length === 0 ? (
+        <div className="space-y-3 rounded-md border border-dashed border-gray-300 px-4 py-6 text-center dark:border-gray-700">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            No parts yet. Import a sliced 3MF or G-code, or add a part from its model (STL or 3MF project).
+            {sizeOptionId && ` Until then, ${label} uses the standard parts.`}
+          </p>
+          {canEdit && <div className="flex flex-wrap justify-center gap-2">{imports}{fromModel('ghost')}</div>}
+        </div>
+      ) : (
+        <>
+          <ul className="rounded-md border border-gray-200 dark:border-gray-700" aria-label={`Parts of ${label}`}>
+            {components.map((c, i) => (
+              <PartRow
+                key={c.id}
+                product={product}
+                component={c}
+                materials={materials}
+                canEdit={canEdit}
+                isAdmin={isAdmin}
+                isFirst={i === 0}
+                isLast={i === components.length - 1}
+                busy={busy}
+                open={openIds.has(c.id)}
+                onToggle={() => toggle(c.id)}
+                printers={printers}
+                runsKey={runsVersion}
+                sliceState={slices.stateOf(c.id)}
+                showCosts={showCosts}
+                onShowCosts={onShowCosts}
+                onMove={dir => void move(c.id, dir)}
+                onEdit={() => setDialog({ kind: 'edit', componentId: c.id })}
+                onRemove={() => { setRemoveError(null); setDialog({ kind: 'remove', componentId: c.id }); }}
+                onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
+                onEditLinks={focus => setDialog({ kind: 'links', focus })}
+                onReload={() => void reload()}
+                stock={canEdit ? stockById : null}
+                onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
+                onSlice={() => { stock.refresh(); setDialog({ kind: 'slice', componentId: c.id }); }}
+              />
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            {!title && addButtons ? <div className="flex flex-wrap gap-2">{addButtons}</div> : <span />}
+            {(components.length > 1 || components.some(c => c.quantity !== 1)) && (
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Per product <span className="font-mono tabular-nums text-gray-900 dark:text-gray-100">{formatGrams(totals.grams)} · {formatMinutes(totals.minutes)}</span>
+              </p>
             )}
           </div>
-        </CardHeader>
-        <CardContent>
-          {components.length === 0 ? (
-            <div className="space-y-3 py-6 text-center">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                No components yet. Import a sliced 3MF or G-code, or add a part from its model (STL or 3MF project).
-                {sizeOptionId && ` Until then, ${label} uses the standard bill of materials.`}
-              </p>
-              {canEdit && (
-                <div className="flex flex-wrap justify-center gap-2">
-                  <ImportButtons busy={importer.busy} onThreeMf={f => void importer.startThreeMf(f)} onGcode={f => void importer.uploadGcode(f)} />
-                  {isAdmin && <AddFromModelButton variant="ghost" disabled={dialog !== null} onFile={file => setDialog({ kind: 'fromModel', file })} />}
-                </div>
-              )}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {canEdit && <TableHead><span className="sr-only">Order</span></TableHead>}
-                  <TableHead>Component</TableHead>
-                  <TableHead>Filament</TableHead>
-                  <TableHead>Per unit</TableHead>
-                  <TableHead className="text-right">Units per product</TableHead>
-                  <TableHead>Per product</TableHead>
-                  <TableHead>Plate layouts</TableHead>
-                  <TableHead>Printed stock</TableHead>
-                  <TableHead>File</TableHead>
-                  {canEdit && <TableHead className="text-right">Actions</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {components.map((c, i) => (
-                  <Fragment key={c.id}>
-                    <ComponentRow
-                      product={product}
-                      component={c}
-                      materials={materials}
-                      canEdit={canEdit}
-                      isFirst={i === 0}
-                      isLast={i === components.length - 1}
-                      busy={busy}
-                      onMove={dir => void move(c.id, dir)}
-                      onEdit={() => setDialog({ kind: 'edit', componentId: c.id })}
-                      onRemove={() => { setRemoveError(null); setDialog({ kind: 'remove', componentId: c.id }); }}
-                      onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
-                      onEditLinks={focus => setDialog({ kind: 'links', focus })}
-                      onReload={() => void reload()}
-                      stock={canEdit ? stockById : null}
-                      onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
-                    />
-                    <PlateList productId={product.id} component={c} canEdit={canEdit} isAdmin={isAdmin} printers={printerNames}
-                      runsKey={runsVersion} colSpan={canEdit ? 10 : 8} onChanged={() => void reload()}
-                      onSlice={() => { stock.refresh(); setDialog({ kind: 'slice', componentId: c.id }); }} />
-                  </Fragment>
-                ))}
-                <TableRow>
-                  <td colSpan={canEdit ? 5 : 4} className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Per product total</td>
-                  <TableCell className="whitespace-nowrap font-medium tabular-nums">{formatGrams(totals.grams)} · {formatMinutes(totals.minutes)}</TableCell>
-                  <td colSpan={canEdit ? 4 : 3} />
-                </TableRow>
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+        </>
+      )}
 
       {canEdit && (
         <>
           {isAdmin && (
             <AddFromModelDialog productId={product.id} file={dialog?.kind === 'fromModel' ? dialog.file : null}
               sizeOptionId={sizeOptionId} scopeLabel={label} materials={materials} stock={stock} loadPrinters={loadPrinters}
-              onClose={() => setDialog(null)} onAdded={() => { setRunsVersion(v => v + 1); void reload(); }} />
+              onClose={() => setDialog(null)}
+              onAdded={out => {
+                // Open the new part: its first slice and its runs are what the owner looks for next.
+                setOpenIds(prev => new Set(prev).add(out.componentId));
+                slices.refresh(out.componentId);
+                setRunsVersion(v => v + 1);
+                void reload();
+              }} />
           )}
           <EditComponentDialog product={product} component={dialog?.kind === 'edit' ? target : null} open={dialog?.kind === 'edit'}
             loadMaterials={data.loadMaterials} onClose={() => setDialog(null)} onSaved={() => void reload()} />
           <ConfirmDialog
             open={dialog?.kind === 'remove' && target !== null}
-            title="Remove component"
-            message={`Remove "${target?.description ?? ''}" from ${label}? A component used by orders or jobs can't be removed.`}
+            title="Remove part"
+            message={`Remove "${target?.description ?? ''}" from ${label}? A part used by orders or jobs can't be removed.`}
             confirmLabel="Remove"
             destructive
             busy={busy}
@@ -263,7 +274,7 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
             scopeLabel={label} stock={stock} onClose={() => setDialog(null)} onSaved={() => void reload()} />
           <SlicePlateDialog product={product} component={dialog?.kind === 'slice' ? target : null} open={dialog?.kind === 'slice'}
             materials={materials} stock={stock} loadPrinters={loadPrinters}
-            onClose={() => setDialog(null)} onQueued={() => setRunsVersion(v => v + 1)} />
+            onClose={() => setDialog(null)} onQueued={run => { slices.refresh(run.componentId); setRunsVersion(v => v + 1); }} />
         </>
       )}
       <PlateLayoutsDialog product={product} component={dialog?.kind === 'layouts' ? target : null} open={dialog?.kind === 'layouts'}

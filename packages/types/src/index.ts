@@ -272,12 +272,27 @@ export interface LoginDto {
   password: string;
 }
 
+/** How the product page is laid out: tabs, or one page of folded sections. */
+export type ProductPageLayout = 'TABS' | 'FOLDED';
+
+export const PRODUCT_PAGE_LAYOUTS: readonly ProductPageLayout[] = ['TABS', 'FOLDED'];
+
+/** A staff user's own UI settings (User.preferences). Every key is optional; absent = the default. */
+export interface UserPreferences {
+  productPageLayout?: ProductPageLayout;
+}
+
+/** PATCH /auth/me/preferences: only the keys sent are changed. */
+export type UpdateUserPreferencesDto = UserPreferences;
+
 export interface AuthUser {
   id: string;
   email: string;
   name: string;
   role: Role;
   userType: UserType;
+  /** GET /auth/me (staff). */
+  preferences: UserPreferences;
 }
 
 export interface AuthCustomer {
@@ -1138,6 +1153,8 @@ export interface ComponentDetail {
   /** Non-base keys: rows with a balance other than 0, plus keys active colours resolve to (0 when absent). */
   colourStock: Array<{ colourKey: string; label: string; stockOnHand: number; usedBy: string[] }>;
   perUnitEstimatedFrom: { layoutId: string; unitsPerPlate: number } | null;
+  /** Made from its model and not sliced yet: grams and minutes are placeholders (problem PART_NOT_MEASURED). */
+  pendingFirstSlice?: boolean;
   file: FileRef | null;
   thumbnailUrl: string | null;
   plateLayouts: ComponentPlateLayout[];

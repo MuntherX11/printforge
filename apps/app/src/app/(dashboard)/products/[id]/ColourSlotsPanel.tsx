@@ -98,7 +98,7 @@ export function ColourSlotsPanel({ product, canEdit, onEditLinks, onChanged }: P
   const r = removal?.preview;
 
   return (
-    <div className="space-y-3 border-t px-6 pt-4 dark:border-gray-700">
+    <div className="space-y-3 border-t pt-4 dark:border-gray-700">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Colour slots</h4>

@@ -29,7 +29,7 @@ function SpoolText({ note }: { note: SpoolNote }) {
   return (
     <>
       <span className="tabular-nums">{note.text}</span>
-      {note.kind === 'low' && <span className={AMBER}> — {note.left}</span>}
+      {note.kind === 'low' && <span className={AMBER}>, {note.left}</span>}
     </>
   );
 }
@@ -45,7 +45,7 @@ function JobSpoolText({ f }: { f: Filament }) {
         {s.pfid ?? 'Spool'} · {formatGrams(s.effectiveRemaining)} left after other jobs{s.location ? ` · ${s.location}` : ''}
       </span>{' '}
       {note.kind === 'other'
-        ? <span className={AMBER}>{s.materialName ?? 'another filament'} — different colour</span>
+        ? <span className={AMBER}>{s.materialName ?? 'another filament'}, different colour</span>
         : f.spoolHasEnough
           ? <span className={GREEN}>✓ enough</span>
           : <span className={AMBER}>short {formatGrams(Math.max(0, f.gramsNeeded - s.effectiveRemaining))}</span>}

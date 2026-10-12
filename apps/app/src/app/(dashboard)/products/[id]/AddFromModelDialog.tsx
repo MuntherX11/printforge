@@ -39,8 +39,8 @@ interface Props {
   stock: FilamentStock;
   loadPrinters: () => Promise<ApiPrinter[]>;
   onClose: () => void;
-  /** The part was created; the caller refetches the product. */
-  onAdded: () => void;
+  /** The part was created; the caller refetches the product and opens the new part's row. */
+  onAdded: (out: ComponentFromModelResult) => void;
 }
 
 type Phase =
@@ -174,8 +174,8 @@ export function AddFromModelDialog({ productId, file, sizeOptionId, scopeLabel, 
     try {
       const out = await api.post<ComponentFromModelResult>(`/products/${productId}/components/from-model`, built.body);
       if (out.notice) toast('warning', out.notice);
-      else toast('success', 'Part added — slicing the first unit');
-      onAdded();
+      else toast('success', 'Part added. Slicing the first unit');
+      onAdded(out);
       onClose();
     } catch (err) {
       setError(sliceErrorText(err, 'Couldn\'t add the part'));

@@ -1,17 +1,18 @@
-import { BadRequestException, ConflictException, forwardRef, HttpException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { SLOT_KEYS, SliceErrorCode, type ComponentFromModelResult, type SliceRunDto, type SlotKey } from '@printforge/types';
+import { BadRequestException, ConflictException, forwardRef, HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { SLOT_KEYS, SliceErrorCode, type ComponentFromModelResult, type SlotKey } from '@printforge/types';
+import { decideImportLinks, type LinkComponent } from '../catalog-core/colour-link-proposal';
 import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { allowedBody } from '../common/utils/validate-number';
 import { SliceService } from '../slice/slice.service';
+import { isMultiColourComponent } from '../stock-ledger/colour-key';
 import { CONVERTED_BLOCKER, CONVERTED_TAIL, liveConversion } from './option-conversion-rules';
 import { rescaleSlotGrams } from './product-components.service';
 import { GRAMS, MINUTES, stripHtml } from './product-input';
 import { lockOptions, TX_OPTS } from './product-locks';
 import { ProductSourcesService } from './product-sources.service';
 import { sourceModelOf, type SourceMeta } from './product-sources';
-import { ProductsService } from './products.service';
-import { unlinkWritten } from './slicer-files';
+import { unlinkWritten, type StoredFile } from './slicer-files';
 
 /**
  * A part made from its model alone (ADMIN only): the owner uploads an
@@ -19,8 +20,13 @@ import { unlinkWritten } from './slicer-files';
  * the part is created with the file as its source and the 1-unit validation
  * slice is queued. Grams and minutes are not known until that slice comes
  * back, so the part starts with the smallest values the manual create path
- * accepts (PLACEHOLDER_*), split evenly over its colours, and the slice
- * processor overwrites them.
+ * accepts (PLACEHOLDER_*), split evenly over its colours, and is marked
+ * `pendingFirstSlice`: its cost is incomplete and no price is written from it.
+ * The slice processor overwrites the numbers and clears the mark.
+ *
+ * Order: every check the slice makes runs first (400, nothing created, the
+ * staged upload kept); the upload is then claimed (409 for a second request);
+ * the part is committed; after that nothing fails the request.
  *
  *  STL             → one filament ("0"), the printer asked for or the product's
  *  project, 1 slot → single-material part on the project's printer
@@ -73,15 +79,25 @@ export function withoutErrorCode(message: string): string {
   return message.replace(/^[A-Z][A-Z0-9_]*:\s*/, '');
 }
 
+/** What went wrong, for the owner: an HTTP error's sentence without its code; anything else is not shown raw. */
+export function plainReason(e: unknown): string {
+  if (e instanceof HttpException) {
+    const raw = (e.getResponse() as any)?.message ?? e.message;
+    return withoutErrorCode(String(Array.isArray(raw) ? raw.join(', ') : raw));
+  }
+  return 'an unexpected error. Open the part and slice it again';
+}
+
 const slotNumber = (key: string) => Number(key) + 1;
 
 @Injectable()
 export class ComponentFromModelService {
+  private readonly logger = new Logger(ComponentFromModelService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly chunkUploads: ChunkUploadsService,
     private readonly sources: ProductSourcesService,
-    private readonly products: ProductsService,
     @Inject(forwardRef(() => SliceService)) private readonly slice: SliceService,
   ) {}
 
@@ -114,6 +130,12 @@ export class ComponentFromModelService {
       );
     }
 
+    // Everything the first slice needs, before anything is created: a missing
+    // profile is a 400 here (the staged upload stays, so the owner can fix
+    // Settings and retry), not a part priced on placeholder numbers.
+    const chosen = Object.fromEntries(slotKeys.map((k) => [k, materialOf(k)])) as Partial<Record<SlotKey, string>>;
+    await this.slice.assertSliceable({ kind: model.kind, meta: model.meta, printerId, defaultPrinterId: null, materials: chosen });
+
     // The owner's filament per slot is what later slices fall back to, not the file's own match.
     const meta: SourceMeta = isProject
       ? { ...model.meta, slots: model.meta.slots.map((s) => ({ ...s, materialId: input.materials[String(s.colorIndex) as SlotKey] ?? s.materialId })) }
@@ -121,17 +143,24 @@ export class ComponentFromModelService {
     const multi = isProject && slotKeys.length > 1;
     const slotGrams = rescaleSlotGrams(slotKeys.map((k) => ({ colorIndex: Number(k), gramsUsed: 0 })), PLACEHOLDER_GRAMS);
 
-    const stored = await this.sources.writeSourceFile(model, `a new part of product ${productId}`);
+    // One request per staged upload: a second POST naming it is refused (409) instead of making a second part.
+    await this.chunkUploads.claim(input.assembledUploadId);
+    let stored: StoredFile | null = null;
     let out: { componentId: string; attachment: any };
     try {
+      stored = await this.sources.writeSourceFile(model, `a new part of product ${productId}`);
+      const file = stored;
       out = await this.prisma.$transaction(async (tx: any) => {
-        const variantId = await this.sizeOf(tx, productId, input.variantId);
+        const size = await this.sizeOf(tx, productId, input.variantId);
+        const variantId = size?.id ?? null;
         const last = await tx.productComponent.findFirst({ where: { productId, variantId }, orderBy: { sortOrder: 'desc' }, select: { sortOrder: true } });
+        const link = await this.linkDecisions(tx, productId, size, input.description, multi, slotKeys.map((k) => ({ colorIndex: Number(k), materialId: materialOf(k) })));
         const comp = await tx.productComponent.create({
           data: {
             productId, variantId, materialId: multi ? null : materialOf(slotKeys[0]), description: input.description,
             gramsUsed: PLACEHOLDER_GRAMS, printMinutes: PLACEHOLDER_MINUTES, quantity: 1, sortOrder: (last?.sortOrder ?? -1) + 1,
-            isMultiColor: multi, colorChanges: 0, stockConfirmedAt: new Date(), colourSlotId: null, colourFixed: null,
+            isMultiColor: multi, colorChanges: 0, stockConfirmedAt: new Date(), pendingFirstSlice: true,
+            colourSlotId: multi ? null : link(Number(slotKeys[0])).colourSlotId, colourFixed: multi ? null : link(Number(slotKeys[0])).colourFixed,
           },
           select: { id: true },
         });
@@ -140,24 +169,73 @@ export class ComponentFromModelService {
             await tx.componentMaterial.create({
               data: {
                 componentId: comp.id, materialId: materialOf(String(s.colorIndex) as SlotKey), gramsUsed: s.gramsUsed,
-                colorIndex: s.colorIndex, sortOrder: s.colorIndex, colourSlotId: null, colourFixed: null,
+                colorIndex: s.colorIndex, sortOrder: s.colorIndex, ...link(s.colorIndex),
               },
             });
           }
         }
-        const attachment = await this.sources.linkSource(tx, productId, comp.id, stored, model, meta);
+        const attachment = await this.sources.linkSource(tx, productId, comp.id, file, model, meta);
         return { componentId: comp.id, attachment };
       }, TX_OPTS);
     } catch (e) {
-      await unlinkWritten([stored]);
+      if (stored) await unlinkWritten([stored]);
+      await this.chunkUploads.release(input.assembledUploadId);
       throw e;
     }
-    await this.chunkUploads.discard(input.assembledUploadId);
-    await this.products.reprice(productId);
 
+    // The part exists from here on: nothing below may fail the request, or the
+    // dialog would offer a retry of an upload that is gone. No reprice either:
+    // the part is not measured, and the slice processor reprices when it is.
     const source = sourceModelOf({ sourceAttachmentId: out.attachment.id, sourceKind: model.kind }, out.attachment)!;
-    const validation = await this.queueValidation(productId, out.componentId, printerId, Object.fromEntries(slotKeys.map((k) => [k, materialOf(k)])));
-    return { componentId: out.componentId, source, ...validation };
+    try {
+      await this.chunkUploads.discard(input.assembledUploadId);
+      const validationRun = await this.slice.create(productId, out.componentId, { printerId, materials: chosen, units: 1 }, true);
+      return { componentId: out.componentId, source, validationRun, notice: null };
+    } catch (e) {
+      const reason = plainReason(e);
+      this.logger.warn(`Part ${out.componentId} was added from its model but its first slice was not queued: ${(e as Error)?.message ?? reason}`);
+      return { componentId: out.componentId, source, validationRun: null, notice: `The part was added but the first slice could not be queued: ${reason}` };
+    }
+  }
+
+  /**
+   * The colour-slot link of each of the new part's colours, decided the way
+   * product onboarding decides them for an imported part (decideImportLinks):
+   * by filament, then by position on a size; a product without colour slots
+   * leaves everything unlinked.
+   */
+  private async linkDecisions(
+    tx: any, productId: string, size: { id: string; name: string } | null, description: string, multi: boolean,
+    slots: Array<{ colorIndex: number; materialId: string }>,
+  ): Promise<(colorIndex: number) => { colourSlotId: string | null; colourFixed: boolean | null }> {
+    const none = { colourSlotId: null, colourFixed: null };
+    const colourSlots = await tx.productColourSlot.findMany({ where: { productId }, select: { id: true, name: true } });
+    if (!colourSlots.length) return () => none;
+    const product = await tx.product.findUnique({ where: { id: productId }, select: { baseOptionLabel: true } });
+    const existing: any[] = await tx.productComponent.findMany({ where: { productId }, include: { materials: true } });
+    const linkInput: LinkComponent[] = existing.map((c) => ({
+      id: c.id, description: c.description, variantId: c.variantId ?? null, sortOrder: c.sortOrder, createdAt: c.createdAt,
+      isMultiColor: isMultiColourComponent(c),
+      slots: isMultiColourComponent(c)
+        ? c.materials.map((m: any) => ({ colorIndex: m.colorIndex, materialId: m.materialId, colourSlotId: m.colourSlotId ?? null, colourFixed: m.colourFixed ?? null }))
+        : c.materialId ? [{ colorIndex: 0, materialId: c.materialId, colourSlotId: c.colourSlotId ?? null, colourFixed: c.colourFixed ?? null }] : [],
+    }));
+    const ids = [...new Set([...slots.map((s) => s.materialId), ...linkInput.flatMap((c) => c.slots.map((s) => s.materialId))])];
+    const materials: Array<{ id: string; name: string; type: string }> = await tx.material.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, type: true } });
+    const rank = existing.filter((c) => (c.variantId ?? null) === (size?.id ?? null)).length;
+    const { decisions } = decideImportLinks({
+      newSlots: slots.map((s) => ({
+        componentKey: 'new', description, colorIndex: s.colorIndex, materialId: s.materialId,
+        materialType: String(materials.find((m) => m.id === s.materialId)?.type ?? 'OTHER'), isMultiColor: multi, rank,
+      })),
+      existing: linkInput, colourSlots,
+      materials: new Map(materials.map((m) => [m.id, { name: m.name, type: String(m.type) }])),
+      targetSize: size, standardSizeLabel: product?.baseOptionLabel ?? 'Standard',
+    });
+    return (colorIndex) => {
+      const d = decisions.find((x) => x.colorIndex === colorIndex);
+      return d ? { colourSlotId: d.colourSlotId, colourFixed: d.colourFixed } : none;
+    };
   }
 
   /** The slots a filament is needed for: the project's own (at most four), "0" for an STL or a project naming none. */
@@ -171,25 +249,12 @@ export class ComponentFromModelService {
   }
 
   /** The SIZE option that owns the part (the rules of P9), or null for the standard size. */
-  private async sizeOf(tx: any, productId: string, variantId: string | null): Promise<string | null> {
+  private async sizeOf(tx: any, productId: string, variantId: string | null): Promise<{ id: string; name: string } | null> {
     if (!variantId) return null;
     const [row] = await lockOptions(tx, [variantId], 'SHARE');
     if (!row || row.productId !== productId) throw new NotFoundException('Size not found');
     if (row.kind === 'COLOUR') throw new BadRequestException("Colours use each size's components — add the component to a size");
     if (await liveConversion(tx, row)) throw new ConflictException(CONVERTED_BLOCKER(row.name, CONVERTED_TAIL.components));
-    return row.id;
-  }
-
-  /** The 1-unit validation slice; when it cannot be queued the part stays and the notice says why. */
-  private async queueValidation(
-    productId: string, componentId: string, printerId: string, materials: Record<string, string>,
-  ): Promise<{ validationRun: SliceRunDto | null; notice: string | null }> {
-    try {
-      return { validationRun: await this.slice.create(productId, componentId, { printerId, materials, units: 1 }, true), notice: null };
-    } catch (e) {
-      if (!(e instanceof HttpException)) throw e;
-      const raw = (e.getResponse() as any)?.message ?? e.message;
-      return { validationRun: null, notice: withoutErrorCode(String(Array.isArray(raw) ? raw.join(', ') : raw)) };
-    }
+    return { id: row.id, name: row.name };
   }
 }

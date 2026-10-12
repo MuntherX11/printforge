@@ -6,6 +6,7 @@ import { BomResolverService, type ResolvedBom, type ResolvedComponent } from './
 import { CatalogRequestContext } from './catalog-context';
 import { computeLineProgress, type ProgressJob, type ProgressMovement } from './line-progress';
 import { noGcodeOnFile, suggestJobPlates } from './job-plate-suggestion';
+import { partNotMeasured } from './bom-resolve';
 import { gramsForPlan, PlanCache, PlanError, unitsOf, validatePlan, type PlanEdit, type PlannedPlate } from './plate-planner';
 import { pickSpools, type SpoolRow } from './spool-picker';
 
@@ -97,7 +98,10 @@ export function planFromBom(
     const R = Math.max(0, base - fromStock);
     let plates: PlannedPlate[] = [];
     const edits = input.plates?.filter((p) => p.componentId === c.componentId);
-    if (edits && edits.length) {
+    if (c.pendingFirstSlice) {
+      // Not sliced yet: the problem the cost reports, never a plate from placeholder numbers.
+      problems.push(partNotMeasured(c.componentId, c.description));
+    } else if (edits && edits.length) {
       plates = validatePlan(c, R, edits);
     } else {
       try {
@@ -331,7 +335,9 @@ export class ProductionPlannerService {
       const needed = p.quantity * qty;
       return { partId: p.partId, name: p.name, needed, stockQty: p.stockQty, reserved: 0, free: p.stockQty, hasEnough: p.stockQty >= needed };
     });
-    const problems = [...plan.bom.problems.filter((p) => p.code !== 'MATERIAL_ZERO_COST'), ...plan.problems];
+    const fromBom = plan.bom.problems.filter((p) => p.code !== 'MATERIAL_ZERO_COST');
+    // PART_NOT_MEASURED is on the BOM and on the plan: say it once.
+    const problems = [...fromBom, ...plan.problems.filter((p) => !fromBom.some((b) => b.code === p.code && b.componentId === p.componentId))];
     return {
       option: { sizeOptionId: plan.bom.sizeOptionId, colourOptionId: plan.bom.colourOptionId, label: plan.bom.label, fallbackToBase: plan.bom.fallbackToBase },
       qty,

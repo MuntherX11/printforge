@@ -31,7 +31,11 @@ export interface SlicerProfileDto {
   inherits: string | null;
   printerId: string | null;
   materialId: string | null;
+  /** FILAMENT: the main preset for every filament of this type that has no preset of its own. */
+  materialType: MaterialType | null;
   isDefault: boolean;
+  /** True when the row is a reference to a preset that ships with OrcaSlicer (json is only name / inherits / from). */
+  stock: boolean;
   updatedAt: string;
 }
 
@@ -46,8 +50,31 @@ export interface SlicerBundleImportResult {
 export interface SlicerProfilePatchDto {
   printerId?: string | null;
   materialId?: string | null;
+  /** FILAMENT only; null clears. Setting it takes the type away from any other filament preset. */
+  materialType?: MaterialType | null;
   isDefault?: boolean;
 }
+
+/** A preset that ships with OrcaSlicer, offered by GET /slicer-profiles/stock. */
+export interface SlicerStockPresetDto {
+  name: string;
+  vendor: string;
+}
+
+/** GET /slicer-profiles/stock?kind=&q= response. `reachable` is false when the slicer container is down. */
+export interface SlicerStockPresetList {
+  presets: SlicerStockPresetDto[];
+  reachable: boolean;
+}
+
+/** POST /slicer-profiles/stock body: store a reference to the stock preset `name`. */
+export interface CreateStockProfileDto {
+  kind: SlicerProfileKind;
+  name: string;
+}
+
+/** Suffix of the stored name of a stock reference: a preset may not carry its parent's name. */
+export const STOCK_PROFILE_SUFFIX = ' (stock)';
 
 /** GET /slicer-profiles/health */
 export interface SlicerHealth {

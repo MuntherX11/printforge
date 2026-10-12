@@ -160,6 +160,8 @@ export class ProductComponentsService {
       const data: Record<string, unknown> = {};
       for (const k of ['description', 'gramsUsed', 'printMinutes', 'quantity', 'materialId'] as const) if (input[k] !== undefined) data[k] = input[k];
       if (input.gramsUsed !== undefined || input.printMinutes !== undefined) data.perUnitEstimatedFromLayoutId = null;
+      // Grams and minutes typed in together are a measurement: the part no longer waits for its first slice.
+      if (input.gramsUsed !== undefined && input.printMinutes !== undefined) data.pendingFirstSlice = false;
       if (link) Object.assign(data, link);
       if (Object.keys(data).length) await tx.productComponent.update({ where: { id: componentId }, data });
       if (multi && input.gramsUsed !== undefined) {

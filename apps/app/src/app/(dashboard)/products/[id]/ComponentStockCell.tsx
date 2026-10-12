@@ -163,7 +163,7 @@ export function ComponentStockCell({ productId, component: c, materials, canEdit
         <div ref={boxRef} className="relative">
           <LinkButton onClick={() => setOpen(o => !o)}>per colour</LinkButton>
           {open && (
-            <div className="absolute right-0 z-20 mt-1 w-72 space-y-3 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+            <div className="absolute left-0 z-20 mt-1 w-72 max-w-[calc(100vw-4rem)] space-y-3 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Printed stock by colour</p>
               {c.colourStock.map(s => (
                 <div key={s.colourKey} className="space-y-1">

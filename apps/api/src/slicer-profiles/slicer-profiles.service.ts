@@ -1,6 +1,15 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { SlicerProfileKind, type SlicerBundleImportResult, type SlicerHealth, type SlicerProfileDto } from '@printforge/types';
+import {
+  SlicerProfileKind,
+  STOCK_PROFILE_SUFFIX,
+  type CreateStockProfileDto,
+  type MaterialType,
+  type SlicerBundleImportResult,
+  type SlicerHealth,
+  type SlicerProfileDto,
+  type SlicerStockPresetList,
+} from '@printforge/types';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BundleError, parseBundle, type ParsedPreset, type PresetJson } from './bundle-import';
 import type { SlicerProfilePatch } from './profile-input';
@@ -11,6 +20,19 @@ import { SidecarClient } from './sidecar.client';
  * printer (MACHINE: the printer it drives; PROCESS: the printer it is the
  * default for) or a shop filament (FILAMENT). The slice processor reads them
  * through `machineFor` / `defaultProcessFor` / `filamentFor`.
+ *
+ * A preset that ships with OrcaSlicer needs no export: it is stored as a thin
+ * reference `{ name: "<stock name> (stock)", inherits: "<stock name>", from: "User" }`
+ * that the slicer container flattens like any other preset. The name differs
+ * from the parent's on purpose: a preset inheriting its own name is a cycle.
+ *
+ *   filament to slice ──▶ preset mapped to it? ──yes──▶ that preset
+ *                              │ no
+ *                              ▼
+ *                    main preset for its type? ──yes──▶ the main preset
+ *                              │ no
+ *                              ▼
+ *                            null (NO_FILAMENT_PROFILE)
  */
 
 interface ProfileRow {
@@ -20,8 +42,18 @@ interface ProfileRow {
   json: unknown;
   printerId: string | null;
   materialId: string | null;
+  materialType?: string | null;
   isDefault: boolean;
   updatedAt: Date;
+}
+
+const STOCK_KEYS = ['name', 'inherits', 'from'];
+
+/** A stock reference carries nothing of its own: only name / inherits / from. */
+export function isStockReference(json: unknown): boolean {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  const preset = json as Record<string, unknown>;
+  return typeof preset.inherits === 'string' && preset.inherits.length > 0 && Object.keys(preset).every((k) => STOCK_KEYS.includes(k));
 }
 
 const MAX_BUNDLE_BYTES = 20 * 1024 * 1024;
@@ -73,7 +105,29 @@ export class SlicerProfilesService {
     return result;
   }
 
-  private async upsertPreset(preset: ParsedPreset): Promise<{ id: string; replaced: boolean }> {
+  /** Search the presets bundled with OrcaSlicer. The sidecar down → an empty list and `reachable: false`. */
+  async listStock(kind: SlicerProfileKind, q: string): Promise<SlicerStockPresetList> {
+    const presets = await this.sidecar.listStock(kind, q);
+    return presets === null ? { presets: [], reachable: false } : { presets, reachable: true };
+  }
+
+  /**
+   * Store a reference to the stock preset `name` (upsert by kind and stored
+   * name, so adding it twice keeps its mapping). The sidecar confirms the
+   * preset exists first: a reference to nothing would only fail at slice time.
+   */
+  async createStock(input: CreateStockProfileDto): Promise<SlicerProfileDto> {
+    const exists = await this.sidecar.hasStock(input.kind, input.name);
+    if (exists === null) throw new BadRequestException('The slicer is offline');
+    if (!exists) throw new BadRequestException('The slicer has no stock preset with that name');
+
+    const name = `${input.name}${STOCK_PROFILE_SUFFIX}`;
+    const { id } = await this.upsertPreset({ kind: input.kind, name, json: { name, inherits: input.name, from: 'User' } });
+    const row = await this.prisma.slicerProfile.findUnique({ where: { id } });
+    return this.toDto(row as ProfileRow);
+  }
+
+  private async upsertPreset(preset: Pick<ParsedPreset, 'kind' | 'name' | 'json'>): Promise<{ id: string; replaced: boolean }> {
     const where = { kind_name: { kind: preset.kind, name: preset.name } };
     const existing = await this.prisma.slicerProfile.findUnique({ where, select: { id: true } });
     const json = preset.json as Prisma.InputJsonValue;
@@ -92,7 +146,7 @@ export class SlicerProfilesService {
     const row = (await this.prisma.slicerProfile.findUnique({ where: { id } })) as ProfileRow | null;
     if (!row) throw new NotFoundException('Slicer profile not found');
 
-    const data: { printerId?: string | null; materialId?: string | null; isDefault?: boolean } = {};
+    const data: { printerId?: string | null; materialId?: string | null; materialType?: MaterialType | null; isDefault?: boolean } = {};
 
     if (patch.printerId !== undefined) {
       if (row.kind === SlicerProfileKind.FILAMENT) throw new BadRequestException('A filament preset maps to a filament, not a printer');
@@ -112,6 +166,11 @@ export class SlicerProfilesService {
       data.materialId = patch.materialId;
     }
 
+    if (patch.materialType !== undefined) {
+      if (row.kind !== SlicerProfileKind.FILAMENT) throw new BadRequestException('Only a filament preset can be the main preset for a filament type');
+      data.materialType = patch.materialType;
+    }
+
     const printerAfter = data.printerId !== undefined ? data.printerId : row.printerId;
     if (patch.isDefault !== undefined) {
       if (row.kind !== SlicerProfileKind.PROCESS) throw new BadRequestException('Only a process preset can be a printer\'s default');
@@ -128,6 +187,13 @@ export class SlicerProfilesService {
           data: { isDefault: false },
         });
       }
+      // One main preset per filament type: the type moves here from whichever preset had it.
+      if (data.materialType) {
+        await tx.slicerProfile.updateMany({
+          where: { kind: SlicerProfileKind.FILAMENT, materialType: data.materialType, id: { not: id } },
+          data: { materialType: null },
+        });
+      }
       return tx.slicerProfile.update({ where: { id }, data });
     });
     return this.toDto(updated as ProfileRow);
@@ -139,6 +205,9 @@ export class SlicerProfilesService {
     if (!row) throw new NotFoundException('Slicer profile not found');
     if (row.printerId || row.materialId) {
       throw new ConflictException(`"${row.name}" is still mapped — unmap it before deleting`);
+    }
+    if (row.materialType) {
+      throw new ConflictException(`"${row.name}" is the main preset for ${row.materialType}. Clear that before deleting`);
     }
     await this.prisma.slicerProfile.delete({ where: { id } });
     return { deleted: true };
@@ -165,14 +234,25 @@ export class SlicerProfilesService {
     return (row?.json as PresetJson | undefined) ?? null;
   }
 
-  /** The raw FILAMENT preset mapped to this shop filament, or null. */
+  /**
+   * The raw FILAMENT preset this shop filament is sliced with: the preset
+   * mapped to it, else the main preset for its material type, else null.
+   */
   async filamentFor(materialId: string): Promise<PresetJson | null> {
-    const row = await this.prisma.slicerProfile.findFirst({
+    const own = await this.prisma.slicerProfile.findFirst({
       where: { kind: SlicerProfileKind.FILAMENT, materialId },
       orderBy: { updatedAt: 'desc' },
       select: { json: true },
     });
-    return (row?.json as PresetJson | undefined) ?? null;
+    if (own) return own.json as PresetJson;
+
+    const material = await this.prisma.material.findUnique({ where: { id: materialId }, select: { type: true } });
+    if (!material?.type) return null;
+    const main = await this.prisma.slicerProfile.findFirst({
+      where: { kind: SlicerProfileKind.FILAMENT, materialType: material.type },
+      select: { json: true },
+    });
+    return (main?.json as PresetJson | undefined) ?? null;
   }
 
   private toDto(row: ProfileRow): SlicerProfileDto {
@@ -185,7 +265,9 @@ export class SlicerProfilesService {
       inherits,
       printerId: row.printerId ?? null,
       materialId: row.materialId ?? null,
+      materialType: (row.materialType as MaterialType | null | undefined) ?? null,
       isDefault: !!row.isDefault,
+      stock: isStockReference(row.json),
       updatedAt: new Date(row.updatedAt).toISOString(),
     };
   }

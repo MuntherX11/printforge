@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Minus, Nut, Plus, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertTriangle, Minus, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -14,12 +13,15 @@ import { api } from '@/lib/api';
 import { useFormatCurrency } from '@/lib/locale-context';
 import type { ApiPart, ApiProductPartLine } from '@/lib/types/api';
 import { ConfirmDialog } from './ConfirmDialog';
+import { HowThisWorks, SectionHead } from './section-ui';
 
 interface Props {
   productId: string;
   canEdit: boolean;
   /** A parts change reprices the product: the page reloads product and cost. */
   onChanged: () => void;
+  /** Heading drawn by the tabs layout; the folded layout's row already says it. */
+  title?: string;
 }
 
 const MAX_QTY = 1000;
@@ -28,8 +30,8 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-/** Section I (spec §5.2): bought-in parts per product unit, included in the price. */
-export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
+/** Hardware (spec §5.2 I): bought-in parts per product unit, included in the price. */
+export function HardwareBody({ productId, canEdit, onChanged, title }: Props) {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
 
@@ -125,22 +127,19 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
   let body: React.ReactNode;
   if (loadError) {
     body = (
-      <p className="py-8 text-center text-sm text-red-600 dark:text-red-400">
-        Couldn&apos;t load parts — {loadError}.{' '}
+      <p className="text-sm text-red-600 dark:text-red-400">
+        Couldn&apos;t load the hardware: {loadError}.{' '}
         <button type="button" className="underline" onClick={load}>Retry</button>
       </p>
     );
   } else if (!lines) {
-    body = <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Loading…</div>;
+    body = <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>;
   } else if (lines.length === 0) {
     body = (
-      <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-        <p className="text-sm">No parts on this product.</p>
-        <p className="mt-1 text-xs">
-          Bought-in hardware (NFC tags, inserts, keyrings) comes from the{' '}
-          <Link href="/parts" className="text-brand-600 hover:underline dark:text-brand-400">Parts</Link> catalog.
-        </p>
-      </div>
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        No hardware on this product. Bought-in hardware (NFC tags, inserts, keyrings) comes from the{' '}
+        <Link href="/parts" className="text-brand-600 hover:underline dark:text-brand-400">Parts</Link> catalog.
+      </p>
     );
   } else {
     body = (
@@ -162,13 +161,13 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
               const busy = busyPartId === line.partId;
               // P21 refuses any change to an inactive part's line; it can only be removed.
               const locked = !line.part.isActive;
-              const lockedHint = locked ? `${line.part.name} is inactive — reactivate it in the catalog to change the quantity, or remove it` : undefined;
+              const lockedHint = locked ? `${line.part.name} is inactive. Reactivate it in the catalog to change the quantity, or remove it` : undefined;
               return (
                 <TableRow key={line.id}>
                   <TableCell>
                     <div className="font-medium dark:text-gray-100">{line.part.name}</div>
                     {line.part.sku && <div className="font-mono text-xs text-gray-400">{line.part.sku}</div>}
-                    {!line.part.isActive && <div className="text-xs text-amber-600 dark:text-amber-400">Inactive in the catalog — reactivate it to change the quantity</div>}
+                    {!line.part.isActive && <div className="text-xs text-amber-600 dark:text-amber-400">Inactive in the catalog. Reactivate it to change the quantity</div>}
                   </TableCell>
                   <TableCell>
                     {canEdit ? (
@@ -209,7 +208,7 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
           </TableBody>
         </Table>
         <div className="flex items-center justify-between border-t px-4 py-3 text-sm dark:border-gray-700">
-          <span className="text-gray-500 dark:text-gray-400">Parts cost per product unit</span>
+          <span className="text-gray-500 dark:text-gray-400">Hardware cost per product unit</span>
           <span className="font-semibold tabular-nums dark:text-gray-100">{formatCurrency(partsCost)}</span>
         </div>
       </>
@@ -217,26 +216,25 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2 dark:text-gray-100">
-          <Nut className="h-4 w-4" aria-hidden="true" /> Parts &amp; hardware
-        </CardTitle>
+    <div className="space-y-3">
+      <SectionHead title={title}>
         {canEdit && (
-          <Button size="sm" onClick={openAdd}>
-            <Plus className="mr-2 h-4 w-4" aria-hidden="true" /> Add part
+          <Button size="sm" variant="outline" onClick={openAdd}>
+            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add hardware
           </Button>
         )}
-      </CardHeader>
-      <CardContent className="p-0">
-        {body}
-        <p className="px-4 pb-3 pt-2 text-xs text-gray-500 dark:text-gray-400">
-          Included in the product price (recalculated automatically). Stock is deducted when a job started from this page
-          or from Production → Build Stock completes. Jobs created from an order&apos;s production plan do not deduct parts yet.
+      </SectionHead>
+      {body}
+      <p className="text-sm text-gray-600 dark:text-gray-400">Included in the product price.</p>
+      <HowThisWorks>
+        <p>The price is recalculated automatically when hardware changes.</p>
+        <p>
+          Stock is deducted when a job started from this page or from Production, Build Stock completes.
+          Jobs created from an order&apos;s production plan do not deduct hardware yet.
         </p>
-      </CardContent>
+      </HowThisWorks>
 
-      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add part">
+      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title="Add hardware">
         {catalog && catalog.length === 0 && !addError ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
             No parts in the catalog yet. Create one on the{' '}
@@ -249,10 +247,10 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
               value={partId}
               onChange={e => setPartId(e.target.value)}
               options={[
-                { value: '', label: catalog ? '— select a part —' : 'Loading parts…' },
+                { value: '', label: catalog ? 'Select a part' : 'Loading parts…' },
                 ...available.map(p => ({
                   value: p.id,
-                  label: `${p.name}${p.sku ? ` (${p.sku})` : ''} — ${formatCurrency(p.unitCost)} / pc, ${p.stockQty} pcs in stock`,
+                  label: `${p.name}${p.sku ? ` (${p.sku})` : ''}: ${formatCurrency(p.unitCost)} / pc, ${p.stockQty} pcs in stock`,
                 })),
               ]}
             />
@@ -281,6 +279,6 @@ export function ProductPartsCard({ productId, canEdit, onChanged }: Props) {
         onConfirm={() => void confirmRemove()}
         onClose={() => setRemoving(null)}
       />
-    </Card>
+    </div>
   );
 }

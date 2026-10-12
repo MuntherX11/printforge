@@ -15,37 +15,6 @@ export const shortBy = (f: Filament) => Math.max(0, materialGrams(f) - f.free);
 /** Whole grams with a thousands separator: "0 g", "1,419 g". */
 export const wholeGrams = (g: number) => `${Math.round(g).toLocaleString('en-US')} g`;
 
-export interface ReadinessStatus {
-  tone: 'ok' | 'short' | 'blocked';
-  text: string;
-}
-
-/** The one line the card shows before "Show details". */
-export function readinessStatus(r: Readiness): ReadinessStatus {
-  if (r.problems.length > 0) return { tone: 'blocked', text: 'Not ready' };
-
-  // One entry per material, even when the filament is split over several lines.
-  const shortF = r.filament.filter((f, i, all) => !f.hasEnough && all.findIndex(g => g.materialId === f.materialId) === i);
-  const names = shortF.map(f => f.color?.trim() || f.label);
-  const unique = new Set(names.map(n => n.toLowerCase())).size === names.length;
-  const shortP = r.parts.filter(p => !p.hasEnough);
-  const shorts: string[] = [];
-  if (shortF.length > 0) {
-    shorts.push(`Short on ${plural(shortF.length, 'filament')}: ${shortF.map((f, i) => `${unique ? names[i] : f.label} ${formatGrams(shortBy(f))}`).join(', ')}`);
-  }
-  if (shortP.length > 0) {
-    shorts.push(`Short on ${plural(shortP.length, 'part')}: ${shortP.map(p => `${p.name} ${Math.max(0, p.needed - p.free)} pcs`).join(', ')}`);
-  }
-  if (shorts.length > 0) return { tone: 'short', text: shorts.join('; ') };
-  if (!r.ready) return { tone: 'blocked', text: 'Not ready' };
-
-  const plates = r.components.reduce((n, c) => n + c.plates.reduce((m, p) => m + p.plateCount, 0), 0);
-  if (plates === 0) return { tone: 'ok', text: '✓ Ready — covered by printed stock' };
-  const grams = r.filament.reduce((n, f) => n + f.gramsNeeded, 0);
-  const minutes = r.components.reduce((n, c) => n + c.printMinutes, 0);
-  return { tone: 'ok', text: `✓ Ready — ${plural(plates, 'plate')} · ${formatGrams(grams)} · ${formatMinutes(minutes)}` };
-}
-
 /** "12 + 12 + 8", or "5 × 12 + 8" when there are many plates. */
 export function platesText(plates: Component['plates']): string {
   const total = plates.reduce((n, p) => n + p.plateCount, 0);
@@ -88,8 +57,79 @@ export function spoolNote(f: Filament): SpoolNote {
   const id = s.pfid ?? 'Spool';
   // A spool of another filament (same type, nearest colour) is a substitute.
   if (s.materialId && s.materialId !== f.materialId) {
-    return { kind: 'other', text: `${id} (${s.materialName ?? 'another filament'}) — different colour` };
+    return { kind: 'other', text: `${id} (${s.materialName ?? 'another filament'}), different colour` };
   }
   const text = [id, s.location].filter(Boolean).join(' · ');
   return f.spoolHasEnough ? { kind: 'ok', text } : { kind: 'low', text, left: `only ${formatGrams(Math.max(0, s.effectiveRemaining))} left` };
+}
+
+// ---------- Make it (the product page's verdict and plan line) ----------
+
+export interface Verdict {
+  tone: 'ok' | 'short' | 'blocked';
+  /** The pill: "Ready to print", or "Short on Pine Green: need 22 g, 12 g left". */
+  text: string;
+  /** The folded row's summary: "Ready to print", "Short on Pine Green". */
+  brief: string;
+}
+
+/** One verdict for the whole quantity. Blocking problems are listed under the pill by the caller. */
+export function verdictOf(r: Readiness): Verdict {
+  if (r.problems.length > 0) return { tone: 'blocked', text: 'Not ready', brief: 'Not ready' };
+
+  // One entry per material, even when the filament is split over several lines.
+  const shortF = r.filament.filter((f, i, all) => !f.hasEnough && all.findIndex(g => g.materialId === f.materialId) === i);
+  const colours = shortF.map(f => f.color?.trim() || f.label);
+  const unique = new Set(colours.map(n => n.toLowerCase())).size === colours.length;
+  const names = shortF.map((f, i) => (unique ? colours[i] : f.label));
+  const shortP = r.parts.filter(p => !p.hasEnough);
+  if (shortF.length > 0 || shortP.length > 0) {
+    const lines = [
+      ...shortF.map((f, i) => `${names[i]}: need ${formatGrams(materialGrams(f))}, ${wholeGrams(Math.max(0, f.free))} left`),
+      ...shortP.map(p => `${p.name}: need ${p.needed} pcs, ${Math.max(0, p.free)} left`),
+    ];
+    return {
+      tone: 'short',
+      text: `Short on ${lines.join('; ')}`,
+      brief: `Short on ${[...names, ...shortP.map(p => p.name)].join(', ')}`,
+    };
+  }
+  if (!r.ready) return { tone: 'blocked', text: 'Not ready', brief: 'Not ready' };
+  return { tone: 'ok', text: 'Ready to print', brief: 'Ready to print' };
+}
+
+/**
+ * The single plan line: "1 plate of 8 on Hi · 1 h 56 min · 7 extra go to stock".
+ * `printerOf` names the printer of a part's plate when the page knows it.
+ */
+export function planLine(r: Readiness, printerOf: (componentId: string, layoutId: string | null) => string | null): string {
+  const groupsOf = (c: Component) => c.plates.filter(p => p.plateCount > 0);
+  const printing = r.components.filter(c => groupsOf(c).length > 0);
+  if (printing.length === 0) return 'Covered by printed stock, nothing to print';
+
+  const plates = printing.reduce((n, c) => n + groupsOf(c).reduce((m, p) => m + p.plateCount, 0), 0);
+  const minutes = r.components.reduce((n, c) => n + c.printMinutes, 0);
+  const extra = r.components.reduce((n, c) => n + c.surplus, 0);
+
+  let head: string;
+  if (printing.length === 1) {
+    const c = printing[0];
+    const groups = groupsOf(c);
+    if (groups.length === 1) {
+      const printer = printerOf(c.componentId, groups[0].layoutId);
+      head = `${plural(plates, 'plate')} of ${groups[0].unitsPerPlate}${printer ? ` on ${printer}` : ''}`;
+    } else {
+      head = `${plural(plates, 'plate')} (${platesText(groups)})`;
+    }
+  } else {
+    head = `${plural(plates, 'plate')} for ${plural(printing.length, 'part')}`;
+  }
+
+  const out = [head, formatMinutes(minutes)];
+  if (extra > 0) {
+    out.push(r.surplusPolicy === 'CANCEL_ON_PRINTER'
+      ? `${extra} extra cancelled on the printer`
+      : `${extra} extra ${extra === 1 ? 'goes' : 'go'} to stock`);
+  }
+  return out.join(' · ');
 }

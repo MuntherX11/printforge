@@ -75,7 +75,7 @@ export function sliceHarness() {
   const plateFiles = new PlateFilesService(h.db as any, parser, {} as any, h.pricing);
   const gateway = { server: { emit: jest.fn() } };
   const service = new SliceService(h.db as any, profiles as any, new StlEstimatorService());
-  const processor = new SliceProcessor(h.db as any, sidecar as any, parser, profiles as any, layouts, plateFiles, h.components, gateway as any);
+  const processor = new SliceProcessor(h.db as any, sidecar as any, parser, profiles as any, layouts, plateFiles, gateway as any);
   // The claim query over the in-memory table: oldest QUEUED → RUNNING, one at a time.
   h.db.$queryRaw.mockImplementation(async () => {
     const next = h.db.t('sliceRun').filter((r: any) => r.status === 'QUEUED').sort((a: any, b: any) => +new Date(a.createdAt) - +new Date(b.createdAt))[0];

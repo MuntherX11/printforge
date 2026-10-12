@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -12,6 +12,8 @@ const CHUNK_DIR = path.join(UPLOAD_DIR, 'chunk-tmp');
 const MAX_PART_BYTES = 50 * 1024 * 1024;
 const MAX_PARTS = 100;
 const MAX_ASSEMBLED_BYTES = 500 * 1024 * 1024;
+const CLAIM_MARKER = 'claimed';
+export const UPLOAD_IN_USE = 'This upload is already being used';
 // Abandoned uploads are junk on disk, nothing more — sweep them daily.
 const STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -153,6 +155,34 @@ export class ChunkUploadsService implements OnModuleInit, OnModuleDestroy {
     await fs.rm(dir, { recursive: true, force: true }).catch((e) => {
       this.logger.warn(`Could not discard staged upload ${id}: ${(e as Error)?.message}`);
     });
+  }
+
+  /**
+   * Take a staged upload for the one request that commits it. Atomic: the
+   * marker is created exclusively, so of two requests naming the same upload
+   * exactly one gets it and the other is refused (409). The winner calls
+   * `discard` after its commit, or `release` when it fails so a retry works.
+   * A claim left by a crashed process goes with the daily sweep.
+   */
+  async claim(id: string): Promise<void> {
+    const dir = this.dirFor(String(id ?? ''));
+    try {
+      await fs.writeFile(path.join(dir, CLAIM_MARKER), String(Date.now()), { flag: 'wx' });
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === 'EEXIST') throw new ConflictException(UPLOAD_IN_USE);
+      if (code === 'ENOENT') throw new NotFoundException('Unknown or expired upload — start again');
+      throw e;
+    }
+  }
+
+  /** Give a claimed upload back (the claiming request failed before its commit). Never throws. */
+  async release(id: string): Promise<void> {
+    try {
+      await fs.rm(path.join(this.dirFor(String(id ?? '')), CLAIM_MARKER), { force: true });
+    } catch (e) {
+      this.logger.warn(`Could not release staged upload ${id}: ${(e as Error)?.message}`);
+    }
   }
 
   private async sweep() {

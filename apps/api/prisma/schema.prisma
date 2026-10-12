@@ -16,6 +16,8 @@ model User {
   name         String
   role         Role     @default(OPERATOR)
   isActive     Boolean  @default(true)
+  /// The user's own UI settings (UserPreferences in @printforge/types), e.g. the product page layout.
+  preferences  Json     @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -329,6 +331,7 @@ model ProductComponent {
   perUnitEstimatedFromLayoutId String? // no FK. Set when per-unit grams/minutes were divided out of a xN plate at import; cleared by any grams/minutes edit
   sourceAttachmentId           String? // the STL or 3MF project the slicer slices from (Attachment, entityType 'product'); no FK like attachmentId
   sourceKind                   SourceModelKind?
+  pendingFirstSlice            Boolean                  @default(false) // made from its model and not sliced yet: grams/minutes are placeholders, so cost is incomplete and the price is not rewritten; cleared by the 1-unit validation slice or a grams/minutes edit
   sliceRuns                    SliceRun[]
   plateLayouts                 PlateLayout[]
   colourStock                  ComponentColourStock[]
@@ -1129,6 +1132,9 @@ model SlicerProfile {
   printer    Printer?          @relation(fields: [printerId], references: [id], onDelete: SetNull)
   materialId String? // FILAMENT: the shop filament sliced with this preset
   material   Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  // FILAMENT: the main preset for every filament of this type that has no preset of its own.
+  // At most one per type (kept in the service, like isDefault for PROCESS).
+  materialType MaterialType?
   isDefault  Boolean           @default(false)
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt

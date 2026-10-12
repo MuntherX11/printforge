@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { SlicerHealth, SlicerProfileKind } from '@printforge/types';
+import type { SlicerHealth, SlicerProfileKind, SlicerStockPresetDto } from '@printforge/types';
 import type { PresetJson } from './bundle-import';
 
 /**
@@ -23,6 +23,7 @@ export interface ProfileCheckResult {
 }
 
 const TIMEOUT_MS = 3000;
+const STOCK_LIST_LIMIT = 50;
 
 @Injectable()
 export class SidecarClient {
@@ -49,7 +50,40 @@ export class SidecarClient {
     return { ok: body.ok === true && unresolved.length === 0, unresolved };
   }
 
+  /**
+   * The presets bundled with OrcaSlicer that a user can pick, filtered by a
+   * case-insensitive substring of the name. Null when the sidecar did not answer.
+   */
+  async listStock(kind: SlicerProfileKind, q: string): Promise<SlicerStockPresetDto[] | null> {
+    const query = new URLSearchParams({ q, limit: String(STOCK_LIST_LIMIT) });
+    const body = await this.request<{ presets?: unknown }>('GET', `/profiles/${kind.toLowerCase()}?${query}`);
+    if (!body) return null;
+    const presets: unknown[] = Array.isArray(body.presets) ? body.presets : [];
+    return presets
+      .filter((p): p is { name: string; vendor?: unknown } => !!p && typeof p === 'object' && typeof (p as { name?: unknown }).name === 'string')
+      .map((p) => ({ name: p.name, vendor: typeof p.vendor === 'string' ? p.vendor : '' }));
+  }
+
+  /** Whether OrcaSlicer bundles a preset of that kind and name. Null when the sidecar did not answer. */
+  async hasStock(kind: SlicerProfileKind, name: string): Promise<boolean | null> {
+    const res = await this.call('GET', `/profiles/${kind.toLowerCase()}/${encodeURIComponent(name)}`);
+    if (!res) return null;
+    if (res.status === 404) return false;
+    return res.ok ? true : null;
+  }
+
   private async request<T>(method: 'GET' | 'POST', route: string, payload?: unknown): Promise<T | null> {
+    const res = await this.call(method, route, payload);
+    if (!res) return null;
+    if (!res.ok) {
+      this.logger.warn(`slicer ${method} ${route} answered ${res.status}`);
+      return null;
+    }
+    return res.body as T;
+  }
+
+  /** Null when the sidecar is not configured, unreachable, timed out or answered something that is not JSON. */
+  private async call(method: 'GET' | 'POST', route: string, payload?: unknown): Promise<{ status: number; ok: boolean; body: unknown } | null> {
     const base = this.baseUrl;
     if (!base) return null;
     try {
@@ -59,11 +93,7 @@ export class SidecarClient {
         body: payload !== undefined ? JSON.stringify(payload) : undefined,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      if (!res.ok) {
-        this.logger.warn(`slicer ${method} ${route} answered ${res.status}`);
-        return null;
-      }
-      return (await res.json()) as T;
+      return { status: res.status, ok: res.ok, body: await res.json() };
     } catch (err) {
       this.logger.warn(`slicer ${method} ${route} unreachable: ${(err as Error)?.message ?? err}`);
       return null;

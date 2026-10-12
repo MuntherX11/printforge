@@ -148,7 +148,7 @@ export class JobsService {
       let reservation: ReturnType<typeof reservationSummary> | null = null;
       if (config && !explicitLines.length) {
         const bom = this.resolver.resolveWithConfig(config, { sizeOptionId, colourOptionId });
-        const blocking = bom.problems.find((p) => ['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL'].includes(p.code));
+        const blocking = bom.problems.find((p) => ['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL', 'PART_NOT_MEASURED'].includes(p.code));
         if (blocking && bom.components.length) throw new BadRequestException(blocking.message);
         for (const e of dto.plates ?? []) {
           if (!bom.components.some((c) => c.componentId === e.componentId)) {

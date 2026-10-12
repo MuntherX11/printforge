@@ -147,7 +147,8 @@ export class JobPlanningService {
         let problem: Problem | null = null;
         plan = planComponent(c, toProduce, bom, config, ctx, policy);
         if (plan.problems.length) {
-          problem = { code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: NO_SLICED_DATA(c.description) };
+          const first = plan.problems[0];
+          problem = first.code === 'PART_NOT_MEASURED' ? first : { code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: NO_SLICED_DATA(c.description) };
           if (toProduce > 0) rowWarnings.push(problem);
         }
         const pc = plan.components[0];

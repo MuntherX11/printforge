@@ -1,8 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import * as fs from 'fs';
 import * as path from 'path';
-import { OPT, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
+import { OPT, sardineRow, SLOT } from '../catalog-core/__fixtures__/sardine-tin';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { HI, K1, M, P, sliceHarness, statusOf, useTempUploadDir, type SliceHarness } from '../slice/__fixtures__/slice-harness';
 import { productsHarness } from './__fixtures__/products-harness';
@@ -48,10 +48,28 @@ async function project(settings: Record<string, unknown>) {
 /** The real slice service and processor behind the new service, over the sardine tin. */
 function setup(file: Buffer, name: string) {
   const x = sliceHarness();
-  const chunk = { consume: jest.fn(async () => ({ originalname: name, buffer: file, size: file.length })), discard: jest.fn(async () => undefined) };
+  const chunk = chunkStub(file, name);
   const sources = new ProductSourcesService(x.db as any, chunk as any, x.service);
-  const svc = new ComponentFromModelService(x.db as any, chunk as any, sources, x.h.products, x.service);
+  const svc = new ComponentFromModelService(x.db as any, chunk as any, sources, x.service);
   return { x, chunk, svc, sources };
+}
+
+/** A staged upload with the service's claim rule: one holder at a time, gone once discarded. */
+function chunkStub(file: Buffer, name: string) {
+  let claimed = false;
+  let gone = false;
+  return {
+    consume: jest.fn(async () => {
+      if (gone) throw new BadRequestException('Unknown or expired upload — start again');
+      return { originalname: name, buffer: file, size: file.length };
+    }),
+    claim: jest.fn(async () => {
+      if (claimed) throw new ConflictException('This upload is already being used');
+      claimed = true;
+    }),
+    release: jest.fn(async () => { claimed = false; }),
+    discard: jest.fn(async () => { gone = true; }),
+  };
 }
 
 const comp = (x: SliceHarness, id: string) => x.db.t('productComponent').find((c: any) => c.id === id);
@@ -94,6 +112,7 @@ describe('from an STL', () => {
     expect(c).toMatchObject({
       productId: P, variantId: null, description: 'Key ring', materialId: M.black, isMultiColor: false, quantity: 1,
       gramsUsed: PLACEHOLDER_GRAMS, printMinutes: 0, sortOrder: 5, sourceKind: 'STL', sourceAttachmentId: out.source.attachmentId,
+      pendingFirstSlice: true,
     });
     expect(c.stockConfirmedAt).toBeTruthy();
     expect(mats(x, c.id)).toHaveLength(0);
@@ -104,8 +123,10 @@ describe('from an STL', () => {
     expect(out.notice).toBeNull();
     expect(out.validationRun).toMatchObject({ componentId: c.id, printerId: K1, unitsRequested: 1, status: 'QUEUED', filamentMap: { '0': { materialId: M.black } } });
     expect(chunk.consume).toHaveBeenCalledWith(UPLOAD, expect.any(Number), { keep: true });
+    expect(chunk.claim).toHaveBeenCalledWith(UPLOAD);
     expect(chunk.discard).toHaveBeenCalledWith(UPLOAD);
-    expect(recalc).toHaveBeenCalledWith(P);
+    // Nothing is priced on placeholder numbers: the slice processor reprices when the part is measured.
+    expect(recalc).not.toHaveBeenCalled();
   });
 
   it('the printer asked for wins; a product without a default printer needs one', async () => {
@@ -135,15 +156,23 @@ describe('from an STL', () => {
   it('a size option owns the part; a colour option or another product\'s option is refused', async () => {
     // The plain products harness: its database serves the option row locks.
     const h = productsHarness([sardineRow()]);
-    const chunk = { consume: jest.fn(async () => ({ originalname: 'box.stl', buffer: stl(), size: stl().length })), discard: jest.fn(async () => undefined) };
-    const slice = { create: jest.fn(async () => ({ id: 'run-1', status: 'QUEUED' })) };
-    const svc = new ComponentFromModelService(h.db as any, chunk as any, new ProductSourcesService(h.db as any, chunk as any, slice as any), h.products, slice as any);
+    const file = stl();
+    const chunk = {
+      consume: jest.fn(async () => ({ originalname: 'box.stl', buffer: file, size: file.length })),
+      claim: jest.fn(async () => undefined), release: jest.fn(async () => undefined), discard: jest.fn(async () => undefined),
+    };
+    const slice = { assertSliceable: jest.fn(async () => undefined), create: jest.fn(async () => ({ id: 'run-1', status: 'QUEUED' })) };
+    const svc = new ComponentFromModelService(h.db as any, chunk as any, new ProductSourcesService(h.db as any, chunk as any, slice as any), slice as any);
     const out = await svc.create(P, body({ variantId: OPT.large }));
+    expect(slice.assertSliceable).toHaveBeenCalledWith({ kind: 'STL', meta: { printerModel: null, printerId: null, slots: [] }, printerId: K1, defaultPrinterId: null, materials: { '0': M.black } });
     expect(h.db.t('productComponent').find((c: any) => c.id === out.componentId)).toMatchObject({ variantId: OPT.large, sortOrder: 4 });
     expect(slice.create).toHaveBeenCalledWith(P, out.componentId, { printerId: K1, materials: { '0': M.black }, units: 1 }, true);
     expect(out.validationRun).toEqual({ id: 'run-1', status: 'QUEUED' });
     await expect(svc.create(P, body({ variantId: OPT.red }))).rejects.toThrow("Colours use each size's components");
     expect(await statusOf(svc.create(P, body({ variantId: 'v-none' })))).toBe(404);
+    // A refused transaction gives the upload back, so the retry is not a 409.
+    expect(chunk.release).toHaveBeenCalledTimes(2);
+    expect(chunk.discard).toHaveBeenCalledTimes(1);
     // A refused part leaves no row and no file behind.
     expect(h.db.t('attachment')).toHaveLength(1);
     const files = fs.readdirSync(dirOf(), { recursive: true }).filter((f) => String(f).endsWith('.stl'));
@@ -223,21 +252,165 @@ describe('from an OrcaSlicer project', () => {
     expect(fs.readdirSync(dirOf())).toHaveLength(0);
   });
 
-  it('the run cannot be queued (a filament without a profile) → the part and its source stay, the notice is the sentence', async () => {
+  it('preconditions fail (a filament without a preset) → 400 with the slice message, nothing created, the upload kept for a retry', async () => {
     const { x, svc, chunk } = setup(await project(FOUR), 'Zelda.3mf');
     x.profiles.filaments.delete(M.white);
-    const out = await svc.create(P, body({ materials: FOUR_MATERIALS }));
-    expect(out).toMatchObject({ validationRun: null, notice: '"PLA White" has no filament profile — map one in Settings › Slicer' });
-    expect(comp(x, out.componentId)).toMatchObject({ isMultiColor: true, sourceAttachmentId: out.source.attachmentId });
-    expect(mats(x, out.componentId)).toHaveLength(4);
+    const attempt = svc.create(P, body({ materials: FOUR_MATERIALS }));
+    await expect(attempt).rejects.toThrow('NO_FILAMENT_PROFILE: "PLA White" has no slicer preset, and there is no main preset for PLA. Set one in Settings › Slicer');
+    expect(await statusOf(svc.create(P, body({ materials: FOUR_MATERIALS })))).toBe(400);
+    expect(x.db.t('productComponent')).toHaveLength(9);
+    expect(x.db.t('attachment')).toHaveLength(0);
     expect(x.db.t('sliceRun')).toHaveLength(0);
-    expect(chunk.discard).toHaveBeenCalledWith(UPLOAD);
+    expect(fs.readdirSync(dirOf())).toHaveLength(0);
+    expect(chunk.claim).not.toHaveBeenCalled();
+    expect(chunk.discard).not.toHaveBeenCalled();
+    // The owner sets the preset in Settings and submits the same upload again.
+    x.profiles.filaments.set(M.white, { name: 'Generic PLA' });
+    await expect(svc.create(P, body({ materials: FOUR_MATERIALS }))).resolves.toMatchObject({ notice: null, validationRun: { status: 'QUEUED' } });
   });
 
-  it('a crash while queueing that is not an HTTP error is not swallowed', async () => {
-    const { x, svc } = setup(stl(), 'box.stl');
+  it.each([
+    ['no machine profile', (x: SliceHarness) => x.profiles.machines.delete(K1), 'NO_MACHINE_PROFILE: K1 has no machine profile — import one in Settings › Slicer'],
+    ['no default process (STL)', (x: SliceHarness) => x.profiles.processes.delete(K1), 'NO_PROCESS_PROFILE: K1 has no default process profile — set one in Settings › Slicer'],
+    ['an inactive printer', (x: SliceHarness) => { x.db.t('printer').find((p: any) => p.id === K1).isActive = false; }, 'NO_MACHINE_PROFILE: That printer is not active'],
+  ])('preconditions fail (%s) → 400, nothing created', async (_what, breakIt, message) => {
+    const { x, svc, chunk } = setup(stl(), 'box.stl');
+    const name = x.db.t('printer').find((p: any) => p.id === K1).name;
+    breakIt(x);
+    await expect(svc.create(P, body())).rejects.toThrow(message.replace('K1 has', `${name} has`));
+    expect(await statusOf(svc.create(P, body()))).toBe(400);
+    expect(x.db.t('productComponent')).toHaveLength(9);
+    expect(x.db.t('attachment')).toHaveLength(0);
+    expect(chunk.discard).not.toHaveBeenCalled();
+  });
+
+  it('an error after the part is committed is never a 500: the part stays and the notice says the first slice was not queued', async () => {
+    const { x, svc, chunk } = setup(stl(), 'box.stl');
     jest.spyOn(x.service, 'create').mockRejectedValue(new Error('db down'));
-    await expect(svc.create(P, body())).rejects.toThrow('db down');
+    const out = await svc.create(P, body());
+    expect(out.validationRun).toBeNull();
+    expect(out.notice).toBe('The part was added but the first slice could not be queued: an unexpected error. Open the part and slice it again');
+    expect(out.notice).not.toContain('db down');
+    expect(comp(x, out.componentId)).toMatchObject({ sourceAttachmentId: out.source.attachmentId, pendingFirstSlice: true });
+    expect(chunk.discard).toHaveBeenCalledWith(UPLOAD);
+
+    // An HTTP refusal gives its own sentence, without the error code.
+    const b = setup(stl(), 'box.stl');
+    jest.spyOn(b.x.service, 'create').mockRejectedValue(new ConflictException('IDENTICAL_PENDING: The same slice is already queued'));
+    await expect(b.svc.create(P, body())).resolves.toMatchObject({ validationRun: null, notice: 'The part was added but the first slice could not be queued: The same slice is already queued' });
+
+    // So does a failure to clear the staged upload.
+    const c = setup(stl(), 'box.stl');
+    c.chunk.discard.mockRejectedValue(new Error('EBUSY'));
+    const third = await c.svc.create(P, body());
+    expect(third.notice).toContain('The part was added but the first slice could not be queued');
+    expect(comp(c.x, third.componentId)).toBeTruthy();
+  });
+
+  it('a double submit of one upload makes one part: the second request is a 409', async () => {
+    const { x, svc } = setup(stl(), 'box.stl');
+    const results = await Promise.allSettled([svc.create(P, body()), svc.create(P, body())]);
+    const made = results.filter((r) => r.status === 'fulfilled');
+    const refused = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(made).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0].reason).toBeInstanceOf(ConflictException);
+    expect(refused[0].reason.message).toBe('This upload is already being used');
+    expect(x.db.t('productComponent')).toHaveLength(10);
+    expect(x.db.t('attachment')).toHaveLength(1);
+    expect(x.db.t('sliceRun')).toHaveLength(1);
+    expect(fs.readdirSync(dirOf(), { recursive: true }).filter((f) => String(f).endsWith('.stl'))).toHaveLength(1);
+  });
+
+  it('a failed transaction releases the claim, so the same upload can be submitted again', async () => {
+    const { x, svc, chunk } = setup(stl(), 'box.stl');
+    x.db.$transaction.mockRejectedValueOnce(new Error('deadlock'));
+    await expect(svc.create(P, body())).rejects.toThrow('deadlock');
+    expect(chunk.release).toHaveBeenCalledWith(UPLOAD);
+    expect(chunk.discard).not.toHaveBeenCalled();
+    expect(x.db.t('productComponent')).toHaveLength(9);
+    expect(fs.readdirSync(dirOf(), { recursive: true }).filter((f) => String(f).endsWith('.stl'))).toHaveLength(0);
+    await expect(svc.create(P, body())).resolves.toMatchObject({ notice: null });
+    expect(x.db.t('productComponent')).toHaveLength(10);
+  });
+});
+
+describe('a part that is not sliced yet', () => {
+  it('the cost is incomplete (PART_NOT_MEASURED), the stored price is not rewritten, and planning reports the same problem', async () => {
+    const { x, svc } = setup(stl(), 'Key ring.stl');
+    const before = x.db.t('product')[0].basePrice;
+    const out = await svc.create(P, body({ description: 'Key ring' }));
+    expect(x.db.t('product')[0].basePrice).toBe(before);
+
+    // Any reprice while the part waits (another part was edited, a setting changed) keeps the price.
+    const results = await x.h.pricing.recalcPricing(P);
+    const standard = results.find((r) => r.sizeOptionId === null)!;
+    expect(standard.written).toBe(false);
+    expect(standard.problems).toContainEqual({ code: 'PART_NOT_MEASURED', componentId: out.componentId, message: '"Key ring" has not been sliced yet' });
+    expect(standard.problems.filter((p) => p.componentId === out.componentId)).toHaveLength(1);
+    expect(x.db.t('product')[0].basePrice).toBe(before);
+
+    const bom = await x.h.resolver.resolve(P, { sizeOptionId: null, colourOptionId: null });
+    expect(bom.complete).toBe(false);
+    expect(bom.productionReady).toBe(false);
+    expect(bom.components.find((c) => c.componentId === out.componentId)!.layouts).toHaveLength(0);
+    const plan = await x.h.planner.planOption({ productId: P, sizeOptionId: null, colourOptionId: null, quantity: 3 });
+    expect(plan.problems).toEqual([{ code: 'PART_NOT_MEASURED', componentId: out.componentId, message: '"Key ring" has not been sliced yet' }]);
+    expect(plan.components.find((c) => c.componentId === out.componentId)).toMatchObject({ plates: [], printMinutes: 0 });
+  });
+
+  it('the validation slice measures it: the mark is cleared, the cost is complete and the price is rewritten', async () => {
+    const { x, svc } = setup(stl(), 'Key ring.stl');
+    const out = await svc.create(P, body({ description: 'Key ring' }));
+    const before = x.db.t('product')[0].basePrice;
+    x.sidecar.slice.mockResolvedValue({ ok: true, gcode: gcode({ labels: labels('key', 1), minutes: 30, totalGrams: 12, toolGrams: [12] }), plateFiles: 1 });
+    await x.processor.tick();
+    expect(x.run(out.validationRun!.id)).toMatchObject({ status: 'DONE' });
+    expect(comp(x, out.componentId)).toMatchObject({ pendingFirstSlice: false, gramsUsed: 12, printMinutes: 30 });
+    const bom = await x.h.resolver.resolve(P, { sizeOptionId: null, colourOptionId: null });
+    expect(bom.problems.filter((p) => p.code === 'PART_NOT_MEASURED')).toHaveLength(0);
+    expect(x.db.t('product')[0].basePrice).toBeGreaterThan(before);
+  });
+
+  it('a failed validation slice leaves the mark, and typing grams and minutes clears it', async () => {
+    const { x, svc } = setup(stl(), 'Key ring.stl');
+    const out = await svc.create(P, body({ description: 'Key ring' }));
+    await x.processor.tick();
+    expect(x.run(out.validationRun!.id)).toMatchObject({ status: 'FAILED' });
+    expect(comp(x, out.componentId)).toMatchObject({ pendingFirstSlice: true, gramsUsed: PLACEHOLDER_GRAMS });
+    await x.h.components.update(P, out.componentId, { gramsUsed: 9 });
+    expect(comp(x, out.componentId).pendingFirstSlice).toBe(true);
+    await x.h.components.update(P, out.componentId, { gramsUsed: 9, printMinutes: 25 });
+    expect(comp(x, out.componentId).pendingFirstSlice).toBe(false);
+  });
+});
+
+describe('colour links', () => {
+  it('each colour takes the link product onboarding would give an imported part: by filament when the product links it one way, else unlinked', async () => {
+    // Silver is only ever linked to Trim on this product.
+    const a = setup(stl(), 'Clip.stl');
+    const silver = await a.svc.create(P, body({ description: 'Clip', materials: { '0': M.silver } }));
+    expect(comp(a.x, silver.componentId)).toMatchObject({ colourSlotId: SLOT.trim, colourFixed: null });
+    // Black is linked to Tin on some parts and Band on another: no decision.
+    const black = await setup(stl(), 'Clip.stl').svc.create(P, body({ description: 'Clip' }));
+    expect(black.componentId).toBeTruthy();
+    const b = setup(stl(), 'Clip.stl');
+    const out = await b.svc.create(P, body({ description: 'Clip' }));
+    expect(comp(b.x, out.componentId)).toMatchObject({ colourSlotId: null, colourFixed: null });
+    // A multicolour part: per colour. White is fixed wherever the product uses it; gold and red are new to it.
+    const c = setup(await project(FOUR), 'Zelda.3mf');
+    const multi = await c.svc.create(P, body({ materials: { ...FOUR_MATERIALS, '1': M.silver } }));
+    expect(mats(c.x, multi.componentId).map((m: any) => [m.colorIndex, m.colourSlotId, m.colourFixed])).toEqual([
+      [0, null, null], [1, SLOT.trim, null], [2, null, true], [3, null, null],
+    ]);
+    expect(comp(c.x, multi.componentId)).toMatchObject({ colourSlotId: null, colourFixed: null });
+  });
+
+  it('a product without colour slots leaves the part unlinked', async () => {
+    const { x, svc } = setup(stl(), 'Clip.stl');
+    x.db.t('productColourSlot').length = 0;
+    const out = await svc.create(P, body({ materials: { '0': M.silver } }));
+    expect(comp(x, out.componentId)).toMatchObject({ colourSlotId: null, colourFixed: null });
   });
 });
 

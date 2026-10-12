@@ -66,6 +66,19 @@ export function anyActiveRun(runs: ReadonlyArray<Pick<SliceRunDto, 'status'>> | 
   return runs !== null && runs.some(isActiveRun);
 }
 
+/** What a closed part row says about the part's slicing: nothing, "Slicing…" or "Slice failed". */
+export type PartSliceState = 'slicing' | 'failed';
+
+/** From the part's runs, newest first: slicing while any is queued or running, failed when the newest failed. */
+export function partSliceStateOf(runs: ReadonlyArray<Pick<SliceRunDto, 'status'>>): PartSliceState | null {
+  if (runs.some(isActiveRun)) return 'slicing';
+  return runs[0]?.status === SliceRunStatus.FAILED ? 'failed' : null;
+}
+
+export function partSliceChip(state: PartSliceState): RunStatusChip {
+  return state === 'slicing' ? { text: 'Slicing…', variant: 'info' } : { text: 'Slice failed', variant: 'error' };
+}
+
 export interface RunStatusChip {
   text: string;
   variant: 'default' | 'info' | 'success' | 'error';

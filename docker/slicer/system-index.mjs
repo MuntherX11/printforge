@@ -93,9 +93,41 @@ export function loadSystemIndex(profilesDir) {
     return readPreset(byKind.get(kind).get(vendor).get(name), vendor);
   }
 
+  /**
+   * Bundled presets of one kind a user can pick: instantiable ones only (the
+   * abstract `fdm_*` roots and `instantiation: "false"` bases are skipped).
+   * Names are filtered before any preset file is read, so a search never
+   * opens more files than it has candidates.
+   *
+   * @param {'machine'|'process'|'filament'} kind
+   * @param {{q?: string, limit?: number}} [options] case-insensitive substring of the name
+   * @returns {Array<{name: string, vendor: string}>} sorted by name
+   */
+  function list(kind, { q = '', limit = 50 } = {}) {
+    if (!LIST_KEY[kind]) return [];
+    const needle = String(q).trim().toLowerCase();
+    const names = new Set();
+    for (const map of byKind.get(kind).values()) {
+      for (const name of map.keys()) {
+        if (name.startsWith('fdm_')) continue;
+        if (needle && !name.toLowerCase().includes(needle)) continue;
+        names.add(name);
+      }
+    }
+    const out = [];
+    for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+      if (out.length >= limit) break;
+      const raw = lookup(kind, name);
+      if (!raw || raw.instantiation !== 'true') continue;
+      out.push({ name, vendor: vendorOfRaw.get(raw) ?? '' });
+    }
+    return out;
+  }
+
   return {
     vendors,
     lookup,
+    list,
     vendorOf: (raw) => vendorOfRaw.get(raw),
     /** lookup bound to one kind, in the shape flattenPreset's lookup expects */
     forKind: (kind) => (name, child) => lookup(kind, name, child),

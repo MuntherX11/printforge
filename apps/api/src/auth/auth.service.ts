@@ -1,10 +1,12 @@
 import { Injectable, UnauthorizedException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailNotificationService } from '../communications/email-notification.service';
-import { JwtPayload, Role } from '@printforge/types';
+import { JwtPayload, Role, UserPreferences } from '@printforge/types';
+import { mergePreferences, parsePreferencesPatch, storedPreferences } from './user-preferences';
 
 @Injectable()
 export class AuthService {
@@ -55,6 +57,25 @@ export class AuthService {
         userType: 'staff' as const,
       },
     };
+  }
+
+  // ============ STAFF PREFERENCES ============
+
+  /** The staff user's stored UI settings, reduced to the known keys ({} by default). */
+  async getPreferences(userId: string): Promise<UserPreferences> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { preferences: true } });
+    if (!user) throw new NotFoundException('User not found');
+    return storedPreferences(user.preferences);
+  }
+
+  /** Merges an allowlisted patch into the stored settings; returns the merged settings. */
+  async updatePreferences(userId: string, body: unknown): Promise<UserPreferences> {
+    const patch = parsePreferencesPatch(body);
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { preferences: true } });
+    if (!user) throw new NotFoundException('User not found');
+    const merged = mergePreferences(user.preferences, patch);
+    await this.prisma.user.update({ where: { id: userId }, data: { preferences: merged as Prisma.InputJsonObject } });
+    return storedPreferences(merged);
   }
 
   // ============ CUSTOMER AUTH ============

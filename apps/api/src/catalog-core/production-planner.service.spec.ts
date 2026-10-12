@@ -128,6 +128,23 @@ describe('ProductionPlannerService.freeFilament (§3.7)', () => {
     expect(free.materials.get(M.black)!.reserved).toBe(0);
   });
 
+  it('a part that is not sliced yet (pendingFirstSlice): not ready, PART_NOT_MEASURED said once, and no plate is planned from its placeholder numbers or its layouts', async () => {
+    const row = boxRow();
+    // The box has real layouts and numbers; the mark alone must keep it out of a plan.
+    const pending = { ...row, components: row.components.map((c: any) => ({ ...c, pendingFirstSlice: true })) };
+    const { svc } = setup({ rows: [pending], spools: [{ id: 's', materialId: M.black, currentWeight: 5000, material: fixtureMaterial(M.black) }] });
+    const r = await svc.readiness(BOX_ID, { sizeOptionId: null, colourOptionId: null }, 12);
+    const name = row.components[0].description;
+    expect(r.ready).toBe(false);
+    expect(r.productionReady).toBe(false);
+    expect(r.problems).toEqual([{ code: 'PART_NOT_MEASURED', componentId: row.components[0].id, message: `"${name}" has not been sliced yet` }]);
+    expect(r.components[0]).toMatchObject({ plates: [], printMinutes: 0, unitsPrinted: 0 });
+    expect(r.filament).toEqual([]);
+    // The same product without the mark is ready.
+    const ok = setup({ rows: [row], spools: [{ id: 's', materialId: M.black, currentWeight: 5000, material: fixtureMaterial(M.black) }] });
+    await expect(ok.svc.readiness(BOX_ID, { sizeOptionId: null, colourOptionId: null }, 12)).resolves.toMatchObject({ productionReady: true, problems: [] });
+  });
+
   it('an orphan line (missing product) is skipped with a warning; readiness still returns', async () => {
     const { svc } = setup({
       rows: [boxRow()],

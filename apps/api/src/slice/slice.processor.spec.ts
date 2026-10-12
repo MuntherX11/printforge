@@ -88,7 +88,7 @@ describe('re-validation at claim', () => {
     x.profiles.filaments.delete(M.black);
     const r3 = queue(x);
     await x.processor.tick();
-    expect(x.run(r3.id).error).toBe('NO_FILAMENT_PROFILE: "PLA Black" has no filament profile');
+    expect(x.run(r3.id).error).toBe('NO_FILAMENT_PROFILE: "PLA Black" has no slicer preset, and there is no main preset for PLA');
   });
 });
 
@@ -289,6 +289,86 @@ describe('the result', () => {
     expect(x.run(r.id)).toMatchObject({ status: 'DONE', unitsSliced: 4 });
     const layout = layoutsOf(x).find((l: any) => l.source === 'SLICED');
     expect(layout).toMatchObject({ name: 'x4 · Hi', unitsPerPlate: 4, objectCount: 12 });
+  });
+
+  describe('the validation run is all or nothing', () => {
+    const TWO = { ...PLA_MAP, '1': { materialId: M.silver, name: 'PLA Silver', type: 'PLA' } };
+    const part = (x: SliceHarness, id: string) => x.db.t('productComponent').find((c: any) => c.id === id);
+    const colours = (x: SliceHarness, id: string) => x.db.t('componentMaterial').filter((m: any) => m.componentId === id).sort((a: any, b: any) => a.colorIndex - b.colorIndex).map((m: any) => m.gramsUsed);
+    const gcodeFiles = () => fs.readdirSync(dirOf(), { recursive: true }).filter((f) => String(f).endsWith('.gcode'));
+
+    /** c2 (Lid, two colours) with a hand-uploaded x1 file, waiting for its first slice. */
+    async function lid() {
+      const x = sliceHarness();
+      await x.seedSource('c2', 'STL');
+      const hand = x.db.insert('attachment', { entityType: 'product', entityId: P, filename: 'hand.gcode', originalName: 'hand.gcode', mimeType: 'application/octet-stream', sizeBytes: 1, storagePath: 'x/hand.gcode' });
+      Object.assign(part(x, 'c2'), { attachmentId: hand.id, gcodeFilename: 'hand.gcode', colorChanges: 3, pendingFirstSlice: true });
+      const before = { part: { ...part(x, 'c2') }, colours: colours(x, 'c2'), attachments: x.db.t('attachment').length, price: x.db.t('product')[0].basePrice };
+      return { x, hand, before };
+    }
+    const untouched = (x: SliceHarness, before: Awaited<ReturnType<typeof lid>>['before']) => {
+      expect(part(x, 'c2')).toEqual(before.part);
+      expect(colours(x, 'c2')).toEqual(before.colours);
+      expect(x.db.t('attachment')).toHaveLength(before.attachments);
+      expect(x.db.t('product')[0].basePrice).toBe(before.price);
+      expect(gcodeFiles()).toHaveLength(0);
+    };
+
+    it('a write that fails half way leaves the x1 file, the grams, the minutes, the colours and the mark as they were', async () => {
+      const { x, before } = await lid();
+      ok(x, gcode({ labels: labels('lid', 1), minutes: 31, totalGrams: 7, toolGrams: [6, 1], changes: 14 }));
+      // The second colour's write fails: the part row, the first colour and the file link were already written.
+      const real = x.db.componentMaterial.updateMany;
+      let calls = 0;
+      x.db.componentMaterial.updateMany = jest.fn(async (args: any) => {
+        if (++calls === 2) throw new Error('connection lost');
+        return real(args);
+      });
+      const recalc = jest.spyOn(x.h.pricing, 'recalcPricing');
+      const r = queue(x, { componentId: 'c2', unitsRequested: 1, filamentMap: TWO });
+      await x.processor.tick();
+      expect(calls).toBe(2);
+      expect(x.run(r.id)).toMatchObject({ status: 'FAILED', error: 'SLICE_FAILED: connection lost' });
+      untouched(x, before);
+      expect(recalc).not.toHaveBeenCalled();
+
+      // The same run again, with the database back: everything lands together.
+      x.db.componentMaterial.updateMany = real;
+      const again = queue(x, { componentId: 'c2', unitsRequested: 1, filamentMap: TWO });
+      await x.processor.tick();
+      expect(x.run(again.id)).toMatchObject({ status: 'DONE' });
+      expect(part(x, 'c2')).toMatchObject({ gramsUsed: 7, printMinutes: 31, colorChanges: 14, pendingFirstSlice: false, gcodeFilename: 'Lid x1 K1.gcode' });
+      expect(colours(x, 'c2')).toEqual([6, 1]);
+      expect(gcodeFiles()).toHaveLength(1);
+      expect(recalc).toHaveBeenCalledWith(P);
+    });
+
+    it('numbers the part cannot hold fail the run before any write', async () => {
+      const { x, before } = await lid();
+      ok(x, gcode({ labels: labels('lid', 1), minutes: 31, totalGrams: 250_000, toolGrams: [200_000, 50_000] }));
+      const tx = x.db.$transaction.mock.calls.length;
+      const r = queue(x, { componentId: 'c2', unitsRequested: 1, filamentMap: TWO });
+      await x.processor.tick();
+      expect(x.run(r.id)).toMatchObject({ status: 'FAILED', error: 'BAD_GRAMS: The sliced file reports 250000 g, more than a part can weigh (100000 g)' });
+      expect(x.db.$transaction.mock.calls.length).toBe(tx);
+      untouched(x, before);
+
+      ok(x, gcode({ labels: labels('lid', 1), minutes: 200_000, totalGrams: 7, toolGrams: [6, 1] }));
+      const slow = queue(x, { componentId: 'c2', unitsRequested: 1, filamentMap: TWO });
+      await x.processor.tick();
+      expect(x.run(slow.id)).toMatchObject({ status: 'FAILED', error: 'BAD_TIME: The sliced file reports 200000 min, more than a part can take (100000 min)' });
+      untouched(x, before);
+    });
+
+    it('a slice lighter than the smallest weight a part can have is stored at that minimum, not refused', async () => {
+      const x = sliceHarness();
+      await x.seedSource('c1', 'STL');
+      ok(x, gcode({ labels: labels('box', 1), minutes: 2, totalGrams: 0.04, toolGrams: [0.04] }));
+      const r = queue(x, { unitsRequested: 1 });
+      await x.processor.tick();
+      expect(x.run(r.id)).toMatchObject({ status: 'DONE', unitsSliced: 1 });
+      expect(part(x, 'c1')).toMatchObject({ gramsUsed: 0.1, printMinutes: 2 });
+    });
   });
 
   it('a crash inside the result step still marks the run FAILED', async () => {
