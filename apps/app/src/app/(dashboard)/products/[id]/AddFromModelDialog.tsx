@@ -119,7 +119,7 @@ export function AddFromModelDialog({ productId, file, sizeOptionId, scopeLabel, 
 
   if (phase.step === 'reading') {
     return (
-      <Dialog open onClose={onClose} title={title} className="max-w-md">
+      <Dialog open onClose={onClose} title={title} className="w-full max-w-md">
         <div className="space-y-4">
           <p role="status" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Reading the model…
@@ -134,7 +134,7 @@ export function AddFromModelDialog({ productId, file, sizeOptionId, scopeLabel, 
 
   if (phase.step === 'failed') {
     return (
-      <Dialog open onClose={onClose} title={title} className="max-w-md">
+      <Dialog open onClose={onClose} title={title} className="w-full max-w-md">
         <div className="space-y-4">
           <p role="alert" className="break-words text-sm text-red-600 dark:text-red-400">{phase.message}</p>
           <div className="flex justify-end border-t pt-3 dark:border-gray-700">
@@ -199,7 +199,7 @@ export function AddFromModelDialog({ productId, file, sizeOptionId, scopeLabel, 
   const projectPrinter = m.printerId ? printers?.find(p => p.id === m.printerId) ?? null : null;
 
   return (
-    <Dialog open onClose={submitting ? () => undefined : onClose} title={title} className="max-w-md">
+    <Dialog open onClose={submitting ? () => undefined : onClose} title={title} className="w-full max-w-md">
       <form onSubmit={submit} className="space-y-4" noValidate>
         <p className="break-all text-xs text-gray-500 dark:text-gray-400">From {m.filename} ({sourceKindText(m.kind)})</p>
 

@@ -1,4 +1,4 @@
-import { PROJECT_FILL_UNITS, projectFillUnits } from './fill-units';
+import { PROJECT_FILL_UNITS, pastFillUnits, projectFillUnits } from './fill-units';
 
 /** "Fill the plate" for a project: 100 copies until a run shows how many fit, then that many + 2. */
 describe('projectFillUnits', () => {
@@ -33,5 +33,19 @@ describe('projectFillUnits', () => {
     expect(projectFillUnits([run(500, 98)])).toBe(100);
     expect(projectFillUnits([run(500, 97)])).toBe(99);
     expect(projectFillUnits([run(500, 300)])).toBe(100);
+  });
+
+  it('no run has hit capacity: the footprint estimate, capped at 100; an unreadable estimate is 100', () => {
+    expect(projectFillUnits([], 18)).toBe(18);
+    expect(projectFillUnits([run(12, 12), run(1, 3)], 18)).toBe(18);
+    expect(projectFillUnits([], 240)).toBe(100);
+    expect(projectFillUnits([], 1)).toBe(1);
+    for (const bad of [null, 0, -4, 7.5, NaN, Infinity]) expect(projectFillUnits([], bad)).toBe(100);
+  });
+
+  it('a run that hit capacity wins over the estimate', () => {
+    expect(projectFillUnits([run(18, 15)], 18)).toBe(17);
+    expect(pastFillUnits([run(18, 15)])).toBe(17);
+    expect(pastFillUnits([run(12, 12)])).toBeNull();
   });
 });

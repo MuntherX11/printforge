@@ -47,19 +47,16 @@ export function SliceSlotRows({ slots, chosen, disabled, showSlotNumber, showFil
         const m = chosen[s.key] ?? null;
         const label = filamentLabel(m);
         const slotNo = Number(s.key) + 1;
+        const secondary = m ? [label.secondary, [m.brand, m.type].filter(Boolean).join(' ')].filter(Boolean).join(' · ') : '';
         return (
-          <li key={s.key} className="flex flex-wrap items-center gap-1.5 text-sm">
-            {showSlotNumber && <span className="text-gray-500 dark:text-gray-400">Slot {slotNo}:</span>}
+          <li key={s.key} className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+            {showSlotNumber && <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">Slot {slotNo}:</span>}
             {m
               ? (
                 <>
                   <Swatch hex={m.colorHex} name={m.color || m.name} title={label.primary} />
-                  <span className="text-gray-800 dark:text-gray-200">{label.primary}</span>
-                  {(label.secondary || m.brand || m.type) && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {[label.secondary, [m.brand, m.type].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}
-                    </span>
-                  )}
+                  <span className="min-w-0 max-w-full truncate text-gray-800 dark:text-gray-200" title={label.primary}>{label.primary}</span>
+                  {secondary && <span className="min-w-0 max-w-full truncate text-xs text-gray-500 dark:text-gray-400" title={secondary}>{secondary}</span>}
                 </>
               )
               : <span className="text-amber-700 dark:text-amber-300">No filament yet</span>}
@@ -68,16 +65,17 @@ export function SliceSlotRows({ slots, chosen, disabled, showSlotNumber, showFil
               disabled={disabled}
               onClick={() => onPick(s)}
               aria-label={m ? `Change the filament for slot ${slotNo}` : `Choose a filament for slot ${slotNo}`}
-              className="ml-1 inline-flex min-h-[24px] items-center rounded px-1 text-xs font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400"
+              className="ml-1 inline-flex min-h-[24px] flex-shrink-0 items-center rounded px-1 text-xs font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400"
             >
               {m ? 'Change' : 'Choose'}
             </button>
             {s.fileLabel && (showFileSwatch ? (
-              <span className="flex w-full flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                In the project: <Swatch hex={s.fileHex} title={s.fileLabel} decorative /> {s.fileLabel}
+              <span className="flex w-full min-w-0 items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <span className="flex-shrink-0">In the project:</span> <Swatch hex={s.fileHex} title={s.fileLabel} decorative />
+                <span className="min-w-0 truncate" title={s.fileLabel}>{s.fileLabel}</span>
               </span>
             ) : (
-              <span className="w-full text-xs text-gray-500 dark:text-gray-400">In the project: {s.fileLabel}</span>
+              <span className="w-full min-w-0 truncate text-xs text-gray-500 dark:text-gray-400" title={s.fileLabel}>In the project: {s.fileLabel}</span>
             ))}
           </li>
         );

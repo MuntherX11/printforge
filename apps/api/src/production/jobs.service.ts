@@ -4,6 +4,7 @@ import { JobStatus } from '@printforge/types';
 import { BomResolverService } from '../catalog-core/bom-resolver.service';
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
 import { lineDescription, mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
+import type { PrinterScope } from '../catalog-core/job-plate-suggestion';
 import { planFromBom, ProductionPlannerService } from '../catalog-core/production-planner.service';
 import { pickSpools } from '../catalog-core/spool-picker';
 import { PaginationDto, paginate, paginatedResponse } from '../common/dto/pagination.dto';
@@ -146,6 +147,7 @@ export class JobsService {
       let plates: any[] = [];
       let lines: any[] = explicitLines.map((l) => ({ ...l, colorIndex: 0 }));
       let reservation: ReturnType<typeof reservationSummary> | null = null;
+      let planPrinterId: string | null = null;
       if (config && !explicitLines.length) {
         const bom = this.resolver.resolveWithConfig(config, { sizeOptionId, colourOptionId });
         const blocking = bom.problems.find((p) => ['NO_COMPONENTS', 'COMPONENT_NO_MATERIAL', 'SLOT_NO_MATERIAL', 'PART_NOT_MEASURED'].includes(p.code));
@@ -155,7 +157,21 @@ export class JobsService {
             throw new BadRequestException(`That component isn't part of "${bom.label}"`);
           }
         }
-        const plan = planFromBom(bom, { quantity: dto.quantityToProduce, surplusPolicy: policy, plates: dto.plates }, config.materials, ctx.planCache);
+        // A job has one printer (v2.18.2): plates sliced for another one are refused, and none are suggested.
+        let printer: PrinterScope | null = null;
+        if (dto.printerId && bom.components.some((c) => c.layouts.some((l) => l.printerId))) {
+          const row = await tx.printer.findUnique({ where: { id: dto.printerId }, select: { id: true, name: true } });
+          if (!row) throw new BadRequestException('Printer not found');
+          printer = { id: row.id, name: row.name };
+        }
+        const plan = planFromBom(bom, {
+          quantity: dto.quantityToProduce, surplusPolicy: policy, plates: dto.plates, printer,
+          // Not chosen (older clients): the default printer when it can print every part, as the preview does.
+          preferPrinter: dto.printerId === undefined && config.printer ? { id: config.printer.id, name: config.printer.name } : null,
+        }, config.materials, ctx.planCache);
+        planPrinterId = plan.planPrinter?.id ?? null;
+        const noPlate = plan.problems.find((p) => p.code === 'NO_PLATE_FOR_PRINTER');
+        if (noPlate) throw new BadRequestException(noPlate.message);
         if (plan.problems.length) {
           const c = bom.components.find((x) => x.componentId === plan.problems[0].componentId);
           throw new BadRequestException(`"${c?.description ?? 'A component'}" has no sliced data — add its grams and minutes or a plate layout`);
@@ -180,7 +196,10 @@ export class JobsService {
           sizeOptionId,
           colourOptionId,
           variantId: sizeOptionId ?? colourOptionId,
-          printerId: dto.printerId !== undefined ? dto.printerId : await defaultJobPrinter(tx, plates, config?.product.defaultPrinterId ?? null),
+          // Not chosen: the printer the plates were sliced for in the app, else as before (the files' printer, the pricing printer).
+          printerId: dto.printerId !== undefined
+            ? dto.printerId
+            : planPrinterId ?? await defaultJobPrinter(tx, plates, config?.product.defaultPrinterId ?? null),
           assignedToId: dto.assignedToId ?? null,
           orderId: dto.orderId ?? null,
           orderItemId: dto.orderItemId ?? null,

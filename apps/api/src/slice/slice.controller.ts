@@ -6,7 +6,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { SliceService } from './slice.service';
 
 /**
- * Slice runs (slicer plan WP5). Queueing and cancelling are OPERATOR/ADMIN;
+ * Slice runs (slicer plan WP5). Queueing, cancelling a queued run and
+ * dismissing a failed one are OPERATOR/ADMIN;
  * the run list is readable by every staff role but VIEWER.
  */
 @Controller()

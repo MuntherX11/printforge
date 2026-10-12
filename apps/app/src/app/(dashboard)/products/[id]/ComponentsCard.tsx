@@ -219,6 +219,7 @@ export function PartsBody({ data, product, scope, onScopeChange, variant, title,
                 onLayouts={() => setDialog({ kind: 'layouts', componentId: c.id })}
                 onEditLinks={focus => setDialog({ kind: 'links', focus })}
                 onReload={() => void reload()}
+                onRunRemoved={() => slices.refresh(c.id)}
                 stock={canEdit ? stockById : null}
                 onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
                 onSlice={() => { stock.refresh(); setDialog({ kind: 'slice', componentId: c.id }); }}

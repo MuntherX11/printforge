@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { MaterialLite, OptionCost, ProductDetail } from '@printforge/types';
+import { NO_PARTS_YET, type MaterialLite, type OptionCost, type ProductDetail } from '@printforge/types';
 import * as ExcelJS from 'exceljs';
 import { BomResolverService } from '../catalog-core/bom-resolver.service';
 import { PRODUCT_CONFIG_INCLUDE, toProductConfig } from '../catalog-core/catalog-config';
@@ -260,6 +260,9 @@ export class ProductsService {
     const ctx = new CatalogRequestContext();
     const config = await this.resolver.requireConfig(id, ctx);
     const pair = { sizeOptionId: pairParam(query.sizeOptionId, 'sizeOptionId'), colourOptionId: pairParam(query.colourOptionId, 'colourOptionId') };
+    // No sizes and no parts: there is no size to choose (a price of 0 would otherwise ask for one).
+    const hasSizes = config.options.some((o) => o.kind === 'SIZE' && o.isActive);
+    if (!pair.sizeOptionId && !hasSizes && config.components.length === 0) throw new BadRequestException(NO_PARTS_YET);
     validatePair(this.resolver.pairContext(config), pair.sizeOptionId, pair.colourOptionId, { audience: 'STAFF' });
     return this.planner.readiness(id, pair, qty, { ctx });
   }

@@ -17,6 +17,9 @@ export interface PlanLayoutOption {
   unitsPerPlate: number;
   plateMinutes?: number;
   plateGrams?: number;
+  /** The printer the plate was sliced for; absent or null = it prints on any printer. */
+  printerId?: string | null;
+  printerName?: string | null;
 }
 
 export interface PlanPlate {
@@ -43,8 +46,29 @@ export function planProblem(plates: PlanPlate[], layouts: PlanLayoutOption[], un
   return null;
 }
 
-function layoutText(l: PlanLayoutOption): string {
+/**
+ * A job has one printer: a plate sliced for another one, or (with no printer
+ * chosen) plates sliced for two, is refused by J1/J2/J5. The same check, so
+ * the plan dialog can say it before the plan is sent.
+ */
+export function printerProblem(plates: PlanPlate[], layouts: PlanLayoutOption[], printer: { id: string; name: string } | null): string | null {
+  const seen = new Map<string, string>();
+  for (const p of plates) {
+    const l = layouts.find(x => x.layoutId === p.layoutId);
+    if (!l?.printerId) continue;
+    const name = l.printerName ?? 'another printer';
+    if (printer && l.printerId !== printer.id) return `Plate ×${l.unitsPerPlate} is sliced for ${name}, not ${printer.name}`;
+    seen.set(l.printerId, name);
+  }
+  if (seen.size < 2) return null;
+  const names = [...seen.values()].sort((a, b) => a.localeCompare(b));
+  return `These plates are sliced for different printers (${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}). Choose one printer.`;
+}
+
+/** "×6 · Ender · 54 min · 22 g per plate": the printer only when the plate was sliced for one. */
+export function layoutText(l: PlanLayoutOption): string {
   const bits = [l.layoutId === null ? 'Single unit' : `×${l.unitsPerPlate}`];
+  if (l.printerId) bits.push(l.printerName ?? 'One printer');
   if (l.plateMinutes != null) bits.push(formatMinutes(l.plateMinutes));
   if (l.plateGrams != null) bits.push(formatGrams(l.plateGrams));
   return bits.join(' · ') + (l.layoutId === null ? '' : ' per plate');

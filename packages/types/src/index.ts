@@ -1412,6 +1412,9 @@ export interface ReadinessPlate {
   label: string;
   unitsPerPlate: number;
   plateCount: number;
+  /** The printer the plate was sliced for; absent or null = any printer. */
+  printerId?: string | null;
+  printerName?: string | null;
 }
 
 /** GET /products/:id/readiness and POST /jobs/preview (spec §4.1 P20, §4.4 J2). */
@@ -1475,6 +1478,9 @@ export interface Readiness {
   ready: boolean;
   problems: Problem[];
   warnings: Problem[];
+  /** The printer the planned plates were sliced for; null when every plate prints on any printer. A plan never mixes two. */
+  planPrinterId?: string | null;
+  planPrinterName?: string | null;
 }
 
 /** One row of GET /jobs/plan/:orderId (spec §4.4.1). rowKey = `${orderItemId}:${componentId}`. */
@@ -1508,6 +1514,9 @@ export interface PlanRow extends OptionPair {
     minutesPerUnit: number;
     gramsPerUnit: number;
     hasFile: boolean;
+    /** The printer the plate was sliced for; absent or null = any printer. */
+    printerId?: string | null;
+    printerName?: string | null;
   }>;
   suggestedPlates: ReadinessPlate[];
   unitsPrinted: number;
@@ -1551,6 +1560,9 @@ export interface ResolvedLayout {
   minutesPerUnit: number;
   gramsPerUnit: number;
   hasFile: boolean;
+  /** The printer the plate was sliced for; absent or null = any printer. */
+  printerId?: string | null;
+  printerName?: string | null;
 }
 
 /** POST /jobs/preview (J2): the P20 shape with creditOnComplete filled, plus each component's layouts. */
@@ -1794,3 +1806,6 @@ export * from './fill-plate';
 export * from './plate-files';
 import type { ComponentPlateRow, PlatePrinterSuggestion } from './plate-files';
 
+
+/** Make it, for a product with no sizes and no parts: there is nothing to make yet (v2.18.2). */
+export const NO_PARTS_YET = 'No parts yet. Add one from its model or import a sliced file.';

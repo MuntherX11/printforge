@@ -19,6 +19,9 @@ export interface PlannerLayout {
   attachmentId?: string | null;
   gcodeFilename?: string | null;
   colorChanges?: number;
+  /** The printer the plate was sliced for; absent or null = prints on any printer. */
+  printerId?: string | null;
+  printerName?: string | null;
 }
 
 export interface PlannedPlate {

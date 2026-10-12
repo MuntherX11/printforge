@@ -4,7 +4,7 @@ import { BomResolverService, type ResolvedBom, type ResolvedComponent } from '..
 import { CatalogRequestContext } from '../catalog-core/catalog-context';
 import { computeLineProgress } from '../catalog-core/line-progress';
 import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
-import { suggestJobPlates } from '../catalog-core/job-plate-suggestion';
+import { assertOnePrinter, noPlateSlicedFor, printerOfPlates, suggestJobPlates, type PrinterScope } from '../catalog-core/job-plate-suggestion';
 import { PlanError, validatePlan, type PlannedPlate } from '../catalog-core/plate-planner';
 import { planFromBom, ProductionPlannerService, type OptionPlan } from '../catalog-core/production-planner.service';
 import { pickSpools, type SpoolRow } from '../catalog-core/spool-picker';
@@ -14,7 +14,7 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { ProductStockService, suggestFromStock } from '../stock-ledger/product-stock.service';
 import { creditUnits, materialLines, plateRows, singlePlateFilename } from './job-builder';
 import { parsePlanSubmit, parsePreview, type PlanRowInput } from './job-input';
-import { applyPlatePrinters, assertPlannable, colourChangedWarning, bucketOf, NO_SLICED_DATA, planComponent, planVersionOf, plateFileOf } from './job-plan-rules';
+import { applyPlatePrinters, assertPlannable, colourChangedWarning, bucketOf, defaultPrinterOf, NO_SLICED_DATA, planComponent, planVersionOf, plateFileOf, printerFields } from './job-plan-rules';
 import { PlatePrinterLookup } from './plate-printers';
 import { lockOrderPlan } from './job-transitions';
 
@@ -89,6 +89,8 @@ export class JobPlanningService {
     const unsuggested = new Map<string, number>();
 
     const out: RowPlan[] = [];
+    // Rows whose suggested plates were sliced for one printer: that printer is the row's.
+    const planPrinters = new Map<string, PrinterScope>();
     for (const item of items as any[]) {
       const res = await this.resolver.resolveForLine(item, `Order ${order.orderNumber}`, ctx);
       if (res.skip) {
@@ -145,10 +147,13 @@ export class JobPlanningService {
 
         let plan: OptionPlan | null = null;
         let problem: Problem | null = null;
-        plan = planComponent(c, toProduce, bom, config, ctx, policy);
+        plan = planComponent(c, toProduce, bom, config, ctx, policy, undefined, { preferPrinter: defaultPrinterOf(config) });
+        if (plan.planPrinter) planPrinters.set(`${item.id}:${c.componentId}`, plan.planPrinter);
         if (plan.problems.length) {
           const first = plan.problems[0];
-          problem = first.code === 'PART_NOT_MEASURED' ? first : { code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: NO_SLICED_DATA(c.description) };
+          problem = first.code === 'PART_NOT_MEASURED' || first.code === 'NO_PLATE_FOR_PRINTER'
+            ? first
+            : { code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: NO_SLICED_DATA(c.description) };
           if (toProduce > 0) rowWarnings.push(problem);
         }
         const pc = plan.components[0];
@@ -180,8 +185,11 @@ export class JobPlanningService {
           layouts: c.layouts.map((l) => ({
             layoutId: l.layoutId, label: l.label, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
             minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!l.attachmentId,
+            ...printerFields(l),
           })),
-          suggestedPlates: (pc?.plates ?? []).map((pl) => ({ layoutId: pl.layout.layoutId, label: pl.layout.label, unitsPerPlate: pl.layout.unitsPerPlate, plateCount: pl.plateCount })),
+          suggestedPlates: (pc?.plates ?? []).map((pl) => ({
+            layoutId: pl.layout.layoutId, label: pl.layout.label, unitsPerPlate: pl.layout.unitsPerPlate, plateCount: pl.plateCount, ...printerFields(pl.layout),
+          })),
           unitsPrinted: pc?.unitsPrinted ?? 0,
           surplus: pc?.surplus ?? 0,
           printMinutes: pc?.printMinutes ?? 0,
@@ -209,6 +217,10 @@ export class JobPlanningService {
       }
     }
     await applyPlatePrinters(this.prisma, out);
+    for (const { row } of out) {
+      const p = planPrinters.get(row.rowKey);
+      if (p) { row.printerId = p.id; row.printerName = p.name; }
+    }
     return { order, planVersion: planVersionOf(out), rows: out, warnings };
   }
 
@@ -288,24 +300,36 @@ export class JobPlanningService {
         throw new BadRequestException(`"${desc}": only ${row.remaining} units remain to plan`);
       }
       const policy = inp?.surplusPolicy ?? row.surplusPolicy;
+      let printerId = inp?.printerId !== undefined ? inp.printerId : row.printerId;
+      let printerName = inp?.printerId !== undefined ? null : row.printerName;
+      if (inp?.printerId) {
+        const p = await tx.printer.findUnique({ where: { id: inp.printerId }, select: { id: true, name: true } });
+        if (!p) throw new BadRequestException('Printer not found');
+        printerId = p.id;
+        printerName = p.name ?? null;
+      }
+      // The row's printer as the planner sees it (a job has one printer, v2.18.2).
+      const rowPrinter: PrinterScope | null = printerId ? { id: printerId, name: printerName ?? 'the chosen printer' } : null;
       let plates: PlannedPlate[] = [];
       if (toProduce > 0) {
         if (inp?.plates) {
           plates = validatePlan(component, toProduce, inp.plates.map((p) => ({ componentId: component.componentId, layoutId: p.layoutId, plateCount: p.plateCount })));
+          assertOnePrinter([{ description: desc, plates }], rowPrinter);
         } else {
           try {
-            plates = suggestJobPlates(toProduce, component.layouts, ctx.planCache).plates;
+            // A printer chosen on the row is the job's; otherwise the suggestion J4 showed (the default printer preferred).
+            const config = await this.resolver.requireConfig(rp.bom.productId, ctx);
+            const s = suggestJobPlates(toProduce, component.layouts, ctx.planCache,
+              inp?.printerId !== undefined ? { printer: rowPrinter } : { prefer: defaultPrinterOf(config) });
+            if (s.blocked) throw new BadRequestException(s.missingFor ? noPlateSlicedFor(s.missingFor.name, desc) : NO_SLICED_DATA(desc));
+            plates = s.plates;
           } catch (e) {
             if (e instanceof PlanError) throw new BadRequestException(NO_SLICED_DATA(desc));
             throw e;
           }
+          // Not chosen on the row: the printer follows the plates that were suggested.
+          if (inp?.printerId === undefined) printerId = printerOfPlates(plates)?.id ?? printerId;
         }
-      }
-      let printerId = inp?.printerId !== undefined ? inp.printerId : row.printerId;
-      if (inp?.printerId) {
-        const p = await tx.printer.findUnique({ where: { id: inp.printerId }, select: { id: true } });
-        if (!p) throw new BadRequestException('Printer not found');
-        printerId = p.id;
       }
       const spools = new Map<string, SpoolRow>();
       const lineMaterials = new Set(component.slots.map((s) => s.materialId));
@@ -457,7 +481,7 @@ export class JobPlanningService {
       if (!bom.components.some((c) => c.componentId === e.componentId)) throw new BadRequestException(`That component isn't part of "${bom.label}"`);
     }
     const readiness = await this.planner.readiness(productId, { sizeOptionId, colourOptionId }, dto.quantity, {
-      surplusPolicy: dto.surplusPolicy, plates: dto.plates, ctx,
+      surplusPolicy: dto.surplusPolicy, plates: dto.plates, ctx, printer: await this.previewPrinter(dto.printerId),
     });
     const credit = { purpose: 'CUSTOMER', orderId: null, stockMode: dto.stockMode ?? null, surplusPolicy: readiness.surplusPolicy };
     const layoutsByComponent: Record<string, unknown[]> = {};
@@ -465,6 +489,7 @@ export class JobPlanningService {
       layoutsByComponent[c.componentId] = c.layouts.map((l) => ({
         layoutId: l.layoutId, label: l.label, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
         minutesPerUnit: l.plateMinutes / l.unitsPerPlate, gramsPerUnit: l.plateGrams / l.unitsPerPlate, hasFile: !!l.attachmentId,
+        ...printerFields(l),
       }));
     }
     // The printer the suggested plates' files were sliced for (owner spec 2026-10-02 item 6).
@@ -473,14 +498,26 @@ export class JobPlanningService {
       return c.plates.map((p) => ({ attachmentId: rc ? plateFileOf(rc, p.layoutId) : null, plateCount: p.plateCount }));
     });
     const lookup = await PlatePrinterLookup.load(this.prisma, plates.map((p) => p.attachmentId));
-    const { warning, ...printer } = lookup.suggest(plates, config.printer ? { id: config.printer.id, name: config.printer.name } : null);
+    const { warning, ...fromFiles } = lookup.suggest(plates, config.printer ? { id: config.printer.id, name: config.printer.name } : null);
+    // Plates sliced in the app say their printer themselves; that outranks the file header's model name.
+    const printer = readiness.planPrinterId
+      ? { ...fromFiles, printerId: readiness.planPrinterId, printerName: readiness.planPrinterName ?? null, fromFile: true }
+      : fromFiles;
     return {
       ...readiness,
-      warnings: warning ? [...readiness.warnings, warning] : readiness.warnings,
+      warnings: warning && !readiness.planPrinterId ? [...readiness.warnings, warning] : readiness.warnings,
       components: readiness.components.map((c) => ({ ...c, creditOnComplete: creditUnits(credit, c.unitsRequired, c.surplus) })),
       layoutsByComponent,
       printer,
     };
+  }
+
+  /** J2 `printerId`: absent = not chosen (undefined), null = "No printer", else the printer with its name. */
+  private async previewPrinter(printerId: string | null | undefined): Promise<PrinterScope | null | undefined> {
+    if (!printerId) return printerId === null ? null : undefined;
+    const p = await this.prisma.printer.findUnique({ where: { id: printerId }, select: { id: true, name: true } });
+    if (!p) throw new BadRequestException('Printer not found');
+    return { id: p.id, name: p.name };
   }
 }
 

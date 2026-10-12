@@ -154,6 +154,8 @@ export interface PreviewInput {
   surplusPolicy?: SurplusPolicy;
   stockMode?: 'BUILD_STOCK' | 'DIRECT_SALE';
   plates?: PlateInput[];
+  /** the dialog's printer: null = "No printer"; absent = not chosen yet */
+  printerId?: string | null;
 }
 
 /** J2 body. */
@@ -171,6 +173,8 @@ export function parsePreview(raw: unknown): PreviewInput {
     surplusPolicy: optionalPolicy(b.surplusPolicy),
     stockMode: optionalStockMode(b.stockMode),
     plates: parsePlates(b.plates),
+    // As in J1: only an explicit null means "no printer".
+    printerId: b.printerId === null ? null : optionalId(b.printerId, 'printerId'),
   };
 }
 

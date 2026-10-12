@@ -30,7 +30,7 @@ export interface PlateRowsInput {
   /** the part's own values, for the ×1 row */
   own: { printMinutes: number; grams: number; file: FileRef | null; slicedFor: string | null };
   /** the part's active layouts */
-  layouts: ReadonlyArray<{ id: string; name: string; unitsPerPlate: number; plateMinutes: number; plateGrams: number; source: ComponentPlateRow['source']; attachmentId: string | null }>;
+  layouts: ReadonlyArray<{ id: string; name: string; unitsPerPlate: number; plateMinutes: number; plateGrams: number; source: ComponentPlateRow['source']; attachmentId: string | null; printerId?: string | null; printerName?: string | null }>;
   /** files of the layouts, by attachment id */
   files: ReadonlyMap<string, { file: FileRef; slicedFor: string | null }>;
   listPrice: number | null;
@@ -79,12 +79,16 @@ export function plateRowsOf(input: PlateRowsInput): ComponentPlateRow[] {
     const p = matchPrinter(slicedFor, input.printers);
     return p ? { id: p.id, name: p.name } : null;
   };
-  const row = (base: Omit<ComponentPlateRow, 'pricePerUnit' | 'priceSource' | 'tierMinQty' | 'marginPct' | 'printer'>): ComponentPlateRow => {
+  const row = (base: Omit<ComponentPlateRow, 'pricePerUnit' | 'priceSource' | 'tierMinQty' | 'marginPct' | 'printer' | 'printerId' | 'printerName'> & { printerId?: string | null; printerName?: string | null }): ComponentPlateRow => {
     const p = base.layoutId === null
       ? { price: input.listPrice, source: input.listPrice === null ? null : ('LIST' as const), tierMinQty: null }
       : priceForUnits(base.unitsPerPlate, input.listPrice, input.tiers);
     const margin = base.costPerUnit !== null && p.price !== null && p.price > 0 ? round1(((p.price - base.costPerUnit) / p.price) * 100) : null;
-    return { ...base, pricePerUnit: p.price, priceSource: p.source, tierMinQty: p.tierMinQty, marginPct: margin, printer: printerOf(base.slicedFor) };
+    return {
+      ...base, pricePerUnit: p.price, priceSource: p.source, tierMinQty: p.tierMinQty, marginPct: margin, printer: printerOf(base.slicedFor),
+      // Sliced in the app: the plate belongs to that printer (a job never mixes plates of two).
+      printerId: base.printerId ?? null, printerName: base.printerId ? base.printerName ?? null : null,
+    };
   };
 
   const rows: ComponentPlateRow[] = [row({
@@ -97,7 +101,7 @@ export function plateRowsOf(input: PlateRowsInput): ComponentPlateRow[] {
     rows.push(row({
       layoutId: l.id, name: l.name, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams, source: l.source,
       costPerUnit: r ? cost({ unitsPerPlate: r.unitsPerPlate, plateMinutes: r.plateMinutes, slotGrams: r.slotGrams }) : null,
-      file: f?.file ?? null, slicedFor: f?.slicedFor ?? null,
+      file: f?.file ?? null, slicedFor: f?.slicedFor ?? null, printerId: l.printerId ?? null, printerName: l.printerName ?? null,
     }));
   }
   return rows;

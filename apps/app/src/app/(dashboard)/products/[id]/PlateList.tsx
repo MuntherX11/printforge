@@ -30,6 +30,8 @@ interface Props {
   /** "Show costs per plate": adds Cost / unit, Price / unit and Margin. */
   showCosts: boolean;
   onChanged: () => void;
+  /** A slice run was cancelled or dismissed in the run list. */
+  onRunRemoved?: () => void;
   /** Opens "Slice a plate" for this part. */
   onSlice: () => void;
 }
@@ -47,7 +49,7 @@ const NUMERIC = new Set(['Units', 'Time', 'Filament', ...COST_HEAD]);
  * upload a file onto a plate without one and delete a plate's file; Manage
  * still adds, edits and deletes plates.
  */
-export function PlateList({ productId, component: c, canEdit, isAdmin, printers, runsKey, showCosts, onChanged, onSlice }: Props) {
+export function PlateList({ productId, component: c, canEdit, isAdmin, printers, runsKey, showCosts, onChanged, onRunRemoved, onSlice }: Props) {
   const { toast } = useToast();
   const formatCurrency = useFormatCurrency();
   const [busy, setBusy] = useState<string | null>(null);
@@ -163,7 +165,7 @@ export function PlateList({ productId, component: c, canEdit, isAdmin, printers,
         </div>
       )}
       <SliceRunsRow productId={productId} componentId={c.id} enabled={source !== null} canEdit={canEdit}
-        refreshKey={`${String(runsKey)}:${sourceVersion}`} onDone={onChanged} />
+        refreshKey={`${String(runsKey)}:${sourceVersion}`} onDone={onChanged} onRemoved={onRunRemoved} />
       {rows.length > 0 && (
         // `relative`: the visually hidden caption and file inputs are absolute, and must scroll with the table.
         <div className="relative overflow-x-auto">

@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast';
-import { PlatePlanEditor, planProblem, type PlanPlate } from '@/components/production/PlatePlanEditor';
+import { PlatePlanEditor, planProblem, printerProblem, type PlanPlate } from '@/components/production/PlatePlanEditor';
 import { ApiError, api } from '@/lib/api';
 import { formatGrams, plural, policyLabel } from '@/lib/product-format';
 import type { ApiSpool, PlanRow, PlanSubmitResult, PlanSubmitRow, ProductionPlan, SurplusPolicy } from '@/lib/types/api';
@@ -75,7 +75,22 @@ function stockCap(row: PlanRow, fromStock: number, buckets: Map<string, Bucket>)
   return Math.max(0, Math.min(row.remaining, row.onHand - others));
 }
 
-function rowProblem(row: PlanRow, e: RowEdit | undefined, buckets: Map<string, Bucket>): string | null {
+type PrinterName = { id: string; name: string };
+
+/** The row's printer: the one picked, else the plan's default for the row. */
+function printerOfRow(row: PlanRow, e: RowEdit | undefined, printers: PrinterName[]): PrinterName | null {
+  const id = (e && 'printerId' in e ? e.printerId : row.printerId) ?? null;
+  if (!id) return null;
+  return { id, name: printers.find(p => p.id === id)?.name ?? (id === row.printerId ? row.printerName : null) ?? 'the chosen printer' };
+}
+
+/** The plates the row shows: chosen by hand, else the suggestion while the amount is the suggested one. */
+function shownPlates(row: PlanRow, e: RowEdit | undefined, toProduce: number): PlanPlate[] | null {
+  if (e?.plates) return e.plates;
+  return toProduce === row.toProduce ? row.suggestedPlates.map(p => ({ layoutId: p.layoutId, plateCount: p.plateCount })) : null;
+}
+
+function rowProblem(row: PlanRow, e: RowEdit | undefined, buckets: Map<string, Bucket>, printers: PrinterName[]): string | null {
   const { fromStock, toProduce } = values(row, e);
   if (fromStock > Math.min(row.onHand, row.remaining)) return `At most ${Math.min(row.onHand, row.remaining)} from stock`;
   const shared = buckets.get(bucketOf(row));
@@ -83,8 +98,13 @@ function rowProblem(row: PlanRow, e: RowEdit | undefined, buckets: Map<string, B
   if (fromStock + toProduce > row.remaining) return `Only ${row.remaining} left to plan`;
   // J5 can't plan plates without a layout (NO_USABLE_LAYOUT) and would refuse the whole plan.
   if (toProduce > 0 && row.layouts.length === 0) return 'Nothing to print it from — set To Produce to 0 to plan the other rows';
-  if (toProduce > 0 && e?.plates) return planProblem(e.plates, row.layouts, toProduce);
-  return null;
+  if (toProduce > 0 && e?.plates) {
+    const problem = planProblem(e.plates, row.layouts, toProduce);
+    if (problem) return problem;
+  }
+  // A job has one printer: its plates must be sliced for it (J5 refuses the plan otherwise).
+  const shown = toProduce > 0 ? shownPlates(row, e, toProduce) : null;
+  return shown ? printerProblem(shown, row.layouts, printerOfRow(row, e, printers)) : null;
 }
 
 export function PlanProductionDialog({ open, onClose, orderId, plan, printers, onCreated, onReload }: Props) {
@@ -114,10 +134,10 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
       const v = values(r, edits[r.rowKey]);
       fromStock += v.fromStock;
       if (v.toProduce > 0) jobs += 1;
-      if (rowProblem(r, edits[r.rowKey], buckets)) problems += 1;
+      if (rowProblem(r, edits[r.rowKey], buckets, printers)) problems += 1;
     }
     return { fromStock, jobs, problems };
-  }, [rows, edits, buckets]);
+  }, [rows, edits, buckets, printers]);
 
   const label = totals.fromStock > 0
     ? `Take ${totals.fromStock} from stock · create ${plural(totals.jobs, 'job')}`
@@ -137,7 +157,10 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
             rowKey: r.rowKey,
             fromStock: v.fromStock,
             toProduce: v.toProduce,
-            ...(e?.plates && v.toProduce > 0 ? { plates: e.plates } : {}),
+            // With the printer changed on the row, the plates shown are sent, so what is checked is what is seen.
+            ...(v.toProduce > 0 && (e?.plates || (e && 'printerId' in e && shownPlates(r, e, v.toProduce)))
+              ? { plates: shownPlates(r, e, v.toProduce)! }
+              : {}),
             ...(e?.surplusPolicy ? { surplusPolicy: e.surplusPolicy } : {}),
             ...(e && 'printerId' in e ? { printerId: e.printerId ?? null } : {}),
             ...(spoolList.length ? { spools: spoolList } : {}),
@@ -185,7 +208,7 @@ export function PlanProductionDialog({ open, onClose, orderId, plan, printers, o
                   const e = edits[row.rowKey];
                   const { fromStock, toProduce } = values(row, e);
                   const done = row.remaining === 0;
-                  const problem = done ? null : rowProblem(row, e, buckets);
+                  const problem = done ? null : rowProblem(row, e, buckets, printers);
                   const sharedBy = (buckets.get(bucketOf(row))?.rows ?? 1) - 1;
                   const scale = row.toProduce > 0 ? toProduce / row.toProduce : 0;
                   return (

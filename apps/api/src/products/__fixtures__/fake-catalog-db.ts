@@ -47,7 +47,7 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
   componentMaterial: { material: one('material', 'materialId'), component: one('productComponent', 'componentId') },
   productColourSlot: { assignments: many('colourOptionSlot', 'colourSlotId') },
   colourOptionSlot: { material: one('material', 'materialId'), variant: one('productVariant', 'variantId'), colourSlot: one('productColourSlot', 'colourSlotId') },
-  plateLayout: { slots: many('plateLayoutSlot', 'layoutId'), component: one('productComponent', 'componentId') },
+  plateLayout: { slots: many('plateLayoutSlot', 'layoutId'), component: one('productComponent', 'componentId'), printer: one('printer', 'printerId') },
   jobPlate: { job: one('productionJob', 'jobId') },
   productPart: { part: one('part', 'partId'), product: one('product', 'productId') },
   orderItem: { order: one('order', 'orderId'), productionJobs: many('productionJob', 'orderItemId') },

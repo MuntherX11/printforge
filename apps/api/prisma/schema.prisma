@@ -1158,6 +1158,7 @@ model SliceRun {
   filamentMap    Json
   status         SliceRunStatus   @default(QUEUED)
   error          String?
+  errorDetail    String? // the slicer's raw output behind `error` (shown under Details)
   resultLayoutId String?
   resultLayout   PlateLayout?     @relation(fields: [resultLayoutId], references: [id], onDelete: SetNull)
   startedAt      DateTime?

@@ -48,7 +48,7 @@ export function ProductFoldedLayout({ data, product, scope, readiness, facts, pr
   const reloadCost = () => void data.reloadCost();
   const r = readiness.data;
   const summary: Record<SectionId, string> = {
-    make: r ? verdictOf(r).brief : readiness.error ? 'Couldn\'t check' : 'Checking…',
+    make: readiness.noParts ? 'No parts yet' : r ? verdictOf(r).brief : readiness.error ? 'Couldn\'t check' : 'Checking…',
     parts: partsSummary(componentsInScope(product, scope.bomScope)),
     options: optionsSummary(product),
     pricing: pricingSummary(facts, formatCurrency, pricingAttention),

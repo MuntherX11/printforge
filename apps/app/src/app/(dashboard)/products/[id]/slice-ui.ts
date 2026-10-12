@@ -9,6 +9,8 @@ import {
   SliceErrorCode,
   SliceRunStatus,
   SourceModelKind,
+  runFailureParts,
+  visibleRuns,
   type ComponentSourceModel,
   type SliceRequestDto,
   type SliceRunDto,
@@ -52,9 +54,22 @@ export function sliceErrorText(err: unknown, fallback = 'Slicing failed'): strin
 }
 
 /** The sentence under a failed run: the code mapped, or the reason the API wrote. */
-export function runErrorText(run: Pick<SliceRunDto, 'error'>): string {
-  return sliceErrorText(run.error ?? '', 'Slicing failed');
+export function runErrorText(run: Pick<SliceRunDto, 'error' | 'errorDetail'>): string {
+  return runFailure(run).text;
 }
+
+/**
+ * A failed run as its row shows it: one sentence, and the slicer's raw output
+ * for the Details toggle when there is any. A row from before v2.18.2, whose
+ * `error` is that raw output, reads as the generic sentence (runFailureParts).
+ */
+export function runFailure(run: Pick<SliceRunDto, 'error' | 'errorDetail'>): { text: string; detail: string | null } {
+  const { sentence, detail } = runFailureParts(run);
+  return { text: sentence ?? sliceErrorText(run.error ?? '', 'Slicing failed'), detail };
+}
+
+// The runs a part's list shows (a failure overcome by a later DONE run on the printer is left out; 5 at most).
+export { visibleRuns };
 
 export const RUN_POLL_MS = 3000;
 
@@ -69,10 +84,15 @@ export function anyActiveRun(runs: ReadonlyArray<Pick<SliceRunDto, 'status'>> | 
 /** What a closed part row says about the part's slicing: nothing, "Slicing…" or "Slice failed". */
 export type PartSliceState = 'slicing' | 'failed';
 
-/** From the part's runs, newest first: slicing while any is queued or running, failed when the newest failed. */
-export function partSliceStateOf(runs: ReadonlyArray<Pick<SliceRunDto, 'status'>>): PartSliceState | null {
+/**
+ * From the part's runs: slicing while any is queued or running, failed when the
+ * newest run the list shows failed. A failure that a later DONE run on the
+ * printer overcame, or that was dismissed, is not in that list (visibleRuns),
+ * so it leaves no chip.
+ */
+export function partSliceStateOf(runs: ReadonlyArray<Pick<SliceRunDto, 'componentId' | 'printerId' | 'status' | 'createdAt'>>): PartSliceState | null {
   if (runs.some(isActiveRun)) return 'slicing';
-  return runs[0]?.status === SliceRunStatus.FAILED ? 'failed' : null;
+  return visibleRuns(runs)[0]?.status === SliceRunStatus.FAILED ? 'failed' : null;
 }
 
 export function partSliceChip(state: PartSliceState): RunStatusChip {

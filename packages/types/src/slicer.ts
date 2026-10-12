@@ -170,7 +170,10 @@ export interface SliceRunDto {
   unitsSliced: number | null;
   filamentMap: SliceFilamentMap;
   status: SliceRunStatus;
+  /** FAILED: one plain sentence for the staff. */
   error: string | null;
+  /** FAILED: the slicer's raw output behind `error`, when there is any. */
+  errorDetail: string | null;
   resultLayoutId: string | null;
   createdAt: string;
   startedAt: string | null;
@@ -203,3 +206,48 @@ export const SliceErrorCode = {
   NO_OBJECTS: 'NO_OBJECTS',
 } as const;
 export type SliceErrorCode = (typeof SliceErrorCode)[keyof typeof SliceErrorCode];
+
+// ---------- The run list of a part (pure; shared by the product page) ----------
+
+/** What rows written before v2.18.2 hold in `error` when OrcaSlicer itself failed: the raw output. */
+export const RAW_SLICER_FAILED_PREFIX = 'SLICER_FAILED:';
+export const GENERIC_SLICER_FAILURE = 'The slicer stopped with an error';
+/** Most runs a part's list shows. */
+export const VISIBLE_RUNS_MAX = 5;
+
+/**
+ * A failed run as the staff reads it. `sentence` is null when `error` is
+ * already a sentence (or a code the page maps); an old row whose `error` is
+ * the slicer's raw output reads as the generic sentence with that output as
+ * the detail.
+ */
+export function runFailureParts(run: Pick<SliceRunDto, 'error' | 'errorDetail'>): { sentence: string | null; detail: string | null } {
+  const error = (run.error ?? '').trim();
+  const detail = (run.errorDetail ?? '').trim() || null;
+  if (!error.startsWith(RAW_SLICER_FAILED_PREFIX)) return { sentence: null, detail };
+  const raw = error.slice(RAW_SLICER_FAILED_PREFIX.length).trim();
+  return { sentence: GENERIC_SLICER_FAILURE, detail: detail ?? (raw || null) };
+}
+
+const timeOf = (iso: string): number => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+};
+
+/**
+ * The runs a part's list shows, newest first: a FAILED run is left out once a
+ * later run on the same printer is DONE (the failure was overcome), and at
+ * most `max` runs stay. Runs of one part are expected; a run of another part
+ * never hides anything.
+ */
+export function visibleRuns<T extends Pick<SliceRunDto, 'componentId' | 'printerId' | 'status' | 'createdAt'>>(
+  runs: ReadonlyArray<T>, max: number = VISIBLE_RUNS_MAX,
+): T[] {
+  const done = runs.filter((r) => r.status === SliceRunStatus.DONE);
+  const superseded = (r: T) => r.status === SliceRunStatus.FAILED
+    && done.some((d) => d.componentId === r.componentId && d.printerId === r.printerId && timeOf(d.createdAt) > timeOf(r.createdAt));
+  return runs
+    .filter((r) => !superseded(r))
+    .sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt))
+    .slice(0, Math.max(0, max));
+}

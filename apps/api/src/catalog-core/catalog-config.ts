@@ -41,6 +41,9 @@ export interface LayoutRow {
   createdAt: Date;
   updatedAt: Date;
   slots: Array<{ colorIndex: number; gramsUsed: number }>;
+  /** SLICED layouts: the printer it was sliced for. Absent or null = prints on any printer. */
+  printerId?: string | null;
+  printerName?: string | null;
 }
 
 export interface ComponentSlotRow {
@@ -128,7 +131,7 @@ export const PRODUCT_CONFIG_INCLUDE = {
     include: {
       material: true,
       materials: { include: { material: true } },
-      plateLayouts: { include: { slots: true } },
+      plateLayouts: { include: { slots: true, printer: { select: { id: true, name: true } } } },
       colourStock: true,
     },
   },
@@ -206,6 +209,8 @@ export function toProductConfig(row: any): ProductConfig {
         createdAt: l.createdAt ?? new Date(0),
         updatedAt: l.updatedAt ?? l.createdAt ?? new Date(0),
         slots: (l.slots ?? []).map((s: any) => ({ colorIndex: s.colorIndex, gramsUsed: Number(s.gramsUsed) })),
+        // Only sliced layouts carry a printer; every other layout stays as it was (no key at all).
+        ...(l.printerId ? { printerId: l.printerId as string, printerName: (l.printer?.name ?? null) as string | null } : {}),
       })),
       colourStock: (c.colourStock ?? []).map((s: any) => ({ colourKey: s.colourKey, stockOnHand: Number(s.stockOnHand) })),
     };

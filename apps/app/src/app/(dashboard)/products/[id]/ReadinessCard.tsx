@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
+import { NO_PARTS_YET } from '@printforge/types';
 import { Factory } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { policyLabel, plural } from '@/lib/product-format';
@@ -47,7 +48,7 @@ function useDetailsToggle(): [boolean, () => void] {
  * job are always shown.
  */
 export function MakeItBody({ product, readiness, canEdit, printerOf, onCreateJob, title }: Props) {
-  const { options, pair, qtyText, setQtyText, qty, data: r, error, loading } = readiness;
+  const { options, pair, qtyText, setQtyText, qty, data: r, error, loading, noParts } = readiness;
   const [details, toggleDetails] = useDetailsToggle();
   const qtyId = useId();
   const detailsId = useId();
@@ -76,19 +77,21 @@ export function MakeItBody({ product, readiness, canEdit, printerOf, onCreateJob
           </div>
         </div>
         <div className="flex min-h-[40px] min-w-[12rem] flex-1 items-center" aria-live="polite">
-          {verdict && <Pill tone={verdict.tone}>{verdict.text}</Pill>}
-          {!r && !error && <span className="text-sm text-gray-500 dark:text-gray-400">Checking…</span>}
+          {noParts && <span className="text-sm text-gray-600 dark:text-gray-400">{NO_PARTS_YET}</span>}
+          {!noParts && verdict && <Pill tone={verdict.tone}>{verdict.text}</Pill>}
+          {!noParts && !r && !error && <span className="text-sm text-gray-500 dark:text-gray-400">Checking…</span>}
         </div>
         {canEdit && qty !== null && (
-          <Button variant="outline" className="ml-auto" onClick={() => onCreateJob({ sizeKey: pair.sizeKey, colourKey: pair.colourKey, quantity: qty })}>
+          <Button variant="outline" className="ml-auto" disabled={noParts} title={noParts ? 'Add a part first' : undefined}
+            onClick={() => onCreateJob({ sizeKey: pair.sizeKey, colourKey: pair.colourKey, quantity: qty })}>
             <Factory className="mr-2 h-4 w-4" aria-hidden="true" /> Create job
           </Button>
         )}
       </div>
       {qty === null && <p className="text-xs text-red-600 dark:text-red-400">Whole number from 1 to 100,000</p>}
-      {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && !noParts && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {r && plan && (
+      {r && plan && !noParts && (
         <div className={loading ? 'space-y-3 opacity-60' : 'space-y-3'}>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
             <span>{planLine(r, printerOf)}</span>

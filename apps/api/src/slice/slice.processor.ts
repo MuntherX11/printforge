@@ -12,7 +12,7 @@ import { GRAMS, MINUTES } from '../products/product-input';
 import { containedUploadPath } from '../products/product-images.service';
 import { SlicerProfilesService } from '../slicer-profiles/slicer-profiles.service';
 import { EventsGateway } from '../websocket/events.gateway';
-import { SidecarSliceClient, type SidecarFilament, type SidecarSliceRequest } from './sidecar-slice.client';
+import { SidecarSliceClient, sidecarFailure, type SidecarFilament, type SidecarSliceRequest } from './sidecar-slice.client';
 import { filamentMapOf } from './slice.service';
 
 /**
@@ -36,6 +36,9 @@ import { filamentMapOf } from './slice.service';
  * Project parts may have several bodies per unit, so their unit count is the
  * label count divided by the validation run's (bodies-per-unit rule).
  *
+ * A failed run stores one plain sentence in `error`; when the slicer itself
+ * failed, its raw output goes to `errorDetail` (the UI shows it under Details).
+ *
  * On boot, RUNNING rows left by the previous process go back to QUEUED. Ticks
  * never overlap (re-entrancy flag). Every status change is broadcast as the
  * `slice-run` websocket event.
@@ -57,7 +60,8 @@ type Run = {
 };
 
 class RunFailed extends Error {
-  constructor(public readonly code: string, message: string) {
+  /** `code` null: the message is the whole `error` (a sidecar failure, see sidecarFailure). */
+  constructor(public readonly code: string | null, message: string, public readonly detail: string | null = null) {
     super(message);
   }
 }
@@ -149,15 +153,15 @@ export class SliceProcessor implements OnModuleInit {
     try {
       const result = await this.slice(run);
       await this.prisma.sliceRun.update({
-        where: { id }, data: { status: 'DONE', unitsSliced: result.unitsSliced, resultLayoutId: result.layoutId, error: null, finishedAt: new Date() },
+        where: { id }, data: { status: 'DONE', unitsSliced: result.unitsSliced, resultLayoutId: result.layoutId, error: null, errorDetail: null, finishedAt: new Date() },
       });
       this.logger.log(`Slice run ${id}: ${run.component?.description} x${result.unitsSliced} done`);
       this.broadcast({ id, componentId: run.componentId, productId, status: 'DONE', resultLayoutId: result.layoutId, error: null, unitsSliced: result.unitsSliced });
     } catch (e) {
       const failed = e instanceof RunFailed ? e : new RunFailed('SLICE_FAILED', (e as Error)?.message || 'Slicing failed');
       if (!(e instanceof RunFailed)) this.logger.error(`Slice run ${id} crashed: ${failed.message}`, (e as Error)?.stack);
-      const error = `${failed.code}: ${failed.message}`.slice(0, 1000);
-      await this.prisma.sliceRun.update({ where: { id }, data: { status: 'FAILED', error, finishedAt: new Date() } }).catch(() => undefined);
+      const error = (failed.code ? `${failed.code}: ${failed.message}` : failed.message).slice(0, 1000);
+      await this.prisma.sliceRun.update({ where: { id }, data: { status: 'FAILED', error, errorDetail: failed.detail, finishedAt: new Date() } }).catch(() => undefined);
       this.broadcast({ id, componentId: run.componentId, productId, status: 'FAILED', resultLayoutId: null, error });
     }
   }
@@ -202,7 +206,11 @@ export class SliceProcessor implements OnModuleInit {
       machine: { raw: machine }, ...(process ? { process: { raw: process } } : {}), filaments, siblings,
     };
     const out = await this.sidecar.slice(req);
-    if (!out.ok) throw new RunFailed(out.code, out.logTail ? `${out.message} — ${out.logTail.split('\n').slice(-3).join(' | ')}` : out.message);
+    if (!out.ok) {
+      const failure = sidecarFailure(out);
+      this.logger.warn(`Slice run ${run.id}: the slicer failed (${out.code}, exit ${out.exitCode ?? 'none'}): ${out.message}`);
+      throw new RunFailed(null, failure.error, failure.detail);
+    }
 
     const a = this.gcodeParser.parseHeader(out.gcode);
     const labels = a.objectCount;

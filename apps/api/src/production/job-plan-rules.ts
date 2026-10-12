@@ -3,6 +3,8 @@ import { PLANNABLE_ORDER_STATUSES, type PlanRow, type Problem, type SurplusPolic
 import { createHash } from 'crypto';
 import type { ResolvedBom, ResolvedComponent } from '../catalog-core/bom-resolver.service';
 import type { CatalogRequestContext } from '../catalog-core/catalog-context';
+import type { PrinterScope } from '../catalog-core/job-plate-suggestion';
+import type { PlannerLayout } from '../catalog-core/plate-planner';
 import { planFromBom, type OptionPlan } from '../catalog-core/production-planner.service';
 import { colourLabel } from '../stock-ledger/colour-key';
 import { PlatePrinterLookup } from './plate-printers';
@@ -30,7 +32,19 @@ export function assertPlannable(status: string) {
 /** One printed-stock balance: rows of different lines that resolve to it share it. */
 export const bucketOf = (componentId: string, colourKey: string) => `${componentId}|${colourKey}`;
 
-export function planComponent(component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy, plates?: Array<{ layoutId: string | null; plateCount: number }>): OptionPlan {
+/** The printer keys of a layout or plate DTO: only when the plate was sliced for a printer. */
+export const printerFields = (l: PlannerLayout): { printerId?: string; printerName?: string | null } =>
+  (l.printerId ? { printerId: l.printerId, printerName: l.printerName ?? null } : {});
+
+/** The product's default (pricing) printer, as the planner's preferred printer. */
+export const defaultPrinterOf = (config: { printer: { id: string; name: string } | null }): PrinterScope | null =>
+  (config.printer ? { id: config.printer.id, name: config.printer.name } : null);
+
+export function planComponent(
+  component: ResolvedComponent, R: number, cacheBom: ResolvedBom, config: any, ctx: CatalogRequestContext, policy: SurplusPolicy,
+  plates?: Array<{ layoutId: string | null; plateCount: number }>,
+  printers: { printer?: PrinterScope | null; preferPrinter?: PrinterScope | null } = {},
+): OptionPlan {
   const bom = { ...cacheBom, components: [component] };
   return planFromBom(
     bom,
@@ -39,6 +53,7 @@ export function planComponent(component: ResolvedComponent, R: number, cacheBom:
       unitsRequired: { [component.componentId]: R },
       surplusPolicy: policy,
       plates: plates?.map((p) => ({ componentId: component.componentId, layoutId: p.layoutId, plateCount: p.plateCount })),
+      ...printers,
     },
     config.materials,
     ctx.planCache,

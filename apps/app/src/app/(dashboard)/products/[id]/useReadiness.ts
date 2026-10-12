@@ -20,6 +20,8 @@ export interface ReadinessState {
   data: Readiness | null;
   error: string | null;
   loading: boolean;
+  /** No sizes and no parts: nothing to check or make yet (the check is not sent). */
+  noParts: boolean;
 }
 
 /**
@@ -34,8 +36,10 @@ export function useReadiness(product: ProductDetail, costVersion: string | null)
   const [state, setState] = useState<{ data: Readiness | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true });
   const qty = parseWhole(qtyText, 1, MAX_READINESS_QTY);
   const productId = product.id;
+  const noParts = !options.hasSizes && product.components.length === 0;
 
   useEffect(() => {
+    if (noParts) { setState({ data: null, error: null, loading: false }); return; }
     if (qty === null) return;
     let live = true;
     setState(s => ({ ...s, loading: true }));
@@ -46,7 +50,7 @@ export function useReadiness(product: ProductDetail, costVersion: string | null)
         .catch(err => { if (live) setState({ data: null, error: errorText(err, 'Couldn\'t check readiness'), loading: false }); });
     }, 300);
     return () => { live = false; window.clearTimeout(t); };
-  }, [productId, pair.sizeKey, pair.colourKey, qty, costVersion]);
+  }, [productId, pair.sizeKey, pair.colourKey, qty, costVersion, noParts]);
 
-  return { options, pair, qtyText, setQtyText, qty, data: state.data, error: state.error, loading: state.loading };
+  return { options, pair, qtyText, setQtyText, qty, data: state.data, error: state.error, loading: state.loading, noParts };
 }

@@ -4,6 +4,10 @@
  * and the slicer drops what does not fit — slow when only 15 do. Once a run on
  * the same printer has come back with fewer units than it was asked for, the
  * plate's capacity is known: ask for that many plus a small margin instead.
+ * Before any such run, the footprint of the part's own sliced x1 file gives an
+ * estimate (file-parser/plate-footprint.ts), so the first fill is not 100 either.
+ *
+ * Order: previous fill count (+2), else the footprint estimate, else 100.
  *
  * Pure: the caller passes the part's DONE runs on the printer, newest first.
  */
@@ -23,7 +27,16 @@ function hitCapacity(r: PastRun): r is { unitsRequested: number; unitsSliced: nu
   return typeof sliced === 'number' && Number.isInteger(sliced) && sliced > 0 && r.unitsRequested > 1 && sliced < r.unitsRequested;
 }
 
-export function projectFillUnits(doneRuns: ReadonlyArray<PastRun>): number {
+/** What an earlier run showed fits, plus the margin; null when no run has hit the plate's capacity. */
+export function pastFillUnits(doneRuns: ReadonlyArray<PastRun>): number | null {
   const full = doneRuns.find(hitCapacity);
-  return full ? Math.min(PROJECT_FILL_UNITS, full.unitsSliced + PROJECT_FILL_MARGIN) : PROJECT_FILL_UNITS;
+  return full ? Math.min(PROJECT_FILL_UNITS, full.unitsSliced + PROJECT_FILL_MARGIN) : null;
+}
+
+/** `estimate`: copies from the x1 file's footprint; null (or not a whole number from 1) when there is none. */
+export function projectFillUnits(doneRuns: ReadonlyArray<PastRun>, estimate: number | null = null): number {
+  const past = pastFillUnits(doneRuns);
+  if (past !== null) return past;
+  if (typeof estimate === 'number' && Number.isInteger(estimate) && estimate >= 1) return Math.min(PROJECT_FILL_UNITS, estimate);
+  return PROJECT_FILL_UNITS;
 }

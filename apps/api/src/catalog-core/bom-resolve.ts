@@ -135,18 +135,25 @@ function layoutsOf(c: ComponentRow, desc: string, slots: ResolvedSlot[], minutes
   const slotIdx = slots.map((s) => s.colorIndex).sort((a, b) => a - b);
   const slotSum = slots.reduce((s, x) => s + x.gramsPerUnit, 0);
   const active = c.layouts.filter((l) => l.isActive);
-  // Dedupe: one per unitsPerPlate, keeping the lowest minutes/unit, then sortOrder, then oldest.
-  const best = new Map<number, (typeof active)[number]>();
+  // Dedupe: one per unitsPerPlate and printer (a plate sliced for one printer never
+  // hides the same size sliced for another), keeping the lowest minutes/unit, then
+  // sortOrder, then oldest.
+  type Row = (typeof active)[number];
+  const beats = (l: Row, prev: Row) => l.plateMinutes / l.unitsPerPlate < prev.plateMinutes / prev.unitsPerPlate
+    || (l.plateMinutes / l.unitsPerPlate === prev.plateMinutes / prev.unitsPerPlate
+      && (l.sortOrder < prev.sortOrder || (l.sortOrder === prev.sortOrder && new Date(l.createdAt).getTime() < new Date(prev.createdAt).getTime())));
+  const best = new Map<string, Row>();
   for (const l of active) {
-    const prev = best.get(l.unitsPerPlate);
-    const better = !prev
-      || l.plateMinutes / l.unitsPerPlate < prev.plateMinutes / prev.unitsPerPlate
-      || (l.plateMinutes / l.unitsPerPlate === prev.plateMinutes / prev.unitsPerPlate
-        && (l.sortOrder < prev.sortOrder || (l.sortOrder === prev.sortOrder && new Date(l.createdAt).getTime() < new Date(prev.createdAt).getTime())));
-    if (better) best.set(l.unitsPerPlate, l);
+    const key = `${l.unitsPerPlate}|${l.printerId ?? ''}`;
+    const prev = best.get(key);
+    if (!prev || beats(l, prev)) best.set(key, l);
   }
+  // Per size the winner of the old one-per-size rule comes first, so the planners that
+  // keep one layout per size (bulk prices, the price floor) pick the layout they always did.
+  const kept = [...best.values()];
+  kept.sort((a, b) => b.unitsPerPlate - a.unitsPerPlate || (beats(a, b) ? -1 : beats(b, a) ? 1 : 0));
   const out: ResolvedLayout[] = [];
-  for (const l of best.values()) {
+  for (const l of kept) {
     const rowIdx = l.slots.map((s) => s.colorIndex).sort((a, b) => a - b);
     const same = rowIdx.length === slotIdx.length && rowIdx.every((v, i) => v === slotIdx[i]);
     const slotGrams = new Map<number, number>();
@@ -160,9 +167,10 @@ function layoutsOf(c: ComponentRow, desc: string, slots: ResolvedSlot[], minutes
     out.push({
       layoutId: l.id, label: `${desc} ${l.name}`, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes,
       plateGrams: l.plateGrams, slotGrams, attachmentId: l.attachmentId, gcodeFilename: l.gcodeFilename, colorChanges: l.colorChanges,
+      ...(l.printerId ? { printerId: l.printerId, printerName: l.printerName ?? null } : {}),
     });
   }
-  if (minutesPerUnit > 0 && gramsPerUnit > 0 && !best.has(1)) {
+  if (minutesPerUnit > 0 && gramsPerUnit > 0 && !kept.some((l) => l.unitsPerPlate === 1)) {
     out.push({
       layoutId: null, label: `${desc} single`, unitsPerPlate: 1, plateMinutes: minutesPerUnit, plateGrams: gramsPerUnit,
       slotGrams: new Map(slots.map((s) => [s.colorIndex, s.gramsPerUnit])),

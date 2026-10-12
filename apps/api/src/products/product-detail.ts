@@ -141,6 +141,7 @@ function componentDetail(
     layouts: layouts.filter((l: any) => l.isActive !== false).map((l: any) => ({
       id: l.id, name: l.name ?? `×${l.unitsPerPlate}`, unitsPerPlate: l.unitsPerPlate, plateMinutes: l.plateMinutes, plateGrams: l.plateGrams,
       source: l.source ?? 'MANUAL', attachmentId: l.attachmentId ?? null,
+      printerId: l.printerId ?? null, printerName: l.printerId ? row.layouts.find((x) => x.id === l.id)?.printerName ?? null : null,
     })),
     files: layoutFiles,
     listPrice: pricing.listPrice,

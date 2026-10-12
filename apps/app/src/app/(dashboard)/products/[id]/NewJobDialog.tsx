@@ -52,7 +52,8 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
   const [stockMode, setStockMode] = useState<JobStockMode | ''>('');
   const [policy, setPolicy] = useState<SurplusPolicy>(product.surplusPolicy);
   const [printerId, setPrinterId] = useState('');
-  // Until the user picks a printer, it follows the printer the plates' files were sliced for.
+  // Until the user picks a printer, it follows the printer the suggested plates were sliced for.
+  // Once picked, the preview is asked for that printer, so the suggested plates follow it.
   const [printerPicked, setPrinterPicked] = useState(false);
   const [printers, setPrinters] = useState<ApiPrinter[]>([]);
   const [printersError, setPrintersError] = useState(false);
@@ -107,19 +108,21 @@ export function NewJobDialog({ product, prefill, loadPrinters, onClose }: Props)
     ...(purpose === 'CUSTOMER' && stockMode ? { stockMode } : {}),
     ...(platesBody ? { plates: platesBody } : {}),
   };
-  const bodyKey = JSON.stringify({ ...common, qty });
+  // null = "No printer"; left out until a printer is picked (the server then prefers the pricing printer).
+  const previewPrinter = printerPicked ? { printerId: printerId || null } : {};
+  const bodyKey = JSON.stringify({ ...common, ...previewPrinter, qty });
 
   useEffect(() => {
     if (!open || qty === null || editedProblem) return;
     let live = true;
     setPreview(s => ({ ...s, loading: true }));
     const t = window.setTimeout(() => {
-      api.post<JobPreview>('/jobs/preview', { ...common, quantity: qty })
+      api.post<JobPreview>('/jobs/preview', { ...common, ...previewPrinter, quantity: qty })
         .then(data => { if (live) setPreview({ data, error: null, loading: false }); })
         .catch(err => { if (live) setPreview(s => ({ data: s.data, error: errorText(err, 'Couldn\'t preview the job'), loading: false })); });
     }, 400);
     return () => { live = false; window.clearTimeout(t); };
-    // `common` is captured through bodyKey.
+    // `common` and the printer are captured through bodyKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bodyKey, editedProblem]);
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useId } from 'react';
-import { ChevronRight, Download, Package } from 'lucide-react';
+import { ChevronRight, Package } from 'lucide-react';
 import { filamentInStock, filamentLabel, plateLinkLabel } from '@printforge/types';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -40,6 +40,8 @@ interface Props {
   onLayouts: () => void;
   onEditLinks: (focus: ColourLinksFocus) => void;
   onReload: () => void;
+  /** A slice run of the part was cancelled or dismissed: its chip is settled again. */
+  onRunRemoved: () => void;
   /** Grams in stock per filament id (GET /materials/stock); null hides the note. */
   stock: ReadonlyMap<string, FilamentStockRow> | null;
   /** Opens the filament picker for one colour slot. */
@@ -176,7 +178,7 @@ export function PartRow(props: Props) {
           </ul>
 
           <PlateList productId={product.id} component={c} canEdit={canEdit} isAdmin={isAdmin} printers={props.printers}
-            runsKey={props.runsKey} showCosts={props.showCosts} onChanged={props.onReload} onSlice={props.onSlice} />
+            runsKey={props.runsKey} showCosts={props.showCosts} onChanged={props.onReload} onRunRemoved={props.onRunRemoved} onSlice={props.onSlice} />
 
           <div className="flex flex-wrap items-start gap-x-6 gap-y-2 text-sm">
             <div className="flex flex-wrap items-start gap-2">
@@ -192,13 +194,7 @@ export function PartRow(props: Props) {
                 </span>
               )}
               {c.file ? (
-                <span>
-                  {c.colorChanges > 0 ? plural(c.colorChanges, 'colour change') : 'No colour changes'}
-                  {' · '}
-                  <a href={c.file.downloadUrl} download className="inline-flex items-center gap-1 rounded font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-brand-400">
-                    <Download className="h-3.5 w-3.5" aria-hidden="true" /> Download the ×1 file
-                  </a>
-                </span>
+                <span>{c.colorChanges > 0 ? plural(c.colorChanges, 'colour change') : 'No colour changes'}</span>
               ) : (
                 <span title="Imported without a file. Re-import from a sliced 3MF or G-code">No ×1 file</span>
               )}

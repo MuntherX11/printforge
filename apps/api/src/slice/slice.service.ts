@@ -1,13 +1,14 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { fillPlateEstimate, SliceErrorCode, type SliceFilamentMap, type SliceRunDto, type SlotKey } from '@printforge/types';
+import { fillPlateEstimate, printableAreaSize, SliceErrorCode, type SliceFilamentMap, type SliceRunDto, type SlotKey } from '@printforge/types';
 import * as fs from 'fs/promises';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { readPlateFootprint } from '../file-parser/plate-footprint';
 import { matchPrinter } from '../file-parser/printer-match';
 import { StlEstimatorService } from '../file-parser/stl-estimator.service';
 import { containedUploadPath } from '../products/product-images.service';
 import { sourceMetaOf, type SourceMeta } from '../products/product-sources';
 import { SlicerProfilesService } from '../slicer-profiles/slicer-profiles.service';
-import { PROJECT_FILL_UNITS, projectFillUnits } from './fill-units';
+import { PROJECT_FILL_UNITS, pastFillUnits, projectFillUnits } from './fill-units';
 import { parseSliceRequest } from './slice-request';
 
 /**
@@ -20,8 +21,9 @@ import { parseSliceRequest } from './slice-request';
  * A project (3MF) part is locked to the printer the project names and slices
  * with the project's own process (plan D14-A); an STL part takes the printer
  * asked for, else the product's pricing printer. "Fill the plate" is the
- * bounding-box estimate for an STL; for a project it is 100, or what an earlier
- * run on the printer showed fits plus 2 (D12, fill-units.ts).
+ * bounding-box estimate for an STL; for a project it is what an earlier run on
+ * the printer showed fits plus 2, else an estimate from the footprint of the
+ * part's sliced x1 file, else 100 (D12, fill-units.ts).
  */
 
 export { PROJECT_FILL_UNITS };
@@ -49,6 +51,7 @@ export function toRunDto(row: any): SliceRunDto {
     filamentMap: filamentMapOf(row.filamentMap),
     status: row.status,
     error: row.error ?? null,
+    errorDetail: row.errorDetail ?? null,
     resultLayoutId: row.resultLayoutId ?? null,
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
@@ -104,7 +107,7 @@ export class SliceService {
       materialFor: (key) => input.materials[key] ?? ownMaterial(key),
     });
 
-    const units = input.fill ? await this.fillUnits(isProject, source, machine, componentId, printer.id) : input.units!;
+    const units = input.fill ? await this.fillUnits(isProject, source, machine, componentId, printer.id, comp.attachmentId ?? null) : input.units!;
 
     const pending = await this.prisma.sliceRun.findMany({
       where: { componentId, printerId: printer.id, unitsRequested: units, status: { in: ['QUEUED', 'RUNNING'] } },
@@ -183,10 +186,12 @@ export class SliceService {
 
   /**
    * D12: copies from the STL's footprint and the machine's bed. A project asks
-   * for 100, or for what an earlier run of this source on the printer showed fits.
+   * for what an earlier run of this source on the printer showed fits, else for
+   * the estimate from its sliced x1 file, else for 100.
    */
   private async fillUnits(
     isProject: boolean, source: { storagePath: string; createdAt?: Date | null }, machine: Record<string, unknown>, componentId: string, printerId: string,
+    ownFileAttachmentId: string | null,
   ): Promise<number> {
     if (isProject) {
       const done = await this.prisma.sliceRun.findMany({
@@ -196,7 +201,8 @@ export class SliceService {
         take: RUN_LIST_LIMIT,
         select: { unitsRequested: true, unitsSliced: true },
       });
-      return projectFillUnits(done);
+      if (pastFillUnits(done) !== null) return projectFillUnits(done);
+      return projectFillUnits(done, await this.footprintEstimate(ownFileAttachmentId, machine));
     }
     const abs = containedUploadPath(source.storagePath);
     if (!abs) return 1;
@@ -211,6 +217,26 @@ export class SliceService {
     return fillPlateEstimate({ x: bbox.x, y: bbox.y }, Array.isArray(area) ? (area as string[]) : []);
   }
 
+  /**
+   * Copies of one unit that fit the bed, from the object polygons of the part's
+   * sliced x1 file (and the bed that file names, else the machine profile's).
+   * Null when the part has no x1 file or it cannot be read that way.
+   */
+  private async footprintEstimate(attachmentId: string | null, machine: Record<string, unknown>): Promise<number | null> {
+    if (!attachmentId) return null;
+    try {
+      const file = await this.prisma.attachment.findUnique({ where: { id: attachmentId }, select: { storagePath: true } });
+      const abs = file ? containedUploadPath(file.storagePath) : null;
+      const footprint = abs ? await readPlateFootprint(abs) : null;
+      if (!footprint?.bbox) return null;
+      const machineArea = Array.isArray(machine.printable_area) ? (machine.printable_area as string[]) : [];
+      const area = [footprint.printableArea, machineArea].find((a) => a && printableAreaSize(a));
+      return area ? fillPlateEstimate(footprint.bbox, area, { cap: PROJECT_FILL_UNITS }) : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** The part's last 20 runs, newest first. */
   async list(productId: string, componentId: string): Promise<SliceRunDto[]> {
     await this.owned(productId, componentId);
@@ -218,11 +244,14 @@ export class SliceService {
     return rows.map(toRunDto);
   }
 
-  /** A QUEUED run is dropped; anything else is 409 (the processor owns it). */
+  /**
+   * A QUEUED run is cancelled and a FAILED run dismissed: both are dropped.
+   * RUNNING (the processor owns it) and DONE (its plate exists) are 409.
+   */
   async cancel(id: string): Promise<{ deleted: true }> {
     const run = await this.prisma.sliceRun.findUnique({ where: { id }, select: { id: true, status: true } });
     if (!run) throw new NotFoundException('Slice run not found');
-    if (run.status !== 'QUEUED') throw new ConflictException(`A ${run.status.toLowerCase()} run can't be cancelled`);
+    if (run.status !== 'QUEUED' && run.status !== 'FAILED') throw new ConflictException(`A ${run.status.toLowerCase()} run can't be removed`);
     await this.prisma.sliceRun.delete({ where: { id } });
     return { deleted: true };
   }

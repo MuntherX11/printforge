@@ -5,9 +5,9 @@ import { colourLabel } from '../stock-ledger/colour-key';
 import { BomResolverService, type ResolvedBom, type ResolvedComponent } from './bom-resolver.service';
 import { CatalogRequestContext } from './catalog-context';
 import { computeLineProgress, type ProgressJob, type ProgressMovement } from './line-progress';
-import { noGcodeOnFile, suggestJobPlates } from './job-plate-suggestion';
+import { assertOnePrinter, noGcodeOnFile, noPlateSlicedFor, printerOfPlates, suggestJobPlan, type PrinterScope } from './job-plate-suggestion';
 import { partNotMeasured } from './bom-resolve';
-import { gramsForPlan, PlanCache, PlanError, unitsOf, validatePlan, type PlanEdit, type PlannedPlate } from './plate-planner';
+import { gramsForPlan, PlanCache, unitsOf, validatePlan, type PlanEdit, type PlannedPlate } from './plate-planner';
 import { pickSpools, type SpoolRow } from './spool-picker';
 
 /**
@@ -25,6 +25,10 @@ export interface PlanOptionInput extends OptionPair {
   fromStock?: Record<string, number>;
   /** per-component units required, overriding component.quantity × quantity (remaining units) */
   unitsRequired?: Record<string, number>;
+  /** the job's printer: only its plates and the printer-agnostic ones; null or absent = none chosen */
+  printer?: PrinterScope | null;
+  /** with no printer chosen: planned for when it has a plate with a file for every part (the default printer) */
+  preferPrinter?: PrinterScope | null;
 }
 
 export interface PlannedSlot {
@@ -69,6 +73,8 @@ export interface OptionPlan {
   totalMinutes: number;
   problems: Problem[];
   warnings: Problem[];
+  /** the printer the plates were sliced for; null when every plate prints on any printer (never two) */
+  planPrinter: PrinterScope | null;
 }
 
 export interface FreeFilament {
@@ -92,26 +98,45 @@ export function planFromBom(
   const needs = new Map<string, FilamentNeed>();
   let totalMinutes = 0;
 
-  for (const c of bom.components) {
+  const rows = bom.components.map((c) => {
     const fromStock = Math.max(0, input.fromStock?.[c.componentId] ?? 0);
     const base = input.unitsRequired?.[c.componentId] ?? c.quantity * input.quantity;
-    const R = Math.max(0, base - fromStock);
+    const edits = c.pendingFirstSlice ? [] : input.plates?.filter((p) => p.componentId === c.componentId) ?? [];
+    return { c, fromStock, R: Math.max(0, base - fromStock), edits };
+  });
+  // Plates chosen by hand first: they fix the job's printer for the parts that are suggested.
+  const chosen = new Map<string, PlannedPlate[]>();
+  for (const { c, R, edits } of rows) if (edits.length) chosen.set(c.componentId, validatePlan(c, R, edits));
+  const chosenPrinter = assertOnePrinter(rows.filter((r) => chosen.has(r.c.componentId)).map((r) => ({ description: r.c.description, plates: chosen.get(r.c.componentId)! })), input.printer);
+  const printer = input.printer ?? chosenPrinter;
+  // Plates with a print file first (owner spec 2026-10-02 item 4), never of two printers.
+  const suggested = suggestJobPlan(
+    rows.filter((r) => !r.c.pendingFirstSlice && !chosen.has(r.c.componentId)).map((r) => ({ key: r.c.componentId, units: r.R, layouts: r.c.layouts })),
+    printer ? { printer } : { prefer: input.preferPrinter },
+    cache,
+  );
+
+  for (const { c, fromStock, R, edits } of rows) {
     let plates: PlannedPlate[] = [];
-    const edits = input.plates?.filter((p) => p.componentId === c.componentId);
     if (c.pendingFirstSlice) {
       // Not sliced yet: the problem the cost reports, never a plate from placeholder numbers.
       problems.push(partNotMeasured(c.componentId, c.description));
-    } else if (edits && edits.length) {
-      plates = validatePlan(c, R, edits);
+    } else if (edits.length) {
+      plates = chosen.get(c.componentId)!;
     } else {
-      try {
-        // Plates with a print file first (owner spec 2026-10-02 item 4).
-        const s = suggestJobPlates(R, c.layouts, cache);
-        plates = s.plates;
-        if (s.noFile) warnings.push({ code: 'NO_GCODE_ON_FILE', componentId: c.componentId, message: noGcodeOnFile(c.description) });
-      } catch (e) {
-        if (!(e instanceof PlanError)) throw e;
+      const s = suggested.parts.get(c.componentId);
+      if (!s) {
         problems.push({ code: 'NO_USABLE_LAYOUT', componentId: c.componentId, message: `"${c.description}" has no usable plate layout — slice it or enter its grams and minutes` });
+      } else if (s.blocked) {
+        // Its plates are all sliced for other printers: nothing this job's printer can print.
+        const message = s.missingFor ? noPlateSlicedFor(s.missingFor.name, c.description) : `"${c.description}" has no plate that prints on any printer`;
+        problems.push({ code: 'NO_PLATE_FOR_PRINTER', componentId: c.componentId, message });
+      } else {
+        plates = s.plates;
+        if (s.noFile) {
+          const message = s.missingFor ? noPlateSlicedFor(s.missingFor.name, c.description) : noGcodeOnFile(c.description);
+          warnings.push({ code: 'NO_GCODE_ON_FILE', componentId: c.componentId, message });
+        }
       }
     }
     const unitsPrinted = unitsOf(plates);
@@ -142,6 +167,7 @@ export function planFromBom(
     bom, quantity: input.quantity, surplusPolicy: input.surplusPolicy, components,
     filamentNeeds: [...needs.values()].filter((n) => n.grams > 0),
     totalMinutes, problems, warnings,
+    planPrinter: printerOfPlates(components.flatMap((c) => c.plates)),
   };
 }
 
@@ -290,10 +316,18 @@ export class ProductionPlannerService {
     productId: string,
     pair: OptionPair,
     qty: number,
-    opts: { surplusPolicy?: SurplusPolicy; plates?: PlanEdit[]; excludeOrderId?: string | null; ctx?: CatalogRequestContext } = {},
+    opts: {
+      surplusPolicy?: SurplusPolicy; plates?: PlanEdit[]; excludeOrderId?: string | null; ctx?: CatalogRequestContext;
+      /** the job's printer; null = "no printer" was chosen; absent = not chosen, so the product's default printer is preferred */
+      printer?: PrinterScope | null;
+    } = {},
   ): Promise<Readiness> {
     const ctx = opts.ctx ?? new CatalogRequestContext();
-    const plan = await this.planOption({ productId, ...pair, quantity: qty, surplusPolicy: opts.surplusPolicy, plates: opts.plates }, ctx);
+    const preferred = opts.printer === undefined ? (await this.resolver.requireConfig(productId, ctx)).printer : null;
+    const plan = await this.planOption({
+      productId, ...pair, quantity: qty, surplusPolicy: opts.surplusPolicy, plates: opts.plates,
+      printer: opts.printer ?? null, preferPrinter: preferred ? { id: preferred.id, name: preferred.name } : null,
+    }, ctx);
     const needs = plan.filamentNeeds;
     const free = await this.freeFilament([...new Set(needs.map((n) => n.materialId))], { excludeOrderId: opts.excludeOrderId, ctx });
     const picks = pickSpools(needs, await this.spoolsFor(needs), { reservedBySpool: await this.reservedBySpool() });
@@ -346,7 +380,10 @@ export class ProductionPlannerService {
       components: plan.components.map((c) => ({
         componentId: c.componentId, description: c.description, colourKey: c.colourKey, colourLabel: c.colourLabel,
         unitsRequired: c.unitsRequired, stockOnHand: c.stockOnHand,
-        plates: c.plates.map((p) => ({ layoutId: p.layout.layoutId, label: p.layout.label, unitsPerPlate: p.layout.unitsPerPlate, plateCount: p.plateCount })),
+        plates: c.plates.map((p) => ({
+          layoutId: p.layout.layoutId, label: p.layout.label, unitsPerPlate: p.layout.unitsPerPlate, plateCount: p.plateCount,
+          ...(p.layout.printerId ? { printerId: p.layout.printerId, printerName: p.layout.printerName ?? null } : {}),
+        })),
         unitsPrinted: c.unitsPrinted, surplus: c.surplus, printMinutes: c.printMinutes, creditOnComplete: null,
       })),
       filament,
@@ -354,6 +391,8 @@ export class ProductionPlannerService {
       ready: plan.bom.productionReady && plan.problems.length === 0 && filament.every((f) => f.hasEnough) && parts.every((p) => p.hasEnough),
       problems,
       warnings: [...plan.warnings, ...free.warnings],
+      planPrinterId: plan.planPrinter?.id ?? null,
+      planPrinterName: plan.planPrinter?.name ?? null,
     };
   }
 }

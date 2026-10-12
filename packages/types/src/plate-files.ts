@@ -34,6 +34,9 @@ export interface ComponentPlateRow {
   slicedFor: string | null;
   /** The farm printer matched to `slicedFor`; null when nothing matches. */
   printer: PrinterRef | null;
+  /** The printer the plate was sliced for in the app (PlateLayout.printerId); null = any printer. A job never mixes plates of two. */
+  printerId: string | null;
+  printerName: string | null;
 }
 
 /** POST …/plate-layouts/:layoutId/file and POST …/components/:componentId/file. */

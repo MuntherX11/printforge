@@ -100,7 +100,9 @@ export function verdictOf(r: Readiness): Verdict {
 
 /**
  * The single plan line: "1 plate of 8 on Hi · 1 h 56 min · 7 extra go to stock".
- * `printerOf` names the printer of a part's plate when the page knows it.
+ * A plan whose plates were sliced for one printer says "on <printer>" (it never
+ * mixes two); otherwise `printerOf` names the printer of a part's plate when
+ * the page knows it.
  */
 export function planLine(r: Readiness, printerOf: (componentId: string, layoutId: string | null) => string | null): string {
   const groupsOf = (c: Component) => c.plates.filter(p => p.plateCount > 0);
@@ -111,18 +113,19 @@ export function planLine(r: Readiness, printerOf: (componentId: string, layoutId
   const minutes = r.components.reduce((n, c) => n + c.printMinutes, 0);
   const extra = r.components.reduce((n, c) => n + c.surplus, 0);
 
+  const on = r.planPrinterName ? ` on ${r.planPrinterName}` : '';
   let head: string;
   if (printing.length === 1) {
     const c = printing[0];
     const groups = groupsOf(c);
     if (groups.length === 1) {
-      const printer = printerOf(c.componentId, groups[0].layoutId);
+      const printer = r.planPrinterName ?? printerOf(c.componentId, groups[0].layoutId);
       head = `${plural(plates, 'plate')} of ${groups[0].unitsPerPlate}${printer ? ` on ${printer}` : ''}`;
     } else {
-      head = `${plural(plates, 'plate')} (${platesText(groups)})`;
+      head = `${plural(plates, 'plate')} (${platesText(groups)})${on}`;
     }
   } else {
-    head = `${plural(plates, 'plate')} for ${plural(printing.length, 'part')}`;
+    head = `${plural(plates, 'plate')} for ${plural(printing.length, 'part')}${on}`;
   }
 
   const out = [head, formatMinutes(minutes)];

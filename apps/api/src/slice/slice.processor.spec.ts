@@ -120,18 +120,28 @@ describe('the sidecar call', () => {
     expect(req.process).toBeUndefined();
   });
 
-  it('sidecar unreachable → FAILED SLICER_UNAVAILABLE; Orca crash → FAILED with the log tail; a plate without labels → NO_OBJECTS', async () => {
+  it('sidecar unreachable → FAILED SLICER_UNAVAILABLE; Orca crash → FAILED with a plain sentence and the raw output as the detail; a plate without labels → NO_OBJECTS', async () => {
     const x = sliceHarness();
     await x.seedSource('c1', 'STL');
     const r1 = queue(x);
     await x.processor.tick();
-    expect(x.run(r1.id)).toMatchObject({ status: 'FAILED', error: 'SLICER_UNAVAILABLE: no stub' });
+    expect(x.run(r1.id)).toMatchObject({ status: 'FAILED', error: 'SLICER_UNAVAILABLE: no stub', errorDetail: null });
     expect(x.gateway.server.emit).toHaveBeenCalledWith('slice-run', expect.objectContaining({ id: r1.id, status: 'FAILED', componentId: 'c1' }));
 
-    x.sidecar.slice.mockResolvedValue({ ok: false, code: 'SLICER_FAILED', message: 'orca-slicer exited with code 255', exitCode: 255, logTail: 'a\nb\nassert failed' });
+    x.sidecar.slice.mockResolvedValue({ ok: false, code: 'SLICER_FAILED', message: 'orca-slicer exited with code 235', exitCode: 235, logTail: 'a\nb\nassert failed' });
     const r2 = queue(x);
     await x.processor.tick();
-    expect(x.run(r2.id).error).toBe('SLICER_FAILED: orca-slicer exited with code 255 — a | b | assert failed');
+    expect(x.run(r2.id)).toMatchObject({
+      status: 'FAILED',
+      error: 'The slicer could not arrange the units on the plate; try fewer units',
+      errorDetail: 'orca-slicer exited with code 235\na\nb\nassert failed',
+    });
+    expect(x.gateway.server.emit).toHaveBeenCalledWith('slice-run', expect.objectContaining({ id: r2.id, status: 'FAILED', error: 'The slicer could not arrange the units on the plate; try fewer units' }));
+
+    x.sidecar.slice.mockResolvedValue({ ok: false, code: 'TIMED_OUT', message: 'orca-slicer exceeded 300000 ms', exitCode: null, logTail: '' });
+    const r2b = queue(x);
+    await x.processor.tick();
+    expect(x.run(r2b.id)).toMatchObject({ status: 'FAILED', error: 'The slicer took too long and was stopped; try fewer units', errorDetail: null });
 
     ok(x, gcode({ minutes: 240, totalGrams: 120 }));
     const r3 = queue(x);

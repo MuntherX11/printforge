@@ -239,6 +239,32 @@ describe('ProductsService (§7.1 items 13, 29, 42)', () => {
       await expect(h.products.readiness(P, { variantId: 'x' })).rejects.toThrow('out of date');
     });
 
+    it('P20 for a product with no sizes and no parts says so; with sizes and none chosen it still asks for a size', async () => {
+      const bare = sardineRow();
+      bare.components = [];
+      bare.variants = bare.variants.filter((v) => v.kind !== 'SIZE');
+      bare.basePrice = 0;
+      const h = productsHarness([bare]);
+      await expect(h.products.readiness(P, { qty: '1' })).rejects.toThrow('No parts yet. Add one from its model or import a sliced file.');
+      expect(await statusOf(h.products.readiness(P, { qty: '1' }))).toBe(400);
+
+      // Several sizes, each with its own parts, no standard parts, nothing chosen: the existing message.
+      const sized = sardineRow();
+      sized.components = sized.components.filter((c: any) => c.variantId !== null);
+      await expect(productsHarness([sized]).products.readiness(P, { qty: '1' })).rejects.toThrow('choose a size for "Sardine tin"');
+
+      // Sizes but no parts anywhere and no size chosen: still the size prompt.
+      const empty = sardineRow();
+      empty.components = [];
+      await expect(productsHarness([empty]).products.readiness(P, { qty: '1' })).rejects.toThrow('choose a size for "Sardine tin"');
+
+      // A product with parts goes on to the planner as before.
+      const full = productsHarness([sardineRow()]);
+      const planned = jest.spyOn((full.products as any).planner, 'readiness').mockResolvedValue({ ready: true });
+      await expect(full.products.readiness(P, { qty: '1' })).resolves.toEqual({ ready: true });
+      expect(planned).toHaveBeenCalledWith(P, { sizeOptionId: null, colourOptionId: null }, 1, expect.anything());
+    });
+
     it('P16 returns a costVersion, sizes and cells; a pair returns its breakdown', async () => {
       const h = productsHarness([sardineRow()]);
       const all: any = await h.products.cost(P);
