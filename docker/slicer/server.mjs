@@ -169,6 +169,33 @@ export function parseSliceRequest(body, uploadsDir) {
 /**
  * Build the request handler. Every dependency is injectable for tests.
  */
+/**
+ * Flatten a job's presets and pair them up the way the CLI checks them:
+ *
+ *   machine  ── name ──▶ process.compatible_printers = [machine.name]   (else exit -17)
+ *   filament.compatible_printers = []                                    (any printer)
+ *
+ * A 3MF job carries its own machine and process, so only the filaments are returned.
+ */
+export function buildProfiles(job, index) {
+  const flat = (kind, raw, siblings, options) =>
+    flattenPreset(raw, makeLookup(siblings, index.forKind(kind)), options);
+  const siblings = job.siblings ?? [];
+  const out = { filaments: [] };
+  if (job.machine) out.machine = flat('machine', job.machine, siblings, {});
+  if (job.process) {
+    out.process = flat('process', job.process, siblings,
+      out.machine ? { compatiblePrinters: [out.machine.name] } : {});
+  }
+  const filamentSiblings = [...siblings, ...job.filaments.map((f) => f.raw)];
+  for (const { raw, density } of job.filaments) {
+    const options = { compatiblePrinters: [] };
+    if (density !== undefined) options.density = density;
+    out.filaments.push(flat('filament', raw, filamentSiblings.filter((s) => s !== raw), options));
+  }
+  return out;
+}
+
 export function createApp(deps) {
   const {
     uploadsDir, scratchDir, orcaBin, timeoutMs,
@@ -227,20 +254,12 @@ export function createApp(deps) {
         await fsp.writeFile(target, JSON.stringify(preset, null, 1));
         return target;
       };
+      const profiles = buildProfiles(job, index);
       const profilePaths = { filaments: [] };
-      if (job.machine) {
-        profilePaths.machine = await writePreset('machine.json',
-          flattenWith('machine', job.machine, job.siblings));
-      }
-      if (job.process) {
-        profilePaths.process = await writePreset('process.json',
-          flattenWith('process', job.process, job.siblings));
-      }
-      const filamentSiblings = [...job.siblings, ...job.filaments.map((f) => f.raw)];
-      for (let i = 0; i < job.filaments.length; i += 1) {
-        const { raw, density } = job.filaments[i];
-        profilePaths.filaments.push(await writePreset(`filament_${i}.json`,
-          flattenWith('filament', raw, filamentSiblings.filter((s) => s !== raw), density)));
+      if (profiles.machine) profilePaths.machine = await writePreset('machine.json', profiles.machine);
+      if (profiles.process) profilePaths.process = await writePreset('process.json', profiles.process);
+      for (let i = 0; i < profiles.filaments.length; i += 1) {
+        profilePaths.filaments.push(await writePreset(`filament_${i}.json`, profiles.filaments[i]));
       }
       const args = buildArgs({
         kind: job.kind, inputPath: job.inputPath, copies: job.copies, profilePaths, outputDir, logFile,

@@ -96,7 +96,11 @@ function parentNameOf(raw) {
  *
  * @param {object} raw          the preset exactly as exported by OrcaSlicer
  * @param {(name: string, child: object) => object|null|undefined} lookup
- * @param {{density?: string}} [options]
+ * @param {{density?: string, compatiblePrinters?: string[]}} [options]
+ *   compatiblePrinters: written as `compatible_printers` after the merge. The CLI refuses a
+ *   process whose list does not name the machine preset (exit -17, "process not compatible
+ *   with printer"), and the exported lists name presets we have just renamed or dropped, so
+ *   the caller states the pairing explicitly. An empty list means "any printer".
  * @returns {object} a new preset with no `inherits`, `from: "system"`, unsafe keys removed
  */
 export function flattenPreset(raw, lookup, options = {}) {
@@ -148,6 +152,17 @@ export function flattenPreset(raw, lookup, options = {}) {
       );
     }
     merged.filament_density = [options.density];
+  }
+  if (options.compatiblePrinters !== undefined) {
+    const list = options.compatiblePrinters;
+    if (!Array.isArray(list) || !list.every((v) => typeof v === 'string' && v.length > 0)) {
+      throw new PresetError(
+        'INVALID_VALUE',
+        `preset "${merged.name}": compatiblePrinters must be an array of preset names`,
+        { preset: merged.name, key: 'compatible_printers' },
+      );
+    }
+    merged.compatible_printers = [...list];
   }
   validateValues(merged);
   return merged;
