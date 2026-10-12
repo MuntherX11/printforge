@@ -46,7 +46,7 @@ export function sliceErrorText(err: unknown, fallback = 'Slicing failed'): strin
   if (isSliceErrorCode(message)) return SLICE_ERROR_TEXT[message];
   // The API writes "CODE: the specific sentence" (it names the printer or the slot); show the
   // sentence without the code, or the code's general sentence when nothing follows it.
-  const coded = /^([A-Z][A-Z_]+):\s*(.*)$/s.exec(message.trim());
+  const coded = /^([A-Z][A-Z_]+):\s*([\s\S]*)$/.exec(message.trim());
   if (coded) return coded[2].trim() || (isSliceErrorCode(coded[1]) ? SLICE_ERROR_TEXT[coded[1]] : fallback);
   return message.trim() || fallback;
 }
