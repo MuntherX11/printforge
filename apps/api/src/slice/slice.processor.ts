@@ -26,7 +26,9 @@ import { filamentMapOf } from './slice.service';
  *    filament and type per slot, replacing an active SLICED layout with the
  *    same part + printer + units + slot types;
  *  - 1 unit (the validation run) → the part's own file, and its grams and
- *    minutes through the component update path so the product reprices.
+ *    minutes through the component update path so the product reprices; a
+ *    multicolour part also gets each colour's grams (a colour the slicer did
+ *    not use is 0) and its filament-change count.
  *
  * Project parts may have several bodies per unit, so their unit count is the
  * label count divided by the validation run's (bodies-per-unit rule).
@@ -148,7 +150,7 @@ export class SliceProcessor implements OnModuleInit {
         where: { id }, data: { status: 'DONE', unitsSliced: result.unitsSliced, resultLayoutId: result.layoutId, error: null, finishedAt: new Date() },
       });
       this.logger.log(`Slice run ${id}: ${run.component?.description} x${result.unitsSliced} done`);
-      this.broadcast({ id, componentId: run.componentId, productId, status: 'DONE', resultLayoutId: result.layoutId, error: null });
+      this.broadcast({ id, componentId: run.componentId, productId, status: 'DONE', resultLayoutId: result.layoutId, error: null, unitsSliced: result.unitsSliced });
     } catch (e) {
       const failed = e instanceof RunFailed ? e : new RunFailed('SLICE_FAILED', (e as Error)?.message || 'Slicing failed');
       if (!(e instanceof RunFailed)) this.logger.error(`Slice run ${id} crashed: ${failed.message}`, (e as Error)?.stack);
@@ -217,9 +219,15 @@ export class SliceProcessor implements OnModuleInit {
     // The validation run: the part's own ×1 file and per-unit numbers.
     if (run.unitsRequested === 1) {
       await this.plateFiles.attachBuffer(comp.productId, comp.id, null, out.gcode, filename, { replace: true });
-      if (comp.isMultiColor) {
-        for (const s of slots) await this.prisma.componentMaterial.updateMany({ where: { componentId: comp.id, colorIndex: s.colorIndex }, data: { gramsUsed: s.gramsUsed } });
+      // Per colour only when the file reports grams per tool; without them the
+      // update below spreads the total over the colours as they stand.
+      if (comp.isMultiColor && tools.length) {
+        const bySlot = new Map(slots.map((s) => [s.colorIndex, s.gramsUsed]));
+        for (const m of comp.materials) {
+          await this.prisma.componentMaterial.updateMany({ where: { componentId: comp.id, colorIndex: m.colorIndex }, data: { gramsUsed: bySlot.get(m.colorIndex) ?? 0 } });
+        }
       }
+      await this.prisma.productComponent.update({ where: { id: comp.id }, data: { colorChanges } });
       await this.components.update(comp.productId, comp.id, { gramsUsed: grams, printMinutes: Math.max(minutes, 0) });
       return { unitsSliced: labels, layoutId: null };
     }

@@ -6,7 +6,7 @@ import { M, sardineRow } from '../catalog-core/__fixtures__/sardine-tin';
 import { productsHarness, statusOf } from './__fixtures__/products-harness';
 import { threeMf } from './__fixtures__/slicer-files';
 import { isCurrentProjectVersion, NOT_A_SOURCE_FILE, OLD_PROJECT_FORMAT_MESSAGE, sniffSourceKind, sourceModelOf } from './product-sources';
-import { NO_SOURCE_MODEL, ProductSourcesService } from './product-sources.service';
+import { NO_SOURCE_MODEL, ProductSourcesService, suggestedPartName } from './product-sources.service';
 
 /** Slicer plan WP4: the STL or OrcaSlicer project a part is sliced from. */
 
@@ -150,6 +150,68 @@ describe('upload an OrcaSlicer project', () => {
     const bare = setup(await threeMf([{ index: 1 }], { sliceInfo: false }), 'bare.3mf');
     await expect(bare.svc.upload(P, 'c1', { assembledUploadId: UPLOAD })).rejects.toThrow(OLD_PROJECT_FORMAT_MESSAGE);
     expect(bare.h.db.t('attachment')).toHaveLength(0);
+  });
+});
+
+describe('inspect a staged model', () => {
+  const untouched = (h: any) => JSON.stringify(h.db.tables());
+
+  it('an STL: its kind, name and size, no slots, the product\'s printer as the default; nothing created, the upload kept', async () => {
+    const { h, svc, chunk, slice } = setup(stl(), 'Box v2.stl');
+    const before = untouched(h);
+    await expect(svc.inspect(P, { assembledUploadId: UPLOAD })).resolves.toEqual({
+      kind: 'STL', filename: 'Box v2.stl', sizeBytes: stl().length, suggestedName: 'Box v2', slots: [], printerId: null, printerModel: null, defaultPrinterId: 'pr-1',
+    });
+    expect(untouched(h)).toBe(before);
+    expect(fs.readdirSync(dir)).toHaveLength(0);
+    expect(chunk.consume).toHaveBeenCalledWith(UPLOAD, expect.any(Number), { keep: true });
+    expect(chunk.discard).not.toHaveBeenCalled();
+    expect(slice.create).not.toHaveBeenCalled();
+  });
+
+  it('a project: each slot with the shop filament it matched (null when none) and the project\'s printer', async () => {
+    const settings = {
+      ...PROJECT,
+      filament_settings_id: [...PROJECT.filament_settings_id, 'Polymaker TPU95 Teal @Creality Hi'],
+      filament_vendor: [...PROJECT.filament_vendor, 'Polymaker'],
+      filament_type: [...PROJECT.filament_type, 'TPU'],
+      filament_colour: [...PROJECT.filament_colour, '#00B3A4'],
+    };
+    const { h, svc, chunk } = setup(await project(settings), 'Zelda keychain.3mf');
+    const before = untouched(h);
+    const out = await svc.inspect(P, { assembledUploadId: UPLOAD });
+    expect(out).toMatchObject({ kind: 'THREEMF', filename: 'Zelda keychain.3mf', suggestedName: 'Zelda keychain', printerId: 'pr-hi', printerModel: 'Creality Hi', defaultPrinterId: 'pr-1' });
+    expect(out.slots).toEqual([
+      { colorIndex: 0, profile: 'PLA Black', colorHex: '111111', materialId: M.black },
+      { colorIndex: 1, profile: 'PLA Red', colorHex: 'C4402A', materialId: M.red },
+      { colorIndex: 2, profile: 'Polymaker TPU95 Teal', colorHex: '00B3A4', materialId: null },
+    ]);
+    expect(untouched(h)).toBe(before);
+    expect(chunk.discard).not.toHaveBeenCalled();
+  });
+
+  it('a project for a printer the shop does not have: the model is named, the printer is null', async () => {
+    const { svc } = setup(await project({ ...PROJECT, printer_model: 'Bambu Lab X1 Carbon' }), 'k.3mf');
+    await expect(svc.inspect(P, { assembledUploadId: UPLOAD })).resolves.toMatchObject({ printerId: null, printerModel: 'Bambu Lab X1 Carbon' });
+  });
+
+  it('an older project → 400 with the re-save message; other files, an unknown product and a missing id are refused; the upload is kept', async () => {
+    const old = setup(await project({ ...PROJECT, version: '2.2.0.0' }), 'old.3mf');
+    await expect(old.svc.inspect(P, { assembledUploadId: UPLOAD })).rejects.toThrow(OLD_PROJECT_FORMAT_MESSAGE);
+    expect(await statusOf(old.svc.inspect(P, { assembledUploadId: UPLOAD }))).toBe(400);
+    expect(old.chunk.discard).not.toHaveBeenCalled();
+    const other = setup(stl(), 'box.gcode');
+    await expect(other.svc.inspect(P, { assembledUploadId: UPLOAD })).rejects.toThrow(NOT_A_SOURCE_FILE);
+    expect(await statusOf(other.svc.inspect('p-none', { assembledUploadId: UPLOAD }))).toBe(404);
+    expect(await statusOf(other.svc.inspect(P, {}))).toBe(400);
+    expect(await statusOf(other.svc.inspect(P, { assembledUploadId: UPLOAD, description: 'x' }))).toBe(400);
+  });
+
+  it('the suggested name is the file name without its extension, at most 120 characters', () => {
+    expect(suggestedPartName('Zelda keychain.3MF')).toBe('Zelda keychain');
+    expect(suggestedPartName('box.v2.stl')).toBe('box.v2');
+    expect(suggestedPartName(`${'a'.repeat(150)}.stl`)).toHaveLength(120);
+    expect(suggestedPartName(' spaced .stl')).toBe('spaced');
   });
 });
 

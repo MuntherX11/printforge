@@ -106,6 +106,29 @@ describe('create: the run', () => {
     await seedSource('c2', 'THREEMF', stl(), { printerModel: 'Creality Hi', printerId: HI, slots: [{ colorIndex: 0, profile: null, colorHex: null, materialId: M.black }] });
     await expect(service.create(P, 'c2', { materials: {}, fill: true })).resolves.toMatchObject({ unitsRequested: PROJECT_FILL_UNITS });
   });
+
+  it('fill for a project: once a run on that printer placed fewer units than asked for, ask for those + 2', async () => {
+    const { service, seedSource, db } = sliceHarness();
+    const map = { '0': { materialId: M.black, name: 'PLA Black', type: 'PLA' } };
+    const past = (o: Record<string, unknown>) => db.insert('sliceRun', { componentId: 'c2', printerId: HI, filamentMap: map, status: 'DONE', createdAt: new Date(Date.now() + 1000), ...o });
+    // A run of the previous source says nothing about this one.
+    db.insert('sliceRun', { componentId: 'c2', printerId: HI, filamentMap: map, status: 'DONE', unitsRequested: 100, unitsSliced: 6, createdAt: new Date(Date.now() - 60_000) });
+    await seedSource('c2', 'THREEMF', stl(), { printerModel: 'Creality Hi', printerId: HI, slots: [{ colorIndex: 0, profile: null, colorHex: null, materialId: M.black }] });
+    const fill = () => service.create(P, 'c2', { materials: {}, fill: true });
+    past({ unitsRequested: 1, unitsSliced: 3 }); // the validation run: bodies, not units
+    past({ unitsRequested: 12, unitsSliced: 12 }); // everything fitted: no capacity known
+    past({ unitsRequested: 100, unitsSliced: 9, printerId: K1 }); // another printer's bed
+    past({ unitsRequested: 100, unitsSliced: 8, status: 'FAILED' });
+    past({ unitsRequested: 100, unitsSliced: 7, componentId: 'c1' });
+    const first = await fill();
+    expect(first.unitsRequested).toBe(PROJECT_FILL_UNITS);
+    // That run comes back with 15 on the plate.
+    Object.assign(db.t('sliceRun').find((r: any) => r.id === first.id), { status: 'DONE', unitsSliced: 15 });
+    const second = await fill();
+    expect(second.unitsRequested).toBe(17);
+    Object.assign(db.t('sliceRun').find((r: any) => r.id === second.id), { status: 'DONE', unitsSliced: 15 });
+    await expect(fill()).resolves.toMatchObject({ unitsRequested: 17 });
+  });
 });
 
 describe('list and cancel', () => {

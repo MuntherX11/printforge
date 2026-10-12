@@ -7,6 +7,7 @@ import { PartsModule } from '../parts/parts.module';
 import { SliceModule } from '../slice/slice.module';
 import { ColourSlotsController } from './colour-slots.controller';
 import { ColourSlotsService } from './colour-slots.service';
+import { ComponentFromModelService } from './component-from-model.service';
 import { ProductComponentsService } from './product-components.service';
 import { ProductImageBackfillService } from './product-image-backfill.service';
 import { ProductImagesController } from './product-images.controller';
@@ -35,7 +36,7 @@ import { VariantsService } from './variants.service';
   providers: [
     ProductsService, ProductComponentsService, VariantsService, ColourSlotsService,
     ProductOnboardingService, ProductImagesService, ProductImageBackfillService, PlateLayoutsService, PlateLayoutBackfillService,
-    OptionConversionService, PlateFilesService, ProductSourcesService,
+    OptionConversionService, PlateFilesService, ProductSourcesService, ComponentFromModelService,
   ],
   exports: [ProductsService, ProductImagesService, ProductComponentsService, PlateLayoutsService, PlateFilesService],
 })

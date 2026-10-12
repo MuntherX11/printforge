@@ -7,6 +7,7 @@ import { StlEstimatorService } from '../file-parser/stl-estimator.service';
 import { containedUploadPath } from '../products/product-images.service';
 import { sourceMetaOf } from '../products/product-sources';
 import { SlicerProfilesService } from '../slicer-profiles/slicer-profiles.service';
+import { PROJECT_FILL_UNITS, projectFillUnits } from './fill-units';
 import { parseSliceRequest } from './slice-request';
 
 /**
@@ -19,10 +20,11 @@ import { parseSliceRequest } from './slice-request';
  * A project (3MF) part is locked to the printer the project names and slices
  * with the project's own process (plan D14-A); an STL part takes the printer
  * asked for, else the product's pricing printer. "Fill the plate" is the
- * bounding-box estimate for an STL and 100 for a project (D12).
+ * bounding-box estimate for an STL; for a project it is 100, or what an earlier
+ * run on the printer showed fits plus 2 (D12, fill-units.ts).
  */
 
-export const PROJECT_FILL_UNITS = 100;
+export { PROJECT_FILL_UNITS };
 export const RUN_LIST_LIMIT = 20;
 
 export function filamentMapOf(json: unknown): SliceFilamentMap {
@@ -87,7 +89,7 @@ export class SliceService {
     const input = parseSliceRequest(body);
     const comp = await this.owned(productId, componentId);
     if (!comp.sourceAttachmentId) throw new BadRequestException(`${SliceErrorCode.NO_SOURCE}: Upload the part's STL or project first`);
-    const source = await this.prisma.attachment.findUnique({ where: { id: comp.sourceAttachmentId }, select: { id: true, storagePath: true, parsedMetadata: true } });
+    const source = await this.prisma.attachment.findUnique({ where: { id: comp.sourceAttachmentId }, select: { id: true, storagePath: true, parsedMetadata: true, createdAt: true } });
     if (!source) throw new BadRequestException(`${SliceErrorCode.NO_SOURCE}: The part's source file is gone — upload it again`);
     const isProject = comp.sourceKind === 'THREEMF';
     const meta = sourceMetaOf(source.parsedMetadata);
@@ -132,7 +134,7 @@ export class SliceService {
       filamentMap[w.key] = { materialId: m.id, name: m.name, type: m.type };
     }
 
-    const units = input.fill ? await this.fillUnits(isProject, source.storagePath, machine) : input.units!;
+    const units = input.fill ? await this.fillUnits(isProject, source, machine, componentId, printer.id) : input.units!;
 
     const pending = await this.prisma.sliceRun.findMany({
       where: { componentId, printerId: printer.id, unitsRequested: units, status: { in: ['QUEUED', 'RUNNING'] } },
@@ -149,10 +151,24 @@ export class SliceService {
     return toRunDto(row);
   }
 
-  /** D12: copies from the STL's footprint and the machine's bed; projects use a fixed 100. */
-  private async fillUnits(isProject: boolean, storagePath: string, machine: Record<string, unknown>): Promise<number> {
-    if (isProject) return PROJECT_FILL_UNITS;
-    const abs = containedUploadPath(storagePath);
+  /**
+   * D12: copies from the STL's footprint and the machine's bed. A project asks
+   * for 100, or for what an earlier run of this source on the printer showed fits.
+   */
+  private async fillUnits(
+    isProject: boolean, source: { storagePath: string; createdAt?: Date | null }, machine: Record<string, unknown>, componentId: string, printerId: string,
+  ): Promise<number> {
+    if (isProject) {
+      const done = await this.prisma.sliceRun.findMany({
+        // Runs older than the source were cut from another geometry.
+        where: { componentId, printerId, status: 'DONE', ...(source.createdAt ? { createdAt: { gte: source.createdAt } } : {}) },
+        orderBy: { createdAt: 'desc' },
+        take: RUN_LIST_LIMIT,
+        select: { unitsRequested: true, unitsSliced: true },
+      });
+      return projectFillUnits(done);
+    }
+    const abs = containedUploadPath(source.storagePath);
     if (!abs) return 1;
     let buffer: Buffer;
     try {

@@ -1,5 +1,5 @@
 import { BadRequestException, forwardRef, HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { ComponentSourceModel, SliceRunDto, SourceModelKind, SourceModelUploadResult } from '@printforge/types';
+import type { ComponentSourceModel, ModelInspectResult, SliceRunDto, SourceModelKind, SourceModelUploadResult } from '@printforge/types';
 import JSZip from 'jszip';
 import { ChunkUploadsService } from '../chunk-uploads/chunk-uploads.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -27,6 +27,20 @@ import { StoredFile, unlinkWritten, writeUploadFile } from './slicer-files';
 
 const MAX_SOURCE_BYTES = 200 * 1024 * 1024;
 export const NO_SOURCE_MODEL = 'This part has no source model';
+
+/** A staged upload read as a source model: its bytes, display name, kind and (for a project) slots and printer. */
+export interface StagedModel {
+  buffer: Buffer;
+  /** Display name, sanitised; never a path. */
+  filename: string;
+  kind: SourceModelKind;
+  meta: SourceMeta;
+}
+
+/** "Keychain v2.3mf" → "Keychain v2": the part name offered for a model, at most 120 characters. */
+export function suggestedPartName(filename: string): string {
+  return filename.replace(/\.(stl|3mf)$/i, '').trim().slice(0, 120).trim();
+}
 
 @Injectable()
 export class ProductSourcesService {
@@ -72,36 +86,75 @@ export class ProductSourcesService {
     return projectSourceMeta(settings, materials as any, printers as any);
   }
 
-  /** POST /products/:id/components/:cid/source */
-  async upload(productId: string, componentId: string, body: unknown): Promise<SourceModelUploadResult> {
-    const { assembledUploadId } = parseFileAttach(body);
-    const comp = await this.owned(this.prisma, productId, componentId);
+  /**
+   * Reads a staged upload as a source model without redeeming it (the staged
+   * file stays for the step that commits it): sniffed kind, and for a project
+   * the old-format check, its slots and its printer. 400 for anything else.
+   */
+  async readStaged(assembledUploadId: string): Promise<StagedModel> {
     const file = await this.chunkUploads.consume(assembledUploadId, MAX_SOURCE_BYTES, { keep: true });
     const name = String(file.originalname || '');
     const kind = sniffSourceKind(file.buffer, name);
     if (!kind) throw new BadRequestException(NOT_A_SOURCE_FILE);
     const meta: SourceMeta = kind === 'THREEMF' ? await this.projectMeta(file.buffer) : { printerModel: null, printerId: null, slots: [] };
+    const filename = sanitizeImageName(name).slice(0, 200) || (kind === 'STL' ? 'model.stl' : 'project.3mf');
+    return { buffer: file.buffer, filename, kind, meta };
+  }
 
-    let stored: StoredFile;
+  /** Disk half of storing a source: written before the transaction, unlinked by the caller if it fails. */
+  async writeSourceFile(model: StagedModel, what: string): Promise<StoredFile> {
     try {
-      stored = await writeUploadFile(file.buffer, kind === 'STL' ? 'stl' : '3mf');
+      return await writeUploadFile(model.buffer, model.kind === 'STL' ? 'stl' : '3mf');
     } catch (e) {
-      this.logger.error(`Storing a source model for component ${componentId} failed: ${(e as Error)?.message}`, (e as Error)?.stack);
+      this.logger.error(`Storing a source model for ${what} failed: ${(e as Error)?.message}`, (e as Error)?.stack);
       throw new BadRequestException(STORE_FAILED);
     }
+  }
+
+  /** Row half, inside the caller's transaction: the source Attachment, linked to the part. Returns the Attachment. */
+  async linkSource(tx: any, productId: string, componentId: string, stored: StoredFile, model: StagedModel, meta: SourceMeta = model.meta): Promise<any> {
+    const attachment = await tx.attachment.create({
+      data: {
+        entityType: 'product', entityId: productId, filename: stored.filename, originalName: model.filename,
+        mimeType: SOURCE_MIME[model.kind], sizeBytes: stored.sizeBytes, storagePath: stored.storagePath, parsedMetadata: meta as any,
+      },
+    });
+    await tx.productComponent.update({ where: { id: componentId }, data: { sourceAttachmentId: attachment.id, sourceKind: model.kind } });
+    return attachment;
+  }
+
+  /** POST /products/:id/model-inspect: what the staged file is; nothing is created and the upload is kept. */
+  async inspect(productId: string, body: unknown): Promise<ModelInspectResult> {
+    const { assembledUploadId } = parseFileAttach(body);
+    const product = await this.prisma.product.findUnique({ where: { id: productId }, select: { id: true, defaultPrinterId: true } });
+    if (!product) throw new NotFoundException('Product not found');
+    const model = await this.readStaged(assembledUploadId);
+    const isProject = model.kind === 'THREEMF';
+    return {
+      kind: model.kind,
+      filename: model.filename,
+      sizeBytes: model.buffer.length,
+      suggestedName: suggestedPartName(model.filename),
+      slots: isProject ? model.meta.slots : [],
+      printerId: isProject ? model.meta.printerId : null,
+      printerModel: isProject ? model.meta.printerModel : null,
+      defaultPrinterId: product.defaultPrinterId ?? null,
+    };
+  }
+
+  /** POST /products/:id/components/:cid/source */
+  async upload(productId: string, componentId: string, body: unknown): Promise<SourceModelUploadResult> {
+    const { assembledUploadId } = parseFileAttach(body);
+    const comp = await this.owned(this.prisma, productId, componentId);
+    const model = await this.readStaged(assembledUploadId);
+    const kind = model.kind;
+    const stored = await this.writeSourceFile(model, `component ${componentId}`);
 
     let out: { attachment: any; unlink: string[] };
     try {
       out = await this.prisma.$transaction(async (tx: any) => {
         const again = await this.owned(tx, productId, componentId);
-        const attachment = await tx.attachment.create({
-          data: {
-            entityType: 'product', entityId: productId, filename: stored.filename,
-            originalName: sanitizeImageName(name).slice(0, 200) || (kind === 'STL' ? 'model.stl' : 'project.3mf'),
-            mimeType: SOURCE_MIME[kind], sizeBytes: stored.sizeBytes, storagePath: stored.storagePath, parsedMetadata: meta as any,
-          },
-        });
-        await tx.productComponent.update({ where: { id: componentId }, data: { sourceAttachmentId: attachment.id, sourceKind: kind } });
+        const attachment = await this.linkSource(tx, productId, componentId, stored, model);
         const unlink = again.sourceAttachmentId ? await this.dropOldSource(tx, componentId, again.sourceAttachmentId) : [];
         return { attachment, unlink };
       }, TX_OPTS);

@@ -156,7 +156,7 @@ describe('the result', () => {
     expect(fs.existsSync(path.join(dirOf(), att.storagePath))).toBe(true);
     expect(x.run(r.id)).toMatchObject({ status: 'DONE', unitsSliced: 12, resultLayoutId: layout.id, error: null });
     expect(x.run(r.id).finishedAt).toBeInstanceOf(Date);
-    expect(x.gateway.server.emit).toHaveBeenCalledWith('slice-run', { id: r.id, componentId: 'c1', productId: P, status: 'DONE', resultLayoutId: layout.id, error: null });
+    expect(x.gateway.server.emit).toHaveBeenCalledWith('slice-run', { id: r.id, componentId: 'c1', productId: P, status: 'DONE', resultLayoutId: layout.id, error: null, unitsSliced: 12 });
   });
 
   it('a non-PLA slot puts the type in the name; two slots keep their own grams and types', async () => {
@@ -222,6 +222,58 @@ describe('the result', () => {
     await x.processor.tick();
     const mats = x.db.t('componentMaterial').filter((m: any) => m.componentId === 'c2').sort((a: any, b: any) => a.colorIndex - b.colorIndex);
     expect(mats.map((m: any) => m.gramsUsed)).toEqual([5.2, 0.8]);
+  });
+
+  it('a multicolour part\'s validation run: grams per colour by slot index, a colour the slicer left out is 0, filament changes, total and minutes, repriced', async () => {
+    const x = sliceHarness();
+    // A four-colour part as "from a model" creates it: placeholder grams split evenly.
+    const part = x.db.insert('productComponent', {
+      productId: P, variantId: null, description: 'Zelda', materialId: null, isMultiColor: true, colorChanges: 0, gramsUsed: 0.1, printMinutes: 0,
+      quantity: 1, sortOrder: 9, stockOnHand: 0, attachmentId: null, thumbnailAttachmentId: null, colourSlotId: null, colourFixed: null,
+    });
+    [M.black, M.red, M.white, M.gold].forEach((materialId, i) => x.db.insert('componentMaterial', { componentId: part.id, materialId, colorIndex: i, sortOrder: i, gramsUsed: 0.025 }));
+    await x.seedSource(part.id, 'THREEMF', stl(), {
+      printerModel: 'Creality Hi', printerId: HI,
+      slots: [M.black, M.red, M.white, M.gold].map((materialId, colorIndex) => ({ colorIndex, profile: null, colorHex: null, materialId })),
+    });
+    const map = Object.fromEntries([M.black, M.red, M.white, M.gold].map((materialId, i) => [String(i), { materialId, name: materialId, type: 'PLA' }]));
+    const recalc = jest.spyOn(x.h.pricing, 'recalcPricing');
+    // Slot 3 (index 2) is in the project but on no object: the slicer reports 0 g for it.
+    ok(x, gcode({ labels: labels('zelda', 1), minutes: 47, totalGrams: 7.5, toolGrams: [5, 1.5, 0, 1], changes: 62 }));
+    const r = queue(x, { componentId: part.id, printerId: HI, unitsRequested: 1, filamentMap: map });
+    await x.processor.tick();
+    expect(x.run(r.id)).toMatchObject({ status: 'DONE', unitsSliced: 1, resultLayoutId: null });
+    const mats = x.db.t('componentMaterial').filter((m: any) => m.componentId === part.id).sort((a: any, b: any) => a.colorIndex - b.colorIndex);
+    expect(mats.map((m: any) => [m.colorIndex, m.materialId, m.gramsUsed])).toEqual([[0, M.black, 5], [1, M.red, 1.5], [2, M.white, 0], [3, M.gold, 1]]);
+    expect(x.db.t('productComponent').find((c: any) => c.id === part.id)).toMatchObject({ gramsUsed: 7.5, printMinutes: 47, colorChanges: 62 });
+    expect(recalc).toHaveBeenCalledWith(P);
+    expect(x.gateway.server.emit).toHaveBeenCalledWith('slice-run', expect.objectContaining({ id: r.id, status: 'DONE', unitsSliced: 1 }));
+  });
+
+  it('a multicolour validation file without per-tool grams keeps the colours\' proportions; a single-colour part gets 0 changes', async () => {
+    const x = sliceHarness();
+    await x.seedSource('c2', 'STL');
+    ok(x, gcode({ labels: labels('lid', 1), minutes: 26, totalGrams: 12 }));
+    queue(x, { componentId: 'c2', unitsRequested: 1, filamentMap: { ...PLA_MAP, '1': { materialId: M.silver, name: 'PLA Silver', type: 'PLA' } } });
+    await x.processor.tick();
+    const mats = x.db.t('componentMaterial').filter((m: any) => m.componentId === 'c2').sort((a: any, b: any) => a.colorIndex - b.colorIndex);
+    expect(mats.map((m: any) => m.gramsUsed)).toEqual([10.4, 1.6]);
+    await x.seedSource('c1', 'STL');
+    x.db.t('productComponent').find((c: any) => c.id === 'c1').colorChanges = 9;
+    ok(x, gcode({ labels: labels('box', 1), minutes: 34, totalGrams: 9.4, toolGrams: [9.4] }));
+    queue(x, { unitsRequested: 1 });
+    await x.processor.tick();
+    expect(x.db.t('productComponent').find((c: any) => c.id === 'c1').colorChanges).toBe(0);
+  });
+
+  it('a failed run\'s event carries no unit count', async () => {
+    const x = sliceHarness();
+    await x.seedSource('c1', 'STL');
+    const r = queue(x);
+    await x.processor.tick();
+    const ev = x.gateway.server.emit.mock.calls.find((c: any[]) => c[1].id === r.id)![1];
+    expect(ev).toMatchObject({ status: 'FAILED' });
+    expect(ev.unitsSliced).toBeUndefined();
   });
 
   it('bodies-per-unit: a project whose validation run labelled 3 bodies counts 12 labels as 4 units', async () => {

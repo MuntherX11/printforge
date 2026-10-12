@@ -1,17 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { filamentLabel, type SliceRunDto, type SlotKey } from '@printforge/types';
+import type { SliceRunDto } from '@printforge/types';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toast';
-import { FilamentPicker } from '@/components/filaments/FilamentPicker';
 import type { FilamentStock } from '@/components/filaments/useFilamentStock';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { ApiPrinter, ComponentDetail, FilamentStockRow, MaterialLite, ProductDetail } from '@/lib/types/api';
-import { Swatch, Toggle } from './options-ui';
+import type { ApiPrinter, ComponentDetail, MaterialLite, ProductDetail } from '@/lib/types/api';
+import { Toggle } from './options-ui';
+import { SliceSlotRows, SlotFilamentPickerDialog, choiceIds, pickOf, type SlotChoices } from './SliceSlotRows';
 import { buildSliceRequest, parseSliceUnits, printerLockedBy, sliceErrorText, sliceSlotsOf, sourceOf, type SliceSlotSpec } from './slice-ui';
 
 interface Props {
@@ -27,13 +27,6 @@ interface Props {
   onQueued: (run: SliceRunDto) => void;
 }
 
-type FilamentChoice = { id: string; name: string; type: string; color: string | null; colorHex: string | null; brand: string | null };
-
-function pickOf(id: string | null, materials: Map<string, MaterialLite>, rows: FilamentStockRow[] | null): FilamentChoice | null {
-  if (!id) return null;
-  return materials.get(id) ?? rows?.find(r => r.id === id) ?? null;
-}
-
 /**
  * Slice a plate of one part (v2.18.0): the printer (locked to the one a 3MF
  * project names), the filament for each slot the source uses (the project's
@@ -45,7 +38,7 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
   const { toast } = useToast();
   const [printers, setPrinters] = useState<ApiPrinter[] | null>(null);
   const [printerId, setPrinterId] = useState('');
-  const [chosen, setChosen] = useState<Partial<Record<SlotKey, FilamentChoice>>>({});
+  const [chosen, setChosen] = useState<SlotChoices>({});
   const [units, setUnits] = useState('1');
   const [fill, setFill] = useState(false);
   const [picking, setPicking] = useState<SliceSlotSpec | null>(null);
@@ -59,7 +52,7 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
   // Reset on open and on another part; a background reload keeps what was typed.
   useEffect(() => {
     if (!open || !c || !source) return;
-    const defaults: Partial<Record<SlotKey, FilamentChoice>> = {};
+    const defaults: SlotChoices = {};
     for (const s of sliceSlotsOf(source, c)) {
       const m = pickOf(s.defaultMaterialId, materials, stock.rows);
       if (m) defaults[s.key] = m;
@@ -91,7 +84,7 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
 
   const lockedPrinter = lockedPrinterId ? printers?.find(p => p.id === lockedPrinterId) ?? null : null;
   const projectUnmatched = source.kind === 'THREEMF' && !lockedPrinterId;
-  const built = buildSliceRequest({ printerId: printerId || null, printerLocked: lockedPrinterId !== null, slots, chosen: mapIds(chosen), units, fill });
+  const built = buildSliceRequest({ printerId: printerId || null, printerLocked: lockedPrinterId !== null, slots, chosen: choiceIds(chosen), units, fill });
   const unitsBad = !fill && parseSliceUnits(units) === null;
   const canSubmit = built.body !== null && !submitting && !projectUnmatched;
 
@@ -112,34 +105,14 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
   }
 
   if (picking) {
-    const slotNo = Number(picking.key) + 1;
-    const current = chosen[picking.key] ?? null;
     return (
-      <Dialog open onClose={() => setPicking(null)} title={`Your filament for slot ${slotNo}`} className="max-w-2xl">
-        <div className="space-y-3">
-          {picking.fileLabel && (
-            <p className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-              In the project: <Swatch hex={picking.fileHex} title={picking.fileLabel} decorative />
-              <span className="min-w-0 break-words font-medium">{picking.fileLabel}</span>
-            </p>
-          )}
-          <FilamentPicker
-            rows={stock.rows}
-            loading={stock.loading}
-            error={stock.error}
-            onRetry={stock.refresh}
-            preferType={current?.type ?? null}
-            nearHex={picking.fileHex}
-            currentMaterialId={current?.id ?? null}
-            savingId={null}
-            disabled={false}
-            onPick={row => { setChosen(prev => ({ ...prev, [picking.key]: row })); setPicking(null); }}
-          />
-          <div className="flex justify-end border-t pt-3 dark:border-gray-700">
-            <Button type="button" variant="outline" onClick={() => setPicking(null)}>Back</Button>
-          </div>
-        </div>
-      </Dialog>
+      <SlotFilamentPickerDialog
+        slot={picking}
+        current={chosen[picking.key] ?? null}
+        stock={stock}
+        onPick={row => { setChosen(prev => ({ ...prev, [picking.key]: row })); setPicking(null); }}
+        onBack={() => setPicking(null)}
+      />
     );
   }
 
@@ -177,41 +150,8 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
 
         <div>
           <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{slots.length > 1 ? 'Filaments' : 'Filament'}</p>
-          <ul className="mt-1 space-y-1">
-            {slots.map(s => {
-              const m = chosen[s.key] ?? null;
-              const label = filamentLabel(m);
-              const slotNo = Number(s.key) + 1;
-              return (
-                <li key={s.key} className="flex flex-wrap items-center gap-1.5 text-sm">
-                  {slots.length > 1 && <span className="text-gray-500 dark:text-gray-400">Slot {slotNo}:</span>}
-                  {m
-                    ? (
-                      <>
-                        <Swatch hex={m.colorHex} name={m.color || m.name} title={label.primary} />
-                        <span className="text-gray-800 dark:text-gray-200">{label.primary}</span>
-                        {(label.secondary || m.brand || m.type) && (
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {[label.secondary, [m.brand, m.type].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}
-                          </span>
-                        )}
-                      </>
-                    )
-                    : <span className="text-amber-700 dark:text-amber-300">No filament yet</span>}
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => { if (!stock.rows) stock.refresh(); setPicking(s); }}
-                    aria-label={m ? `Change the filament for slot ${slotNo}` : `Choose a filament for slot ${slotNo}`}
-                    className="ml-1 inline-flex min-h-[24px] items-center rounded px-1 text-xs font-medium text-brand-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400"
-                  >
-                    {m ? 'Change' : 'Choose'}
-                  </button>
-                  {s.fileLabel && <span className="w-full text-xs text-gray-500 dark:text-gray-400">In the project: {s.fileLabel}</span>}
-                </li>
-              );
-            })}
-          </ul>
+          <SliceSlotRows slots={slots} chosen={chosen} disabled={submitting} showSlotNumber={slots.length > 1}
+            onPick={s => { if (!stock.rows) stock.refresh(); setPicking(s); }} />
         </div>
 
         <div className="flex flex-wrap items-end gap-4">
@@ -256,10 +196,4 @@ export function SlicePlateDialog({ product, component: c, open, materials, stock
       </div>
     </Dialog>
   );
-}
-
-function mapIds(chosen: Partial<Record<SlotKey, FilamentChoice>>): Partial<Record<SlotKey, string>> {
-  const out: Partial<Record<SlotKey, string>> = {};
-  for (const [k, v] of Object.entries(chosen)) if (v) out[k as SlotKey] = v.id;
-  return out;
 }

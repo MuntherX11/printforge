@@ -138,8 +138,8 @@ export function parsePage(rawPage: unknown, rawLimit: unknown): { page: number; 
 
 // ---------------------------------------------------------------- components
 
-const GRAMS = { min: 0.1, max: 100_000 };
-const MINUTES = { min: 0, max: 100_000 };
+export const GRAMS = { min: 0.1, max: 100_000 };
+export const MINUTES = { min: 0, max: 100_000 };
 const QTY = { min: 1, max: 1000, integer: true };
 
 function linkFields(b: Body, out: { colourSlotId?: string | null; colourFixed?: boolean }) {

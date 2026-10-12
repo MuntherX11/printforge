@@ -1,6 +1,6 @@
 'use client';
 
-/** Fields shared by AddComponentDialog and EditComponentDialog (spec §5.1, bounds §4.7 P9/P10). */
+/** The fields of EditComponentDialog (spec §5.1, bounds §4.7 P9/P10). */
 import { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import type { ApiMaterial } from '@/lib/types/api';

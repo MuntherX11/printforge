@@ -13,6 +13,7 @@ import { WatchFolderService } from '../file-parser/watch-folder.service';
 import { ProductImageBackfillService } from './product-image-backfill.service';
 import { PlateLayoutBackfillService } from './plate-layout-backfill.service';
 import { PlateLayoutsController } from './plate-layouts.controller';
+import { ProductSourcesController } from './product-sources.controller';
 import { ProductsController } from './products.controller';
 import { ProductsModule } from './products.module';
 import { VariantsController } from './variants.controller';
@@ -106,6 +107,17 @@ describe('ProductsModule routes', () => {
     const reflector = new Reflector();
     expect(reflector.get(ROLES_KEY, PlateLayoutsController)).toEqual(['ADMIN', 'OPERATOR']);
     expect(reflector.get(GUARDS_METADATA, PlateLayoutsController)).toContain(RolesGuard);
+  });
+
+  it('registers "part from a model" once each, ADMIN only, with no POST :id/components/:param route to shadow from-model', () => {
+    for (const r of ['POST /products/:id/model-inspect', 'POST /products/:id/components/from-model']) {
+      expect(routes.filter((x) => x === r)).toHaveLength(1);
+    }
+    // Any two-segment POST under :id/components with a parameter would compete with the static "from-model".
+    expect(routes.filter((r) => /^POST \/products\/:id\/components\/:[^/]+$/.test(r))).toEqual([]);
+    const reflector = new Reflector();
+    expect(reflector.get(ROLES_KEY, ProductSourcesController)).toEqual(['ADMIN']);
+    expect(reflector.get(GUARDS_METADATA, ProductSourcesController)).toContain(RolesGuard);
   });
 
   it('the removed routes are gone', () => {

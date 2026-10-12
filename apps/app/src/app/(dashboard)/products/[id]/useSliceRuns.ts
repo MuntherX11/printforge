@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SliceRunStatus, type SliceRunDto, type SliceRunEvent } from '@printforge/types';
+import { SliceRunStatus, type SliceRunDto } from '@printforge/types';
 import { api } from '@/lib/api';
 import { useSocketEvent } from '@/lib/use-websocket';
 import { errorText } from './options-ui';
-import { RUN_POLL_MS, anyActiveRun, applyRunEvent } from './slice-ui';
+import { RUN_POLL_MS, anyActiveRun, applyRunEvent, runJustFinished, type SliceRunLiveEvent } from './slice-ui';
 
 export interface SliceRuns {
   /** Newest first; null until the first load (or while disabled). */
@@ -18,8 +18,10 @@ export interface SliceRuns {
 
 /**
  * GET …/slice-runs of one part, kept current: the `slice-run` websocket event
- * updates a known run in place (an unknown id refetches), and while any run is
- * queued or slicing the list is polled every 3 s as a fallback. A run that
+ * updates a known run in place (an unknown id refetches) and, when it ends the
+ * run (DONE or FAILED), refetches the list once so the row shows the units
+ * sliced; while any run is queued or slicing the list is polled every 3 s as a
+ * fallback. A run that
  * turns DONE calls `onDone` once, so the page refetches the product and the
  * new plate appears. `refreshKey` forces a refetch (after queueing a run or
  * replacing the source).
@@ -76,14 +78,16 @@ export function useSliceRuns(productId: string, componentId: string, enabled: bo
   const runsRef = useRef(runs);
   runsRef.current = runs;
 
-  useSocketEvent<SliceRunEvent>('slice-run', ev => {
+  useSocketEvent<SliceRunLiveEvent>('slice-run', ev => {
     if (!enabled || ev.componentId !== componentId) return;
     const current = runsRef.current;
     const applied = current ? applyRunEvent(current, ev) : null;
     if (applied?.known) setRuns(applied.runs);
+    const finished = runJustFinished(seen.current.get(ev.id), ev.status);
     noteStatuses([{ id: ev.id, status: ev.status }]);
-    // A run this list has not seen (queued elsewhere), or no list yet: fetch it.
-    if (!applied?.known) void refresh();
+    // A run this list has not seen (queued elsewhere), no list yet, or a run
+    // that just ended (its units sliced come with the list): fetch it, once.
+    if (!applied?.known || finished) void refresh();
   });
 
   return { runs, error, active, refresh };

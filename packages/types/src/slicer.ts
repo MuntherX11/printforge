@@ -76,6 +76,44 @@ export interface SourceModelUploadResult {
   notice: string | null;
 }
 
+/** POST /products/:id/model-inspect response: what a staged STL or project is, before any part exists. */
+export interface ModelInspectResult {
+  kind: SourceModelKind;
+  filename: string;
+  sizeBytes: number;
+  /** The file name without its extension, at most 120 characters. */
+  suggestedName: string;
+  /** 3MF projects: the project's slots with the shop filament each one matched (null = no match). STL: []. */
+  slots: Array<{ colorIndex: number; profile: string | null; colorHex: string | null; materialId: string | null }>;
+  /** 3MF projects: the printer the project names, matched to a Printer row; null = not matched (or an STL). */
+  printerId: string | null;
+  printerModel: string | null;
+  /** The product's pricing printer, the default choice for an STL. */
+  defaultPrinterId: string | null;
+}
+
+/** POST /products/:id/components/from-model body. */
+export interface ComponentFromModelDto {
+  assembledUploadId: string;
+  /** 1..120 characters. */
+  description: string;
+  /** STL only; required when the product has no pricing printer. Ignored for a project. */
+  printerId?: string;
+  /** Filament per slot: "0" alone for an STL, one per project slot for a 3MF. */
+  materials: Partial<Record<SlotKey, string>>;
+  /** The SIZE option that owns the part; null or omitted = the standard size. */
+  variantId?: string | null;
+}
+
+/** POST /products/:id/components/from-model response. */
+export interface ComponentFromModelResult {
+  componentId: string;
+  source: ComponentSourceModel;
+  /** The 1-unit validation run that was queued, or null with a notice when it could not be. */
+  validationRun: SliceRunDto | null;
+  notice: string | null;
+}
+
 /** A filament chosen for a slot, snapshotted so a merged Material stays readable. */
 export interface SliceFilamentChoice {
   materialId: string;
@@ -120,6 +158,8 @@ export interface SliceRunEvent {
   status: SliceRunStatus;
   resultLayoutId: string | null;
   error: string | null;
+  /** Set on DONE: the units the slicer placed (a 1-unit run reports its labelled bodies). */
+  unitsSliced?: number | null;
 }
 
 /** Error codes the slice endpoints return in `message` (exact strings the UI maps). */

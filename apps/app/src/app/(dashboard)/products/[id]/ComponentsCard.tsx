@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { FileCode, Plus, Upload } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import type { ProductPageData } from './useProduct';
 import { BOM_SECTION_ID } from './useBomScope';
 import { ComponentRow } from './ComponentRow';
 import { PlateList } from './PlateList';
-import { AddComponentDialog } from './AddComponentDialog';
+import { AddFromModelDialog } from './AddFromModelDialog';
 import { EditComponentDialog } from './EditComponentDialog';
 import { PlateLayoutsDialog } from './PlateLayoutsDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -38,7 +38,7 @@ interface Props {
 }
 
 type BomDialog =
-  | { kind: 'add' }
+  | { kind: 'fromModel'; file: File }
   | { kind: 'edit'; componentId: string }
   | { kind: 'layouts'; componentId: string }
   | { kind: 'remove'; componentId: string }
@@ -64,10 +64,24 @@ function ImportButtons({ busy, onThreeMf, onGcode }: { busy: string | null; onTh
   );
 }
 
+/** "Add from model" (ADMIN): pick an STL or a 3MF project; the dialog opens once a file is chosen. */
+function AddFromModelButton({ variant, disabled, onFile }: { variant: 'outline' | 'ghost'; disabled: boolean; onFile: (f: File) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input ref={input} type="file" accept=".stl,.3mf" className="hidden" tabIndex={-1} aria-hidden="true" disabled={disabled}
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
+      <Button variant={variant} size="sm" disabled={disabled} onClick={() => input.current?.click()}>
+        {variant === 'outline' && <Plus className="mr-1 h-4 w-4" />} Add from model
+      </Button>
+    </>
+  );
+}
+
 /** Section D (spec §5.2 D): the printed components of one size. */
 export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
   const { toast } = useToast();
-  const { canEdit } = data;
+  const { canEdit, isAdmin } = data;
   const [dialog, setDialog] = useState<BomDialog | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -79,7 +93,7 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
   const totals = perProductTotals(components);
   const importer = useSlicerImport(product.id, sizeOptionId, () => void reload());
   // Editors only (VIEWER never fetches it); refetched after every product reload.
-  const stock = useFilamentStock(canEdit && components.length > 0, product);
+  const stock = useFilamentStock(canEdit && (components.length > 0 || dialog?.kind === 'fromModel'), product);
   const stockById = useMemo(() => new Map((stock.rows ?? []).map(r => [r.id, r] as const)), [stock.rows]);
   const find = (id: string) => components.find(c => c.id === id) ?? null;
   const target = dialog && 'componentId' in dialog ? find(dialog.componentId) : null;
@@ -147,7 +161,7 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
             {canEdit && components.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 <ImportButtons busy={importer.busy} onThreeMf={f => void importer.startThreeMf(f)} onGcode={f => void importer.uploadGcode(f)} />
-                <Button variant="outline" size="sm" onClick={() => setDialog({ kind: 'add' })}><Plus className="mr-1 h-4 w-4" /> Add manually</Button>
+                {isAdmin && <AddFromModelButton variant="outline" disabled={dialog !== null} onFile={file => setDialog({ kind: 'fromModel', file })} />}
               </div>
             )}
           </div>
@@ -156,13 +170,13 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
           {components.length === 0 ? (
             <div className="space-y-3 py-6 text-center">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                No components yet. Import a sliced 3MF or G-code to create them with weights, times and files.
+                No components yet. Import a sliced 3MF or G-code, or add a part from its model (STL or 3MF project).
                 {sizeOptionId && ` Until then, ${label} uses the standard bill of materials.`}
               </p>
               {canEdit && (
                 <div className="flex flex-wrap justify-center gap-2">
                   <ImportButtons busy={importer.busy} onThreeMf={f => void importer.startThreeMf(f)} onGcode={f => void importer.uploadGcode(f)} />
-                  <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: 'add' })}>Add manually</Button>
+                  {isAdmin && <AddFromModelButton variant="ghost" disabled={dialog !== null} onFile={file => setDialog({ kind: 'fromModel', file })} />}
                 </div>
               )}
             </div>
@@ -202,7 +216,7 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
                       stock={canEdit ? stockById : null}
                       onPickFilament={colorIndex => { stock.refresh(); setDialog({ kind: 'filament', componentId: c.id, colorIndex }); }}
                     />
-                    <PlateList productId={product.id} component={c} canEdit={canEdit} isAdmin={data.isAdmin} printers={printerNames}
+                    <PlateList productId={product.id} component={c} canEdit={canEdit} isAdmin={isAdmin} printers={printerNames}
                       runsKey={runsVersion} colSpan={canEdit ? 10 : 8} onChanged={() => void reload()}
                       onSlice={() => { stock.refresh(); setDialog({ kind: 'slice', componentId: c.id }); }} />
                   </Fragment>
@@ -220,8 +234,11 @@ export function ComponentsCard({ data, product, scope, onScopeChange }: Props) {
 
       {canEdit && (
         <>
-          <AddComponentDialog product={product} open={dialog?.kind === 'add'} sizeOptionId={sizeOptionId} scopeLabel={label}
-            loadMaterials={data.loadMaterials} onClose={() => setDialog(null)} onSaved={() => void reload()} />
+          {isAdmin && (
+            <AddFromModelDialog productId={product.id} file={dialog?.kind === 'fromModel' ? dialog.file : null}
+              sizeOptionId={sizeOptionId} scopeLabel={label} materials={materials} stock={stock} loadPrinters={loadPrinters}
+              onClose={() => setDialog(null)} onAdded={() => { setRunsVersion(v => v + 1); void reload(); }} />
+          )}
           <EditComponentDialog product={product} component={dialog?.kind === 'edit' ? target : null} open={dialog?.kind === 'edit'}
             loadMaterials={data.loadMaterials} onClose={() => setDialog(null)} onSaved={() => void reload()} />
           <ConfirmDialog

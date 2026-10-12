@@ -87,14 +87,26 @@ export function runUnitsText(run: Pick<SliceRunDto, 'unitsRequested' | 'unitsSli
 }
 
 /** Apply a `slice-run` websocket event to the list; an unknown id means the list must be refetched. */
-export function applyRunEvent(runs: SliceRunDto[], ev: SliceRunEvent): { runs: SliceRunDto[]; known: boolean } {
+export function applyRunEvent(runs: SliceRunDto[], ev: SliceRunLiveEvent): { runs: SliceRunDto[]; known: boolean } {
   let known = false;
   const next = runs.map(r => {
     if (r.id !== ev.id) return r;
     known = true;
-    return { ...r, status: ev.status, error: ev.error, resultLayoutId: ev.resultLayoutId };
+    return { ...r, status: ev.status, error: ev.error, resultLayoutId: ev.resultLayoutId, unitsSliced: ev.unitsSliced ?? r.unitsSliced };
   });
   return { runs: next, known };
+}
+
+export function isFinishedStatus(status: SliceRunStatus): boolean {
+  return status === SliceRunStatus.DONE || status === SliceRunStatus.FAILED;
+}
+
+/**
+ * True when an event ends a run this list had not yet seen ended: the list is
+ * then refetched once, so the row carries everything the run finished with.
+ */
+export function runJustFinished(prev: SliceRunStatus | undefined, next: SliceRunStatus): boolean {
+  return isFinishedStatus(next) && prev !== next;
 }
 
 /** The request a failed run was made with, to queue it again as it was. */
@@ -215,4 +227,84 @@ export function rowPrinterId(r: { layoutId: string | null; printerId?: string | 
   if (r.printerId) return r.printerId;
   if (!r.layoutId) return null;
   return layouts.find(l => l.id === r.layoutId)?.printerId ?? null;
+}
+
+// ---------- Add from model ----------
+
+// Shared with the API (packages/types/src/slicer.ts); re-exported so the dialogs keep one import.
+export type { ModelInspectResult, ComponentFromModelDto, ComponentFromModelResult } from '@printforge/types';
+import type { ModelInspectResult, ComponentFromModelDto, ComponentFromModelResult } from '@printforge/types';
+
+/** The `slice-run` websocket event (carries `unitsSliced` once a run is done). */
+export type SliceRunLiveEvent = SliceRunEvent;
+
+export const PART_NAME_MAX = 120;
+
+/** Why the name cannot be saved; null when it can. */
+export function partNameProblem(name: string): string | null {
+  const t = name.trim();
+  if (!t) return 'Enter a name';
+  return t.length > PART_NAME_MAX ? `At most ${PART_NAME_MAX} characters` : null;
+}
+
+export function isProjectModel(m: Pick<ModelInspectResult, 'kind'>): boolean {
+  return m.kind === SourceModelKind.THREEMF;
+}
+
+/** A 3MF project whose printer matches none of the farm's: it cannot be added. */
+export function projectPrinterUnmatched(m: Pick<ModelInspectResult, 'kind' | 'printerId'>): boolean {
+  return isProjectModel(m) && !m.printerId;
+}
+
+export function projectPrinterWarning(printerModel: string | null): string {
+  return printerModel
+    ? `This project is for ${printerModel}, which matches none of your printers`
+    : 'This project names no printer, so it matches none of your printers';
+}
+
+/** STL: slot 0 with no default. 3MF: every slot the project uses, with the filament it matched. */
+export function inspectSlotsOf(m: Pick<ModelInspectResult, 'kind' | 'slots'>): SliceSlotSpec[] {
+  if (!isProjectModel(m)) {
+    return [{ key: '0', fileLabel: null, fileHex: null, defaultMaterialId: m.slots[0]?.materialId ?? null }];
+  }
+  const out: SliceSlotSpec[] = [];
+  for (const s of m.slots) {
+    const key = asSlotKey(s.colorIndex);
+    if (!key || out.some(o => o.key === key)) continue;
+    out.push({ key, fileLabel: s.profile, fileHex: s.colorHex, defaultMaterialId: s.materialId });
+  }
+  return out.length ? out : [{ key: '0', fileLabel: null, fileHex: null, defaultMaterialId: null }];
+}
+
+/** The printer an STL starts with: the product's default when it is active, else the first active one. */
+export function defaultModelPrinterId(defaultPrinterId: string | null, active: ReadonlyArray<{ id: string }>): string {
+  if (defaultPrinterId && active.some(p => p.id === defaultPrinterId)) return defaultPrinterId;
+  return active[0]?.id ?? '';
+}
+
+/** The body of "Add part", or the reason it cannot be sent yet. */
+export function buildFromModelRequest(input: {
+  assembledUploadId: string;
+  model: Pick<ModelInspectResult, 'kind' | 'printerId'>;
+  name: string;
+  printerId: string | null;
+  slots: SliceSlotSpec[];
+  chosen: Partial<Record<SlotKey, string>>;
+  variantId: string | null;
+}): { body: ComponentFromModelDto; problem: null } | { body: null; problem: string } {
+  const nameProblem = partNameProblem(input.name);
+  if (nameProblem) return { body: null, problem: nameProblem };
+  const project = isProjectModel(input.model);
+  if (projectPrinterUnmatched(input.model)) return { body: null, problem: 'The project\'s printer matches none of yours' };
+  if (!project && !input.printerId) return { body: null, problem: 'Choose a printer' };
+  const materials: Partial<Record<SlotKey, string>> = {};
+  for (const s of input.slots) {
+    const id = input.chosen[s.key];
+    if (!id) return { body: null, problem: input.slots.length > 1 ? `Choose a filament for slot ${Number(s.key) + 1}` : 'Choose a filament' };
+    materials[s.key] = id;
+  }
+  const body: ComponentFromModelDto = { assembledUploadId: input.assembledUploadId, description: input.name.trim(), materials };
+  if (!project && input.printerId) body.printerId = input.printerId;
+  if (input.variantId) body.variantId = input.variantId;
+  return { body, problem: null };
 }
