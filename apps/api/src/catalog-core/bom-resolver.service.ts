@@ -5,6 +5,7 @@ import { PRODUCT_CONFIG_INCLUDE, toProductConfig, type ProductConfig } from './c
 import { CatalogRequestContext, pairKey } from './catalog-context';
 import { resolveInConfig, standardMixedWarnings, type ResolvedBom } from './bom-resolve';
 import { effectiveOptions, type PairContext, type PairRow, type VariantLite } from './option-pair';
+import { applyProjectPrinters } from './project-printer';
 
 export * from './bom-resolve';
 
@@ -39,6 +40,8 @@ export class BomResolverService {
       const row = await client.product.findUnique({ where: { id: productId }, include: PRODUCT_CONFIG_INCLUDE as any });
       if (!row) return null;
       const config = toProductConfig(row);
+      // A multi-colour project's printer lock (v2.19.0); no query for a product without a 3MF source.
+      await applyProjectPrinters(client as any, config);
       if (ctx) for (const o of config.options) ctx.variants.set(o.id, { id: o.id, productId: o.productId, kind: o.kind, name: o.name });
       return config;
     };

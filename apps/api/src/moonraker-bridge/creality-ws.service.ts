@@ -4,6 +4,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import WebSocket from 'ws';
 import { cancelledOrderNote, JobCompletionService } from '../stock-ledger/job-completion.service';
 import { findJobForCompletion } from './moonraker.service';
+import { sharedPlateJobs, startSharedPlateJobs } from './shared-plate';
 
 // Heartbeat sent every 10s to keep the connection alive and receive fresh state
 const HEARTBEAT_MSG = JSON.stringify({ method: 'get', params: { ReqPrinterPara: 1 } });
@@ -295,6 +296,8 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
 
     if (updated.count > 0) {
       this.logger.log(`Job ${job.id} auto-started for printer ${printerId}: gcode "${snapshot.fileName}"`);
+      // A shared plate is one print: its other jobs start with it.
+      await startSharedPlateJobs(this.prisma, job.id);
     }
   }
 
@@ -308,9 +311,12 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
     const job = await findJobForCompletion(this.prisma, printerId, snapshot.fileName);
     if (!job) return;
 
+    // A shared plate is one print: the printer's time is shared out over its jobs.
+    const group = await sharedPlateJobs(this.prisma, job.id);
+    const share = group[0].share;
     const result = await this.completion.complete(job.id, {
       source: 'CREALITY',
-      printDurationSec: snapshot.printJobTime,
+      printDurationSec: (snapshot.printJobTime || 0) * share,
     }).catch((err) => {
       this.logger.warn(`Completion failed for job ${job.id}: ${err.message}`);
       return null;
@@ -321,10 +327,23 @@ export class CrealityWsService implements OnModuleInit, OnModuleDestroy {
     }
 
     // BIZ-13: machine cost = print hours × hourly rate (after commit).
-    const printHours = (snapshot.printJobTime || 0) / 3600;
-    const machineCost = printHours * (result.job.printer?.hourlyRate ?? 0);
+    const hourlyRate = result.job.printer?.hourlyRate ?? 0;
+    const printHours = ((snapshot.printJobTime || 0) * share) / 3600;
+    const machineCost = printHours * hourlyRate;
     await this.prisma.productionJob.update({ where: { id: job.id }, data: { machineCost } })
       .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
+
+    // The other jobs of the plate finish with it, each with its own share.
+    for (const sibling of group.slice(1)) {
+      const seconds = (snapshot.printJobTime || 0) * sibling.share;
+      const done = await this.completion.complete(sibling.id, { source: 'CREALITY', printDurationSec: seconds }).catch((err) => {
+        this.logger.warn(`Completion failed for job ${sibling.id} (shares a plate with ${job.id}): ${err.message}`);
+        return null;
+      });
+      if (!done) continue;
+      await this.prisma.productionJob.update({ where: { id: sibling.id }, data: { machineCost: (seconds / 3600) * hourlyRate } })
+        .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${sibling.id}: ${err.message}`));
+    }
 
     await this.notifications.create({
       type: 'JOB_COMPLETED',

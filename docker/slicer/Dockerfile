@@ -58,7 +58,7 @@ RUN groupadd --system slicer \
  && chown slicer:slicer /scratch /app
 
 WORKDIR /app
-COPY --chown=slicer:slicer package.json server.mjs flatten.mjs args.mjs system-index.mjs ./
+COPY --chown=slicer:slicer package.json server.mjs flatten.mjs args.mjs labels.mjs request.mjs system-index.mjs ./
 
 ENV PORT=7788 \
     SLICE_TIMEOUT_MS=300000 \

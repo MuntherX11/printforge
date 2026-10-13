@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { JobsService } from './jobs.service';
 import { JobMaterialsService } from './job-materials.service';
+import { JobSiblingsService } from './job-siblings';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -19,6 +20,7 @@ export class JobsController {
   constructor(
     private jobsService: JobsService,
     private jobMaterialsService: JobMaterialsService,
+    private siblings: JobSiblingsService,
   ) {}
 
   /** J1 */
@@ -85,12 +87,12 @@ export class JobsController {
     return this.jobsService.findOne(id);
   }
 
-  /** J8 */
+  /** J8. Jobs of one order plate start together (job-siblings.ts). */
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
   update(@Param('id') id: string, @Body() body: unknown) {
-    return this.jobsService.update(id, body);
+    return this.siblings.update(id, body);
   }
 
   @Post(':id/materials')
@@ -124,7 +126,7 @@ export class JobsController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
   completeJob(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.jobsService.completeJob(id, user?.id ?? null);
+    return this.siblings.complete(id, user?.id ?? null);
   }
 
   /** J9 */
@@ -132,7 +134,7 @@ export class JobsController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'OPERATOR')
   failJob(@Param('id') id: string, @Body() body: unknown) {
-    return this.jobsService.failJob(id, body);
+    return this.siblings.fail(id, body);
   }
 
   /** J7 */

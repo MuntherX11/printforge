@@ -59,7 +59,13 @@ export interface JobDetail {
   plates: JobPlateDetail[];
   surplusByComponent: JobSurplusRow[];
   filamentPlan: FilamentPlanLine[];
+  /** The order plate the job was made from (v2.19.0), and the other jobs printed on that same plate. */
+  orderPlateId?: string | null;
+  sharedWith?: Array<{ id: string; name: string }>;
 }
+
+/** PATCH /jobs/:id and POST …/fail may answer with warnings (e.g. a job sharing the plate could not follow). */
+export type JobWriteWarnings = { warnings?: Array<{ code: string; message: string }> } | null | undefined;
 
 const TERMINAL: JobStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
 export const isTerminal = (s: JobStatus) => TERMINAL.includes(s);

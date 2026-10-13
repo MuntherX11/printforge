@@ -35,6 +35,8 @@ const RELATIONS: Record<string, Record<string, Rel>> = {
     product: one('product', 'productId'),
   },
   sliceRun: { component: one('productComponent', 'componentId'), printer: one('printer', 'printerId') },
+  orderPlate: { printer: one('printer', 'printerId'), order: one('order', 'orderId') },
+  printer: { productionJobs: many('productionJob', 'printerId') },
   productComponent: {
     material: one('material', 'materialId'),
     materials: many('componentMaterial', 'componentId'),
@@ -106,6 +108,8 @@ const MODELS = [
   'expense', 'expenseCategory', 'account', 'accountTransaction',
   // slicer (v2.18)
   'sliceRun', 'slicerProfile',
+  // order print files (v2.19)
+  'orderPlate',
 ];
 
 const LOCK_TABLES: Record<string, string> = {

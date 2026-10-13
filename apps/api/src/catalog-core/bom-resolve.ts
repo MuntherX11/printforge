@@ -65,6 +65,11 @@ export interface ResolvedComponent {
   perUnitEstimated: boolean;
   /** not sliced yet (PART_NOT_MEASURED): grams and minutes are placeholders, never planned or priced */
   pendingFirstSlice: boolean;
+  /** the model the slicer slices from; absent or null = none */
+  sourceAttachmentId?: string | null;
+  sourceKind?: 'STL' | 'THREEMF' | null;
+  /** a multi-colour project's own printer: every plate of the part is that printer's */
+  projectPrinter?: { id: string; name: string } | null;
 }
 
 export interface ResolvedPart {
@@ -170,12 +175,21 @@ function layoutsOf(c: ComponentRow, desc: string, slots: ResolvedSlot[], minutes
       ...(l.printerId ? { printerId: l.printerId, printerName: l.printerName ?? null } : {}),
     });
   }
-  if (minutesPerUnit > 0 && gramsPerUnit > 0 && !kept.some((l) => l.unitsPerPlate === 1)) {
+  const single = minutesPerUnit > 0 && gramsPerUnit > 0 && !kept.some((l) => l.unitsPerPlate === 1);
+  if (single) {
     out.push({
       layoutId: null, label: `${desc} single`, unitsPerPlate: 1, plateMinutes: minutesPerUnit, plateGrams: gramsPerUnit,
       slotGrams: new Map(slots.map((s) => [s.colorIndex, s.gramsPerUnit])),
       attachmentId: c.attachmentId, gcodeFilename: c.gcodeFilename, colorChanges: c.colorChanges,
     });
+  }
+  // A multi-colour project never prints on another printer than its own: a plate that names
+  // none (the part's own file, a hand-entered plate) is that printer's, so a job for another
+  // printer gets "No plate sliced for <printer>" instead of a single-unit plan.
+  if (c.projectPrinter) {
+    for (const l of out) {
+      if (!l.printerId) Object.assign(l, { printerId: c.projectPrinter.id, printerName: c.projectPrinter.name });
+    }
   }
   out.sort((a, b) => b.unitsPerPlate - a.unitsPerPlate);
   return { layouts: out, inactiveLayoutIds: c.layouts.filter((l) => !l.isActive).map((l) => l.id) };
@@ -237,6 +251,9 @@ function sizeStage(config: ProductConfig, sizeOptionId: string | null): SizeStag
       colourKey: baseKey, baseColourKey: baseKey, stockOnHand: c.stockOnHand, stockConfirmedAt: c.stockConfirmedAt,
       perUnitEstimated: !!c.perUnitEstimatedFromLayoutId,
       pendingFirstSlice: pending,
+      sourceAttachmentId: c.sourceAttachmentId ?? null,
+      sourceKind: c.sourceKind ?? null,
+      projectPrinter: c.projectPrinter ?? null,
     };
     return { row: c, resolved };
   });

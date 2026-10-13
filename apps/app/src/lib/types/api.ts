@@ -426,6 +426,10 @@ export interface ApiProductionJob {
   createdAt: string;
   updatedAt: string;
   materials?: ApiJobMaterial[];
+  /** The order plate the job was made from (v2.19.0); jobs sharing it are one physical print. */
+  orderPlateId?: string | null;
+  /** The other jobs printed on the same plate. */
+  sharedWith?: Array<{ id: string; name: string }>;
 }
 
 // ============ ORDERS ============
@@ -543,13 +547,13 @@ export interface ApiDashboardKpis {
 
 /** Shape returned by GET /jobs/queue */
 export interface ApiPrinterQueue extends Pick<ApiPrinter, 'id' | 'name' | 'model' | 'status' | 'cameraUrl'> {
-  productionJobs: Array<Pick<ApiProductionJob, 'id' | 'name' | 'status' | 'quantityToProduce' | 'createdAt'> & {
+  productionJobs: Array<Pick<ApiProductionJob, 'id' | 'name' | 'status' | 'quantityToProduce' | 'createdAt' | 'sharedWith'> & {
     order?: { id: string; orderNumber: string } | null;
   }>;
 }
 
 export interface ApiJobQueue {
-  unassigned: Array<Pick<ApiProductionJob, 'id' | 'name' | 'quantityToProduce' | 'createdAt'> & {
+  unassigned: Array<Pick<ApiProductionJob, 'id' | 'name' | 'quantityToProduce' | 'createdAt' | 'sharedWith'> & {
     order?: { id: string; orderNumber: string } | null;
   }>;
   printers: ApiPrinterQueue[];

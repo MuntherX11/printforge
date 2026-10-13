@@ -23,6 +23,7 @@ import { JobPlanningService } from './job-planning.service';
 import { assertOrderAcceptsJobs, ORDER_CANCELLED_NO_REQUEUE } from './job-transitions';
 import { notifyOrderCompletedIfAllDone } from './order-completed-notice';
 import { buildFilamentPlan, jobDetailExtras } from './job-presenter';
+import { sharedPlateOf, sharedWithOf } from './job-shared-plate';
 import { JobSchedulingService } from './job-scheduling.service';
 import { defaultJobPrinter } from './plate-printers';
 
@@ -254,7 +255,9 @@ export class JobsService {
       }),
       this.prisma.productionJob.count({ where }),
     ]);
-    return paginatedResponse(data, total, query);
+    // Jobs of one order plate print together: each row names the others (v2.19.0).
+    const shared = await sharedWithOf(this.prisma, data);
+    return paginatedResponse(data.map((j) => ({ ...j, sharedWith: shared.get(j.id) ?? [] })), total, query);
   }
 
   /** J3: the job, its pair (effectiveOptions), plates, surplus per component and picking list. */
@@ -286,6 +289,7 @@ export class JobsService {
     return {
       ...job,
       ...extras.detail,
+      ...(await sharedPlateOf(this.prisma, job)),
       filamentPlan: await buildFilamentPlan(job, extras.bom, this.planner, ctx),
     };
   }
@@ -525,6 +529,8 @@ export class JobsService {
           colorChanges: original.colorChanges,
           gcodeFilename: plates.length ? singlePlateFilename(newPlates) : original.gcodeFilename,
           reprintOfId: original.id,
+          // Still the same plate: the reprint prints with (and locks) what its original did.
+          orderPlateId: original.orderPlateId ?? null,
         },
       });
       if (newPlates.length) await tx.jobPlate.createMany({ data: newPlates.map((p) => ({ ...p, jobId: job.id })) });

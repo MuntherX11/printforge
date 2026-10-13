@@ -42,7 +42,31 @@ import { filamentMapOf } from './slice.service';
  * On boot, RUNNING rows left by the previous process go back to QUEUED. Ticks
  * never overlap (re-entrancy flag). Every status change is broadcast as the
  * `slice-run` websocket event.
+ *
+ * The plates of an order's print plan (v2.19.0, order-plates/) wait in the same
+ * queue: the slicer container runs one job at a time, so ONE tick claims the
+ * oldest QUEUED row of either table, a slice run or an order plate. The plate
+ * side registers itself here (`registerOrderPlates`) and does its own work;
+ * this file only reaps, claims and hands the plate over.
  */
+
+/** The order-plate half of the queue, as the tick sees it. */
+export interface OrderPlateQueue {
+  /** RUNNING plates started before `cutoff` → FAILED. */
+  reap(cutoff: Date): Promise<void>;
+  /** Process one claimed (RUNNING) plate to DONE or FAILED. Never throws. */
+  run(id: string): Promise<void>;
+}
+
+/** Labels on the part's most recent 1-unit run (a project's bodies per unit), else 1. */
+export async function bodiesPerUnit(prisma: Pick<PrismaService, 'sliceRun'>, componentId: string): Promise<number> {
+  const v = await prisma.sliceRun.findFirst({
+    where: { componentId, status: 'DONE', unitsRequested: 1, unitsSliced: { gt: 0 } },
+    orderBy: { finishedAt: 'desc' },
+    select: { unitsSliced: true },
+  });
+  return v?.unitsSliced && v.unitsSliced > 0 ? v.unitsSliced : 1;
+}
 
 export const TICK_MS = 2000;
 export const RUN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -71,6 +95,7 @@ export class SliceProcessor implements OnModuleInit {
   private readonly logger = new Logger(SliceProcessor.name);
   private readonly bootAt = new Date();
   private busy = false;
+  private plates: OrderPlateQueue | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -95,14 +120,21 @@ export class SliceProcessor implements OnModuleInit {
     }
   }
 
+  /** Called once by the order-plates module: from then on its QUEUED plates share the tick. */
+  registerOrderPlates(queue: OrderPlateQueue): void {
+    this.plates = queue;
+  }
+
   @Interval(TICK_MS)
   async tick(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     try {
       await this.reap();
-      const id = await this.claim();
-      if (id) await this.run(id);
+      await this.plateSide('reap', () => this.plates!.reap(new Date(Date.now() - RUN_TIMEOUT_MS)));
+      const next = await this.claim();
+      if (next?.kind === 'run') await this.run(next.id);
+      else if (next) await this.plateSide('run', () => this.plates!.run(next.id));
     } catch (e) {
       this.logger.error(`Slice tick failed: ${(e as Error)?.message}`, (e as Error)?.stack);
     } finally {
@@ -126,13 +158,47 @@ export class SliceProcessor implements OnModuleInit {
     }
   }
 
-  /** One run per tick, oldest first; concurrent API processes never take the same one. */
-  private async claim(): Promise<string | null> {
-    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      UPDATE "SliceRun" SET status = 'RUNNING', "startedAt" = now()
-      WHERE id = (SELECT id FROM "SliceRun" WHERE status = 'QUEUED' ORDER BY "createdAt" LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id`);
-    return rows[0]?.id ?? null;
+  /**
+   * The order-plate half never stops slice runs: whatever it throws (a table
+   * that is not there yet, a bug of its own) is logged and the tick goes on.
+   */
+  private async plateSide<T>(what: string, work: () => Promise<T>): Promise<T | null> {
+    if (!this.plates) return null;
+    try {
+      return await work();
+    } catch (e) {
+      this.logger.error(`Order plate ${what} failed: ${(e as Error)?.message}`, (e as Error)?.stack);
+      return null;
+    }
+  }
+
+  /**
+   * One row per tick, the oldest QUEUED of both tables first (a run by when it
+   * was created, a plate by when it was queued); concurrent API
+   * processes never take the same one. The two heads are only looked at to
+   * decide which table to claim from first: the claim itself is the guarded
+   * UPDATE, and when another process took that row the other table is tried.
+   */
+  private async claim(): Promise<{ kind: 'run' | 'plate'; id: string } | null> {
+    const heads: Array<{ kind: 'run' | 'plate'; at: number }> = [];
+    const run = await this.prisma.sliceRun.findFirst({ where: { status: 'QUEUED' }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } });
+    if (run) heads.push({ kind: 'run', at: new Date(run.createdAt).getTime() });
+    const plate = await this.plateSide('queue lookup', () =>
+      this.prisma.orderPlate.findFirst({ where: { status: 'QUEUED' }, orderBy: [{ queuedAt: 'asc' }, { createdAt: 'asc' }], select: { queuedAt: true, createdAt: true } }));
+    if (plate) heads.push({ kind: 'plate', at: new Date(plate.queuedAt ?? plate.createdAt).getTime() });
+    for (const head of heads.sort((a, b) => a.at - b.at)) {
+      const rows = head.kind === 'run'
+        ? await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            UPDATE "SliceRun" SET status = 'RUNNING', "startedAt" = now()
+            WHERE id = (SELECT id FROM "SliceRun" WHERE status = 'QUEUED' ORDER BY "createdAt" LIMIT 1 FOR UPDATE SKIP LOCKED)
+            RETURNING id`)
+        : await this.plateSide('claim', () => this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            UPDATE "OrderPlate" SET status = 'RUNNING', "startedAt" = now(), "updatedAt" = now()
+            WHERE id = (SELECT id FROM "OrderPlate" WHERE status = 'QUEUED' ORDER BY "queuedAt" NULLS FIRST, "createdAt" LIMIT 1 FOR UPDATE SKIP LOCKED)
+            RETURNING id`));
+      if (rows?.[0]?.id) return { kind: head.kind, id: rows[0].id };
+    }
+    return null;
   }
 
   /** Process one claimed run to DONE or FAILED. Never throws. */
@@ -257,7 +323,7 @@ export class SliceProcessor implements OnModuleInit {
     }
 
     // N units: a SLICED layout. Projects may hold several bodies per unit.
-    const bodies = isProject ? await this.bodiesPerUnit(comp.id) : 1;
+    const bodies = isProject ? await bodiesPerUnit(this.prisma, comp.id) : 1;
     const unitsPerPlate = Math.min(MAX_UNITS_PER_PLATE, Math.max(1, Math.round(labels / bodies)));
     const name = `x${unitsPerPlate} · ${printer.name}${types.some((t) => t !== 'PLA') ? ` · ${types.join('/')}` : ''}`;
     const layoutId = await this.layouts.createSliced(comp.id, {
@@ -265,16 +331,6 @@ export class SliceProcessor implements OnModuleInit {
     });
     await this.plateFiles.attachBuffer(comp.productId, comp.id, layoutId, out.gcode, filename, {});
     return { unitsSliced: unitsPerPlate, layoutId };
-  }
-
-  /** Labels on the part's most recent 1-unit run (its bodies per unit), else 1. */
-  private async bodiesPerUnit(componentId: string): Promise<number> {
-    const v = await this.prisma.sliceRun.findFirst({
-      where: { componentId, status: 'DONE', unitsRequested: 1, unitsSliced: { gt: 0 } },
-      orderBy: { finishedAt: 'desc' },
-      select: { unitsSliced: true },
-    });
-    return v?.unitsSliced && v.unitsSliced > 0 ? v.unitsSliced : 1;
   }
 
   private broadcast(ev: SliceRunEvent): void {

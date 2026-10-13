@@ -15,6 +15,7 @@ import { mapLegacyVariantId, validatePair } from '../catalog-core/option-pair';
 import { PricingService, type ResolvedLine } from '../catalog-core/pricing.service';
 import { ProductionPlannerService } from '../catalog-core/production-planner.service';
 import { ProductStockService } from '../stock-ledger/product-stock.service';
+import { sharedWithOf } from '../production/job-shared-plate';
 import { cancelQueuedJobsForItem, LINE_STARTED_MESSAGE, lockOrderPlan } from '../production/job-transitions';
 import { TX_OPTS } from '../products/product-locks';
 import {
@@ -216,8 +217,11 @@ export class OrdersService {
       units: a.units,
     }));
 
+    // Jobs of one order plate print together: each names the others (v2.19.0).
+    const shared = await sharedWithOf(this.prisma, order.productionJobs);
     return {
       ...order,
+      productionJobs: order.productionJobs.map((j: any) => ({ ...j, sharedWith: shared.get(j.id) ?? [] })),
       items,
       materialAvailability: availability.materials,
       partAvailability,

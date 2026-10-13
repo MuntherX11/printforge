@@ -27,10 +27,15 @@ function hitCapacity(r: PastRun): r is { unitsRequested: number; unitsSliced: nu
   return typeof sliced === 'number' && Number.isInteger(sliced) && sliced > 0 && r.unitsRequested > 1 && sliced < r.unitsRequested;
 }
 
+/** Units the newest run that hit the plate's capacity placed (what fits); null when none has. */
+export function pastCapacity(doneRuns: ReadonlyArray<PastRun>): number | null {
+  return doneRuns.find(hitCapacity)?.unitsSliced ?? null;
+}
+
 /** What an earlier run showed fits, plus the margin; null when no run has hit the plate's capacity. */
 export function pastFillUnits(doneRuns: ReadonlyArray<PastRun>): number | null {
-  const full = doneRuns.find(hitCapacity);
-  return full ? Math.min(PROJECT_FILL_UNITS, full.unitsSliced + PROJECT_FILL_MARGIN) : null;
+  const full = pastCapacity(doneRuns);
+  return full !== null ? Math.min(PROJECT_FILL_UNITS, full + PROJECT_FILL_MARGIN) : null;
 }
 
 /** `estimate`: copies from the x1 file's footprint; null (or not a whole number from 1) when there is none. */

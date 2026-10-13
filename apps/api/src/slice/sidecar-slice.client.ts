@@ -31,15 +31,52 @@ export interface SidecarSliceRequest {
   siblings?: SidecarPreset[];
 }
 
+/** One model on a mixed plate (v2.19.0): a part of an order, with the copies asked for. */
+export interface SidecarSliceInput {
+  inputPath: string;
+  kind: 'stl' | '3mf';
+  copies: number;
+}
+
+/**
+ * The second request shape: 1..24 models of ONE filament sliced onto one plate
+ * with the printer's machine and process. A 3MF input gives only its shape. The
+ * answer carries `X-Input-Units`: the units the slicer placed per input, in
+ * request order (an entry can be 0 when the plate was too full).
+ */
+export interface SidecarMixedSliceRequest {
+  inputs: SidecarSliceInput[];
+  machine: SidecarPreset;
+  process: SidecarPreset;
+  /** exactly one */
+  filaments: SidecarFilament[];
+  siblings?: SidecarPreset[];
+}
+
 export interface SidecarSliceError {
   ok: false;
   code: string;
   message: string;
   exitCode: number | null;
   logTail: string;
+  /** Mixed request: the index of the input that is to blame, when one is. */
+  input?: number | null;
 }
 
-export type SidecarSliceResult = { ok: true; gcode: Buffer; plateFiles: number | null } | SidecarSliceError;
+export type SidecarSliceResult =
+  | { ok: true; gcode: Buffer; plateFiles: number | null; /** mixed request only; null when the header is missing or unreadable */ inputUnits?: number[] | null }
+  | SidecarSliceError;
+
+/** `X-Input-Units: [3,0,12]` → whole numbers from 0, or null when it is not that. */
+export function parseInputUnits(header: string | null | undefined): number[] | null {
+  if (!header) return null;
+  try {
+    const v: unknown = JSON.parse(header);
+    return Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0) ? (v as number[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 export const SLICE_TIMEOUT_MS = 330_000;
 
@@ -111,7 +148,7 @@ export class SidecarSliceClient {
     return (process.env.SLICER_URL || '').trim().replace(/\/+$/, '');
   }
 
-  async slice(req: SidecarSliceRequest): Promise<SidecarSliceResult> {
+  async slice(req: SidecarSliceRequest | SidecarMixedSliceRequest): Promise<SidecarSliceResult> {
     const base = this.baseUrl;
     if (!base) return { ok: false, code: SliceErrorCode.SLICER_UNAVAILABLE, message: 'The slicer container is not configured (SLICER_URL)', exitCode: null, logTail: '' };
     let res: Response;
@@ -132,9 +169,12 @@ export class SidecarSliceClient {
     }
     if (res.ok) {
       const plateFiles = Number(res.headers.get('X-Plate-Files'));
-      return { ok: true, gcode: Buffer.from(await res.arrayBuffer()), plateFiles: Number.isFinite(plateFiles) && plateFiles > 0 ? plateFiles : null };
+      return {
+        ok: true, gcode: Buffer.from(await res.arrayBuffer()), plateFiles: Number.isFinite(plateFiles) && plateFiles > 0 ? plateFiles : null,
+        inputUnits: parseInputUnits(res.headers.get('X-Input-Units')),
+      };
     }
-    let body: { error?: unknown; exitCode?: unknown; logTail?: unknown } = {};
+    let body: { error?: unknown; exitCode?: unknown; logTail?: unknown; input?: unknown } = {};
     try {
       body = (await res.json()) as typeof body;
     } catch {
@@ -148,6 +188,7 @@ export class SidecarSliceClient {
       message,
       exitCode: typeof body.exitCode === 'number' ? body.exitCode : null,
       logTail: typeof body.logTail === 'string' ? body.logTail : '',
+      input: typeof body.input === 'number' && Number.isInteger(body.input) && body.input >= 0 ? body.input : null,
     };
   }
 }

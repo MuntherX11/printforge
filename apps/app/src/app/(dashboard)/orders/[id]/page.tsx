@@ -26,6 +26,8 @@ import { CancelledJobNote, CancelOrderSummary, cancelToast } from './CancelOrder
 import { InvoiceList } from './InvoiceList';
 import { ConfigArtifactsCard } from './ConfigArtifactsCard';
 import { PlanProductionDialog } from './PlanProductionDialog';
+import { PrintFilesCard } from './PrintFilesCard';
+import { SharedPlateNote } from '@/components/production/SharedPlateNote';
 
 const orderStatuses = [
   { value: 'PENDING', label: 'Pending' },
@@ -347,11 +349,14 @@ export default function OrderDetailPage() {
         );
       })()}
 
+      {/* The plates this order needs per printer, sliced and downloadable here (v2.19.0). */}
+      <PrintFilesCard orderId={String(id)} canEdit={canEdit} onJobsCreated={reload} />
+
       {/* The slicer files for this order, so the operator doesn't have to go
           find them in the product catalogue. */}
       {order.printFiles && order.printFiles.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Print Files</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Product files</CardTitle></CardHeader>
           <CardContent className="p-0">
             <div className="divide-y dark:divide-gray-700">
               {order.printFiles.map((f, i) => (
@@ -408,6 +413,7 @@ export default function OrderDetailPage() {
                   <div>
                     <p className="text-sm font-medium">{job.name}</p>
                     <p className="text-xs text-gray-500">{job.printer?.name}</p>
+                    <SharedPlateNote sharedWith={job.sharedWith} />
                     <CancelledJobNote orderStatus={order.status} jobStatus={job.status} />
                   </div>
                   <StatusBadge status={job.status} />

@@ -16,6 +16,7 @@ import { Pagination } from '@/components/ui/pagination';
 import type { ApiPaginatedResponse, ApiProductionJob, ApiJobQueue, ApiJobFailureStats } from '@/lib/types/api';
 import { Plus, AlertTriangle, Shuffle, LayoutList, ListChecks, Hammer } from 'lucide-react';
 import { CameraViewer } from '@/components/camera-viewer';
+import { SharedPlateNote } from '@/components/production/SharedPlateNote';
 
 const statusFilters = ['ALL', 'QUEUED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -167,6 +168,7 @@ export default function ProductionPage() {
                       <TableRow key={j.id}>
                         <TableCell>
                           <Link href={`/production/${j.id}`} className="font-medium text-brand-600 hover:underline">{j.name}</Link>
+                          <SharedPlateNote sharedWith={j.sharedWith} />
                         </TableCell>
                         <TableCell>{j.printer?.name || <span className="text-amber-500 text-xs font-medium">Unassigned</span>}</TableCell>
                         <TableCell>{j.assignedTo?.name || '-'}</TableCell>
@@ -205,7 +207,7 @@ export default function ProductionPage() {
                     {queue.unassigned.map((j, i) => (
                       <TableRow key={j.id}>
                         <TableCell className="text-gray-400 text-xs">{i + 1}</TableCell>
-                        <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link></TableCell>
+                        <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link><SharedPlateNote sharedWith={j.sharedWith} /></TableCell>
                         <TableCell>{j.order ? <Link href={`/orders/${j.order.id}`} className="text-brand-600 hover:underline text-xs">{j.order.orderNumber}</Link> : '-'}</TableCell>
                         <TableCell className="text-sm">{j.quantityToProduce}</TableCell>
                         <TableCell className="text-xs text-gray-500">{formatDate(j.createdAt)}</TableCell>
@@ -246,7 +248,7 @@ export default function ProductionPage() {
                       {p.productionJobs.map((j, i) => (
                         <TableRow key={j.id}>
                           <TableCell className="text-gray-400 text-xs">{i + 1}</TableCell>
-                          <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link></TableCell>
+                          <TableCell><Link href={`/production/${j.id}`} className="text-brand-600 hover:underline text-sm">{j.name}</Link><SharedPlateNote sharedWith={j.sharedWith} /></TableCell>
                           <TableCell><StatusBadge status={j.status} /></TableCell>
                           <TableCell>{j.order ? <Link href={`/orders/${j.order.id}`} className="text-brand-600 hover:underline text-xs">{j.order.orderNumber}</Link> : '-'}</TableCell>
                           <TableCell className="text-sm">{j.quantityToProduce}</TableCell>

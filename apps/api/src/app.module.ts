@@ -30,6 +30,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { AddonsModule } from './addons/addons.module';
 import { SlicerProfilesModule } from './slicer-profiles/slicer-profiles.module';
 import { SliceModule } from './slice/slice.module';
+import { OrderPlatesModule } from './order-plates/order-plates.module';
 import { ChunkUploadsModule } from './chunk-uploads/chunk-uploads.module';
 import { ConfiguratorModule } from './configurator/configurator.module';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -74,6 +75,7 @@ import { HealthController } from './health/health.controller';
     AddonsModule,
     SlicerProfilesModule,
     SliceModule,
+    OrderPlatesModule,
     ChunkUploadsModule,
     ConfiguratorModule,
     ScheduleModule.forRoot(),

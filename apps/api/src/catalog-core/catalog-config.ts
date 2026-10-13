@@ -76,6 +76,15 @@ export interface ComponentRow {
   perUnitEstimatedFromLayoutId: string | null;
   /** made from its model and not sliced yet: its grams and minutes are placeholders */
   pendingFirstSlice?: boolean;
+  /** the model the slicer slices from (Attachment id) and its kind; absent = none */
+  sourceAttachmentId?: string | null;
+  sourceKind?: 'STL' | 'THREEMF' | null;
+  /**
+   * A multi-colour 3MF project prints on the printer the project names and on no
+   * other (v2.19.0): set by the resolver's load, it gives every plate of the part
+   * that printer. Absent = not such a part, or the project's printer is not known.
+   */
+  projectPrinter?: { id: string; name: string } | null;
   materials: ComponentSlotRow[];
   layouts: LayoutRow[];
   colourStock: Array<{ colourKey: string; stockOnHand: number }>;
@@ -186,6 +195,8 @@ export function toProductConfig(row: any): ProductConfig {
       stockConfirmedAt: c.stockConfirmedAt ?? null,
       perUnitEstimatedFromLayoutId: c.perUnitEstimatedFromLayoutId ?? null,
       pendingFirstSlice: c.pendingFirstSlice === true,
+      sourceAttachmentId: c.sourceAttachmentId ?? null,
+      sourceKind: c.sourceKind === 'THREEMF' ? 'THREEMF' : c.sourceKind === 'STL' ? 'STL' : null,
       materials: [...(c.materials ?? [])]
         .sort((a: any, b: any) => a.colorIndex - b.colorIndex)
         .map((cm: any) => ({

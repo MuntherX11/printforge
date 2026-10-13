@@ -46,7 +46,7 @@ export interface OrderDetail {
   printFiles?: OrderPrintFile[];
   stockAllocations?: OrderStockAllocation[];
   invoices?: OrderInvoice[];
-  productionJobs?: Array<{ id: string; name: string; status: JobStatus; printer?: { id: string; name: string } | null }>;
+  productionJobs?: Array<{ id: string; name: string; status: JobStatus; printer?: { id: string; name: string } | null; sharedWith?: Array<{ id: string; name: string }> }>;
   warnings?: Problem[];
 }
 

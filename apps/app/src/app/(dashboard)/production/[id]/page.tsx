@@ -19,7 +19,8 @@ import { useToast } from '@/components/ui/toast';
 import { CameraViewer } from '@/components/camera-viewer';
 import { useWebSocket } from '@/lib/use-websocket';
 import type { ApiMaterial, ApiSpool, JobCompletionExtras, ReprintJobInput } from '@/lib/types/api';
-import { loadMaterials, type JobDetail } from './job-detail';
+import { SharedPlateNote } from '@/components/production/SharedPlateNote';
+import { loadMaterials, type JobDetail, type JobWriteWarnings } from './job-detail';
 import { JobPlatesCard } from './JobPlatesCard';
 import { JobFilamentCard } from './JobFilamentCard';
 import { ReprintDialog } from './ReprintDialog';
@@ -68,6 +69,7 @@ export default function JobDetailPage() {
   const load = () => api.get<JobDetail>(`/jobs/${id}`).then(setJob).catch((err: unknown) => toast('error', errorText(err, 'Failed to load'))).finally(() => setLoading(false));
 
   /** Server message as a toast; a 409 (someone or a printer got there first) also reloads the job. */
+  const warn = (res: JobWriteWarnings) => { for (const w of res?.warnings ?? []) toast('warning', w.message); };
   function fail(err: unknown) {
     toast('error', errorText(err));
     if (err instanceof ApiError && err.status === 409) load();
@@ -127,7 +129,7 @@ export default function JobDetailPage() {
 
   async function updateJob(data: Record<string, unknown>) {
     try {
-      await api.patch(`/jobs/${id}`, data);
+      warn(await api.patch<JobWriteWarnings>(`/jobs/${id}`, data));
       toast('success', 'Job updated');
       load();
     } catch (err: unknown) {
@@ -180,10 +182,10 @@ export default function JobDetailPage() {
     const form = new FormData(e.currentTarget);
     setSubmittingFail(true);
     try {
-      await api.post(`/jobs/${id}/fail`, {
+      warn(await api.post<JobWriteWarnings>(`/jobs/${id}/fail`, {
         failureReason: form.get('failureReason'),
         wasteGrams: parseFloat(form.get('wasteGrams') as string) || 0,
-      });
+      }));
       setShowFailDialog(false);
       load();
     } catch (err: unknown) {
@@ -196,7 +198,7 @@ export default function JobDetailPage() {
   async function handleCancel() {
     setCancelling(true);
     try {
-      await api.patch(`/jobs/${id}`, { status: 'CANCELLED' });
+      warn(await api.patch<JobWriteWarnings>(`/jobs/${id}`, { status: 'CANCELLED' }));
       setShowCancelDialog(false);
       toast('success', 'Job cancelled');
       load();
@@ -234,6 +236,7 @@ export default function JobDetailPage() {
             {job.printer?.name || 'No printer'} | {job.assignedTo?.name || 'Unassigned'}
             {job.order && <> | <Link href={`/orders/${job.order.id}`} className="text-brand-600 hover:underline">{job.order.orderNumber}</Link></>}
           </p>
+          <SharedPlateNote sharedWith={job.sharedWith} links className="mt-0.5" />
         </div>
         <div className="flex gap-2 flex-wrap items-center">
           {/* GCode match indicator — only for IN_PROGRESS Moonraker jobs with a gcodeFilename */}

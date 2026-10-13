@@ -1063,6 +1063,7 @@ export type PlateLayoutSource = (typeof PlateLayoutSource)[keyof typeof PlateLay
 
 // In-app slicing: profiles, source models, slice runs (v2.18.0).
 export * from './slicer';
+export * from './order-plates';
 
 /** A blocking problem or non-blocking warning. Codes and messages are exact (spec §3.2). */
 export interface Problem {
@@ -1784,6 +1785,17 @@ export interface JobPlateDetail {
   downloadUrl: string | null;
   /** The plate had a file that was deleted from the product since (finished jobs keep their plates). */
   fileDeleted?: boolean;
+}
+
+/**
+ * Jobs made from one order plate (v2.19.0) are ONE physical print: starting, completing or
+ * failing one does the same to the others. On GET /jobs/:id and every row of GET /jobs.
+ */
+export interface JobSharedPlate {
+  /** The order plate the job was made from; null for every other job. */
+  orderPlateId: string | null;
+  /** The other jobs of that plate that are not cancelled. */
+  sharedWith: Array<{ id: string; name: string }>;
 }
 
 /** J3 `surplusByComponent[]`. */

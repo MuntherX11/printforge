@@ -391,6 +391,7 @@ model Printer {
   slicerProfiles  SlicerProfile[]
   plateLayouts    PlateLayout[]
   sliceRuns       SliceRun[]
+  orderPlates     OrderPlate[]
 
   @@index([connectionType, isActive])
 }
@@ -499,9 +500,11 @@ model ProductionJob {
   surplusPolicy  SurplusPolicy? // resolved at creation; null = legacy job (no plates)
   stockMode      JobStockMode? // only for jobs without orderId; null = DIRECT_SALE semantics
   plates         JobPlate[]
+  orderPlateId   String? // no FK. The order plate this job was made from; jobs sharing one are ONE physical print
 
   @@index([sizeOptionId])
   @@index([colourOptionId])
+  @@index([orderPlateId])
   @@index([status])
   @@index([orderId])
   @@index([orderItemId])
@@ -649,6 +652,7 @@ model Order {
   invoices       Invoice[]
   attachments    Attachment[]
   configOrders   ConfigOrder[]
+  orderPlates    OrderPlate[]
 
   @@index([status])
   @@index([customerId])
@@ -890,7 +894,7 @@ model Attachment {
   invoiceId       String?
   invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
 
-  photoMigratedAt DateTime? // backfill marker (photo copied, thumbnail linked, or skipped)
+  photoMigratedAt  DateTime? // backfill marker (photo copied, thumbnail linked, or skipped)
   slicedForPrinter String? // product G-code: the printer model the file was sliced for (from its header); null = unknown
 
   @@index([entityType, entityId])
@@ -1124,20 +1128,20 @@ enum SliceRunStatus {
 // Never flattened here: the slicer container resolves `inherits` against its own bundled
 // profiles at slice time, so an Orca upgrade never leaves stale merged JSON behind.
 model SlicerProfile {
-  id         String            @id @default(cuid())
-  kind       SlicerProfileKind
-  name       String
-  json       Json
-  printerId  String? // MACHINE: the printer it drives. PROCESS: the printer it is the default for.
-  printer    Printer?          @relation(fields: [printerId], references: [id], onDelete: SetNull)
-  materialId String? // FILAMENT: the shop filament sliced with this preset
-  material   Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  id           String            @id @default(cuid())
+  kind         SlicerProfileKind
+  name         String
+  json         Json
+  printerId    String? // MACHINE: the printer it drives. PROCESS: the printer it is the default for.
+  printer      Printer?          @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  materialId   String? // FILAMENT: the shop filament sliced with this preset
+  material     Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
   // FILAMENT: the main preset for every filament of this type that has no preset of its own.
   // At most one per type (kept in the service, like isDefault for PROCESS).
   materialType MaterialType?
-  isDefault  Boolean           @default(false)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  isDefault    Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   @@unique([kind, name])
   @@index([printerId])
@@ -1170,6 +1174,54 @@ model SliceRun {
 }
 
 // Bulk tiers of a SIZE option. The standard size keeps using PriceTier. Colours have no tiers.
+// Print files for a whole order (v2.19.0): one row per plate the order prints.
+enum OrderPlateKind {
+  MIXED // single-colour parts of ONE filament sliced together from their models
+  PROJECT // one 3MF project part, its own settings, on the printer the project names
+  LAYOUT // an existing plate file of a part; nothing is sliced
+}
+
+enum OrderPlateStatus {
+  DRAFT
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+model OrderPlate {
+  id            String           @id @default(cuid())
+  orderId       String
+  order         Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind          OrderPlateKind
+  status        OrderPlateStatus @default(DRAFT)
+  printerId     String?
+  printer       Printer?         @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  sortOrder     Int              @default(0) // the plate's number minus one; never reused inside an order
+  items         Json // [{ rowKey, orderItemId, componentId, units, unitsSliced|null, minutes|null, grams|null, slotGrams? }]
+  filamentMap   Json // slot -> { materialId, name, type } (same shape as SliceRun.filamentMap)
+  layoutId      String? // LAYOUT kind: the plate layout (null = the part's own single-unit file); no FK
+  plateCount    Int              @default(1)
+  estMinutes    Float            @default(0)
+  estGrams      Float            @default(0)
+  minutes       Float? // sliced (or the layout's) numbers, for ONE plate
+  grams         Float?
+  colorChanges  Int              @default(0)
+  attachmentId  String? // the plate's G-code (MIXED/PROJECT: its own Attachment; LAYOUT: the layout's); no FK
+  gcodeFilename String?
+  preview       Json? // the exact top-down drawing, once sliced
+  error         String?
+  errorDetail   String?
+  queuedAt      DateTime? // set on every transition to QUEUED: the plate's place in the slice queue
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([orderId])
+  @@index([status, queuedAt])
+}
+
 model VariantPriceTier {
   id        String         @id @default(cuid())
   variantId String

@@ -3,6 +3,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isLocalUrl } from '../common/utils/is-local-url';
 import { cancelledOrderNote, JobCompletionService } from '../stock-ledger/job-completion.service';
+import { sharedPlateJobs, startSharedPlateJobs } from './shared-plate';
 
 /**
  * The job a printer's completion event belongs to (§3.6): this printer, this
@@ -238,6 +239,8 @@ export class MoonrakerService {
 
     if (updated.count > 0) {
       this.logger.log(`Job ${job.id} auto-started for printer ${printerId}: gcode "${filename}"`);
+      // A shared plate is one print: its other jobs start with it.
+      await startSharedPlateJobs(this.prisma, job.id);
     }
   }
 
@@ -258,10 +261,13 @@ export class MoonrakerService {
       return;
     }
 
-    const filamentMm = stats.filament_used || 0;
+    // A shared plate is one print: what the printer measured is shared out over its jobs.
+    const group = await sharedPlateJobs(this.prisma, job.id);
+    const share = group[0].share;
+    const filamentMm = (stats.filament_used || 0) * share;
     const result = await this.completion.complete(job.id, {
       source: 'MOONRAKER',
-      printDurationSec: stats.print_duration,
+      printDurationSec: (stats.print_duration || 0) * share,
       filamentUsedMm: filamentMm,
     }).catch((err) => {
       this.logger.warn(`Completion failed for job ${job.id}: ${err.message}`);
@@ -273,10 +279,27 @@ export class MoonrakerService {
     }
 
     // BIZ-13: machine cost = print hours × printer hourly rate (after commit).
-    const printHours = (stats.print_duration || 0) / 3600;
-    const machineCost = printHours * (result.job.printer?.hourlyRate ?? 0);
+    const hourlyRate = result.job.printer?.hourlyRate ?? 0;
+    const printHours = ((stats.print_duration || 0) * share) / 3600;
+    const machineCost = printHours * hourlyRate;
     await this.prisma.productionJob.update({ where: { id: job.id }, data: { machineCost } })
       .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${job.id}: ${err.message}`));
+
+    // The other jobs of the plate finish with it, each with its own share.
+    for (const sibling of group.slice(1)) {
+      const seconds = (stats.print_duration || 0) * sibling.share;
+      const done = await this.completion.complete(sibling.id, {
+        source: 'MOONRAKER',
+        printDurationSec: seconds,
+        filamentUsedMm: (stats.filament_used || 0) * sibling.share,
+      }).catch((err) => {
+        this.logger.warn(`Completion failed for job ${sibling.id} (shares a plate with ${job.id}): ${err.message}`);
+        return null;
+      });
+      if (!done) continue;
+      await this.prisma.productionJob.update({ where: { id: sibling.id }, data: { machineCost: (seconds / 3600) * hourlyRate } })
+        .catch((err) => this.logger.warn(`BIZ-13 post-completion update failed for job ${sibling.id}: ${err.message}`));
+    }
 
     // WARN-22: use material density if available, fall back to PLA
     const density = result.job.materials?.[0]?.material?.density ?? 1.24;

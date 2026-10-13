@@ -4,6 +4,7 @@ import { JobsService } from './jobs.service';
 import { JobMaterialsService } from './job-materials.service';
 import { JobPlanningService } from './job-planning.service';
 import { JobSchedulingService } from './job-scheduling.service';
+import { JobSiblingsService } from './job-siblings';
 import { CatalogCoreModule } from '../catalog-core/catalog-core.module';
 import { CostingModule } from '../costing/costing.module';
 import { WebSocketModule } from '../websocket/websocket.module';
@@ -18,7 +19,7 @@ import { SettingsModule } from '../settings/settings.module';
 @Module({
   imports: [CatalogCoreModule, CostingModule, WebSocketModule, CommunicationsModule, SettingsModule],
   controllers: [JobsController],
-  providers: [JobsService, JobMaterialsService, JobPlanningService, JobSchedulingService],
+  providers: [JobsService, JobMaterialsService, JobPlanningService, JobSchedulingService, JobSiblingsService],
   exports: [JobsService, JobMaterialsService, JobPlanningService, JobSchedulingService],
 })
 export class ProductionModule {}

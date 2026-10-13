@@ -17,6 +17,7 @@ import { SliceService } from './slice.service';
   imports: [forwardRef(() => ProductsModule), SlicerProfilesModule, FileParserModule],
   controllers: [SliceController],
   providers: [SliceService, SliceProcessor, SidecarSliceClient],
-  exports: [SliceService],
+  // The processor and the sidecar client are shared with the order-plates module (one slice queue).
+  exports: [SliceService, SliceProcessor, SidecarSliceClient],
 })
 export class SliceModule {}

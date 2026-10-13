@@ -56,6 +56,67 @@ function bboxOf(text: string): PlateFootprint['bbox'] {
   return Number.isFinite(x) && Number.isFinite(y) && x > 0 && y > 0 ? { x, y } : null;
 }
 
+/** One object on a sliced plate: its label and its outline in bed millimetres. */
+export interface PlateOutline {
+  name: string;
+  polygon: Array<[number, number]>;
+}
+
+/** Every labelled object of the text with an outline of 3 points or more; the purge tower is left out. */
+export function parsePlateOutlines(text: string): PlateOutline[] {
+  const out: PlateOutline[] = [];
+  for (const define of text.matchAll(DEFINE)) {
+    const args = define[1];
+    if (NOT_A_PART.test(args)) continue;
+    const name = /NAME=(\S+)/i.exec(args)?.[1];
+    const raw = /POLYGON=(\S+)/i.exec(args)?.[1];
+    if (!name || !raw) continue;
+    const polygon: Array<[number, number]> = [];
+    for (const p of raw.matchAll(POINT)) {
+      const x = Number(p[1]);
+      const y = Number(p[2]);
+      if (Number.isFinite(x) && Number.isFinite(y)) polygon.push([x, y]);
+    }
+    if (polygon.length >= 3) out.push({ name, polygon });
+  }
+  return out;
+}
+
+/** Bytes of the head read for the outlines: a full plate's defines run well past the footprint chunk. */
+export const OUTLINE_HEAD_BYTES = 4 * 1024 * 1024;
+
+/** The outlines and the bed of a sliced file held in memory. */
+export function plateOutlinesOf(gcode: Buffer): { outlines: PlateOutline[]; printableArea: string[] | null } {
+  // The defines all come before the first object's moves.
+  const stop = gcode.indexOf('EXCLUDE_OBJECT_START');
+  const head = gcode.subarray(0, Math.min(stop === -1 ? gcode.length : stop, OUTLINE_HEAD_BYTES)).toString('utf-8');
+  const tail = gcode.subarray(Math.max(0, gcode.length - FOOTPRINT_CHUNK_BYTES)).toString('utf-8');
+  return { outlines: parsePlateOutlines(head), printableArea: areaOf(tail) ?? areaOf(head) };
+}
+
+/** plateOutlinesOf for a file on disk (its head and its tail only). Null when it cannot be read. */
+export async function readPlateOutlines(absPath: string): Promise<{ outlines: PlateOutline[]; printableArea: string[] | null } | null> {
+  let file: fs.FileHandle | null = null;
+  try {
+    const handle = await fs.open(absPath, 'r');
+    file = handle;
+    const { size } = await handle.stat();
+    const chunk = async (position: number, length: number) => {
+      const buf = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buf, 0, length, position);
+      return buf.subarray(0, bytesRead);
+    };
+    const head = await chunk(0, Math.min(size, OUTLINE_HEAD_BYTES));
+    if (size <= OUTLINE_HEAD_BYTES) return plateOutlinesOf(head);
+    const tail = await chunk(size - FOOTPRINT_CHUNK_BYTES, FOOTPRINT_CHUNK_BYTES);
+    return plateOutlinesOf(Buffer.concat([head, tail]));
+  } catch {
+    return null;
+  } finally {
+    await file?.close().catch(() => undefined);
+  }
+}
+
 function areaOf(text: string): string[] | null {
   const m = AREA.exec(text);
   if (!m) return null;

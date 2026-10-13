@@ -26,7 +26,7 @@ import { lockOrderPlan } from './job-transitions';
  */
 
 /** A J4 row plus what J5 needs to create its job (never sent to the client). */
-interface RowPlan {
+export interface RowPlan {
   row: PlanRow;
   bom: ResolvedBom;
   component: ResolvedComponent;
@@ -36,7 +36,7 @@ interface RowPlan {
   problem: Problem | null;
 }
 
-interface ComputedPlan {
+export interface ComputedPlan {
   order: any;
   planVersion: string;
   rows: RowPlan[];
@@ -66,14 +66,17 @@ export class JobPlanningService {
     return { order: plan.order, planVersion: plan.planVersion, rows: plan.rows.map((r) => r.row), warnings: plan.warnings };
   }
 
-  /** J4's computation. Reads committed state; J5 runs it again inside its advisory lock. */
-  private async computePlan(orderId: string): Promise<ComputedPlan> {
+  /**
+   * J4's computation. Reads committed state; J5 runs it again inside its advisory lock.
+   * `anyStatus`: the order's print files read the rows of an order that can no longer be planned.
+   */
+  async computePlan(orderId: string, opts: { anyStatus?: boolean } = {}): Promise<ComputedPlan> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, customer: { select: { id: true, name: true } } },
     });
     if (!order) throw new NotFoundException('Order not found');
-    assertPlannable(order.status);
+    if (!opts.anyStatus) assertPlannable(order.status);
 
     const ctx = new CatalogRequestContext();
     const warnings: Problem[] = [];

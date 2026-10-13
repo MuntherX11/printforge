@@ -5,7 +5,12 @@
 //   GET  /profiles/:kind/:name        -> bundled system preset JSON (404 if unknown)
 //   POST /profiles/check              -> { ok, unresolved: [names], details }
 //   POST /slice                       -> plate_1.gcode bytes (X-Plate-Files) | { error, exitCode, logTail }
+//        one model:   { inputPath, kind, copies, machine?, process?, filaments, siblings? }
+//        mixed plate: { inputs: [{ inputPath, kind, copies }], machine, process, filaments: [one], siblings? }
+//                     -> also X-Input-Units: [units actually placed per input] (JSON)
 //
+// A mixed plate loads every input as `in<k>_<j>.stl` from the job's scratch dir (a 3MF
+// input is first unpacked with --export-stls, its own orca run inside the same timeout).
 // One job at a time; the scratch dir of a job is always removed afterwards.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -13,12 +18,15 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { buildArgs, ArgsError, validateCopies } from './args.mjs';
+import { buildArgs, buildMixedArgs, buildExportArgs, ArgsError, MAX_MIXED_FILES } from './args.mjs';
+import { scratchName, countInputUnits, exportedStls } from './labels.mjs';
 import { flattenPreset, makeLookup, PresetError, PRESET_KINDS } from './flatten.mjs';
 import { loadSystemIndex } from './system-index.mjs';
+import { HttpError, presetFromBody, parseSliceRequest } from './request.mjs';
+
+export { HttpError, resolveInputPath, parseSliceRequest, parseMixedRequest, MAX_INPUTS } from './request.mjs';
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
-const MAX_FILAMENTS = 16;
 const LOG_TAIL_LINES = 60;
 const LIST_DEFAULT_LIMIT = 50;
 const LIST_MAX_LIMIT = 200;
@@ -29,42 +37,6 @@ export function parseListLimit(value) {
   const n = Number(value);
   if (n < 1) return LIST_DEFAULT_LIMIT;
   return Math.min(n, LIST_MAX_LIMIT);
-}
-
-export class HttpError extends Error {
-  constructor(status, message, extra = {}) {
-    super(message);
-    this.status = status;
-    this.extra = extra;
-  }
-}
-
-/**
- * Confine a request path to the uploads directory. Only relative paths made
- * of plain segments are accepted: no absolute paths, no `..`, no backslashes.
- * @returns {string} the absolute path under `uploadsDir`
- */
-export function resolveInputPath(uploadsDir, inputPath) {
-  if (typeof inputPath !== 'string' || inputPath.length === 0) {
-    throw new HttpError(400, 'inputPath is required');
-  }
-  if (inputPath.includes('\0') || inputPath.includes('\\')) {
-    throw new HttpError(400, 'inputPath contains forbidden characters');
-  }
-  if (path.posix.isAbsolute(inputPath) || path.win32.isAbsolute(inputPath)) {
-    throw new HttpError(400, 'inputPath must be relative to the uploads directory');
-  }
-  const segments = inputPath.split('/');
-  if (segments.some((s) => s === '' || s === '.' || s === '..')) {
-    throw new HttpError(400, 'inputPath must not contain empty, "." or ".." segments');
-  }
-  const root = path.resolve(uploadsDir);
-  const resolved = path.resolve(root, ...segments);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    throw new HttpError(400, 'inputPath escapes the uploads directory');
-  }
-  if (resolved === root) throw new HttpError(400, 'inputPath must name a file');
-  return resolved;
 }
 
 export function logTailOf(logFile, lines = LOG_TAIL_LINES) {
@@ -130,51 +102,6 @@ function sendJson(res, status, body) {
   const data = Buffer.from(JSON.stringify(body));
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': data.length });
   res.end(data);
-}
-
-function isObject(v) { return typeof v === 'object' && v !== null && !Array.isArray(v); }
-
-function presetFromBody(value, what) {
-  if (!isObject(value)) throw new HttpError(400, `${what} must be an object`);
-  // `raw` is the contract; `json` is accepted as an alias (the API's SlicerProfile column).
-  const raw = value.raw ?? value.json;
-  if (!isObject(raw)) throw new HttpError(400, `${what}.raw must be a preset object`);
-  if (typeof raw.name !== 'string' || raw.name.length === 0) {
-    if (typeof value.name === 'string' && value.name.length > 0) raw.name = value.name;
-    else throw new HttpError(400, `${what}.raw.name is required`);
-  }
-  return { ...value, raw };
-}
-
-/** Validate and normalise a /slice request body. */
-export function parseSliceRequest(body, uploadsDir) {
-  if (!isObject(body)) throw new HttpError(400, 'body must be a JSON object');
-  const { kind, copies } = body;
-  if (kind !== 'stl' && kind !== '3mf') throw new HttpError(400, 'kind must be "stl" or "3mf"');
-  try { validateCopies(copies); } catch (err) { throw new HttpError(400, err.message); }
-  const inputPath = resolveInputPath(uploadsDir, body.inputPath);
-  if (!Array.isArray(body.filaments) || body.filaments.length === 0) {
-    throw new HttpError(400, 'filaments must be a non-empty array');
-  }
-  if (body.filaments.length > MAX_FILAMENTS) {
-    throw new HttpError(400, `at most ${MAX_FILAMENTS} filaments are supported`);
-  }
-  const filaments = body.filaments.map((f, i) => {
-    const { raw, density } = presetFromBody(f, `filaments[${i}]`);
-    if (density !== undefined && typeof density !== 'string') {
-      throw new HttpError(400, `filaments[${i}].density must be a string`);
-    }
-    return { raw, density };
-  });
-  const machine = body.machine === undefined ? null : presetFromBody(body.machine, 'machine').raw;
-  const process_ = body.process === undefined ? null : presetFromBody(body.process, 'process').raw;
-  if (kind === 'stl' && (!machine || !process_)) {
-    throw new HttpError(400, 'stl slicing needs machine and process presets');
-  }
-  const siblings = Array.isArray(body.siblings)
-    ? body.siblings.map((s, i) => presetFromBody(s, `siblings[${i}]`).raw)
-    : [];
-  return { kind, copies, inputPath, machine, process: process_, filaments, siblings };
 }
 
 /**
@@ -278,23 +205,42 @@ export function createApp(deps) {
       for (let i = 0; i < profiles.filaments.length; i += 1) {
         profilePaths.filaments.push(await writePreset(`filament_${i}.json`, profiles.filaments[i]));
       }
-      const args = buildArgs({
-        kind: job.kind, inputPath: job.inputPath, copies: job.copies, profilePaths, outputDir, logFile,
-      });
-      log(`slice ${job.kind} x${job.copies} ${path.basename(job.inputPath)}`);
+      // Every orca run of a job draws on one budget: the first gets all of
+      // `timeoutMs`, a later one what the earlier runs left.
+      let spentMs = 0;
+      const run = async (args, runLog, extra = {}) => {
+        const left = timeoutMs - spentMs;
+        const timeout = () => new HttpError(504, `orca-slicer exceeded ${timeoutMs} ms`, {
+          exitCode: null, logTail: logTailOf(runLog), ...extra,
+        });
+        if (left <= 0) throw timeout();
+        const began = Date.now();
+        const result = await runOrca({ orcaBin, args, timeoutMs: left, logFile: runLog, env: { TMPDIR: jobDir } });
+        spentMs += Date.now() - began;
+        if (result.timedOut) throw timeout();
+        if (result.exitCode !== 0) {
+          throw new HttpError(500, `orca-slicer exited with code ${result.exitCode}`, {
+            exitCode: result.exitCode, logTail: logTailOf(runLog) || (result.stderr ?? '').trim(), ...extra,
+          });
+        }
+        return result;
+      };
+      let args;
+      let objectCounts = [];
+      if (job.mixed) {
+        const files = await prepareMixedInputs(job, jobDir, run);
+        objectCounts = job.inputs.map((_, k) => files.filter((f) => f.input === k).length);
+        args = buildMixedArgs({ files, profilePaths, outputDir, logFile });
+        log(`slice mixed: ${job.inputs.length} input(s), ${files.length} file(s), copies ${files.map((f) => f.copies).join(',')}`);
+      } else {
+        args = buildArgs({
+          kind: job.kind, inputPath: job.inputPath, copies: job.copies, profilePaths, outputDir, logFile,
+        });
+        log(`slice ${job.kind} x${job.copies} ${path.basename(job.inputPath)}`);
+      }
       const started = Date.now();
-      const result = await runOrca({ orcaBin, args, timeoutMs, logFile, env: { TMPDIR: jobDir } });
+      const result = await run(args, logFile);
       const elapsed = Date.now() - started;
-      if (result.timedOut) {
-        throw new HttpError(504, `orca-slicer exceeded ${timeoutMs} ms`, {
-          exitCode: null, logTail: logTailOf(logFile),
-        });
-      }
-      if (result.exitCode !== 0) {
-        throw new HttpError(500, `orca-slicer exited with code ${result.exitCode}`, {
-          exitCode: result.exitCode, logTail: logTailOf(logFile) || (result.stderr ?? '').trim(),
-        });
-      }
       const plates = (await fsp.readdir(outputDir))
         .filter((f) => /^plate_\d+\.gcode$/.test(f)).sort();
       if (plates.length === 0) {
@@ -305,10 +251,48 @@ export function createApp(deps) {
       const first = plates.includes('plate_1.gcode') ? 'plate_1.gcode' : plates[0];
       const gcode = await fsp.readFile(path.join(outputDir, first));
       log(`slice done in ${elapsed} ms: ${plates.length} plate file(s), ${gcode.length} bytes`);
-      return { gcode, plateFiles: plates.length };
+      const inputUnits = job.mixed
+        ? countInputUnits(gcode.toString('latin1'), job.inputs.length, objectCounts)
+        : undefined;
+      return { gcode, plateFiles: plates.length, inputUnits };
     } finally {
       await fsp.rm(jobDir, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * Place every model of a mixed job in the scratch dir as `in<k>_<j>.stl`.
+   * An STL is copied; a 3MF is unpacked with --export-stls (one orca run each)
+   * and every STL it yields is loaded with that input's copy count.
+   * @returns {Promise<{path: string, copies: number}[]>} files in load order
+   */
+  async function prepareMixedInputs(job, jobDir, run) {
+    const files = [];
+    for (let k = 0; k < job.inputs.length; k += 1) {
+      const input = job.inputs[k];
+      let sources = [input.inputPath];
+      if (input.kind === '3mf') {
+        const exportDir = path.join(jobDir, `export_${k}`);
+        const exportLog = path.join(jobDir, `export_${k}.log`);
+        await fsp.mkdir(exportDir);
+        log(`export stls of inputs[${k}] ${path.basename(input.inputPath)}`);
+        await run(buildExportArgs({ inputPath: input.inputPath, exportDir, logFile: exportLog }), exportLog, { input: k });
+        sources = exportedStls(await fsp.readdir(exportDir)).map((name) => path.join(exportDir, name));
+        if (sources.length === 0) {
+          throw new HttpError(400, 'the project holds no objects', { input: k, logTail: logTailOf(exportLog) });
+        }
+      }
+      if (files.length + sources.length > MAX_MIXED_FILES) {
+        throw new HttpError(400, `the plate would load more than ${MAX_MIXED_FILES} model files`, { input: k });
+      }
+      for (let j = 0; j < sources.length; j += 1) {
+        const target = path.join(jobDir, scratchName(k, j));
+        if (input.kind === '3mf') await fsp.rename(sources[j], target);
+        else await fsp.copyFile(sources[j], target, fs.constants.COPYFILE_FICLONE);
+        files.push({ path: target, copies: input.copies, input: k });
+      }
+    }
+    return files;
   }
 
   async function handleSlice(req, res) {
@@ -317,14 +301,24 @@ export function createApp(deps) {
     try {
       const body = await readJsonBody(req);
       const job = parseSliceRequest(body, uploadsDir);
-      const stat = await fsp.stat(job.inputPath).catch(() => null);
-      if (!stat?.isFile()) throw new HttpError(400, 'inputPath does not exist');
-      const { gcode, plateFiles } = await runJob(job);
-      res.writeHead(200, {
+      const isFile = async (p) => (await fsp.stat(p).catch(() => null))?.isFile() === true;
+      if (job.mixed) {
+        for (let k = 0; k < job.inputs.length; k += 1) {
+          if (!(await isFile(job.inputs[k].inputPath))) {
+            throw new HttpError(400, `inputs[${k}]: inputPath does not exist`, { input: k });
+          }
+        }
+      } else if (!(await isFile(job.inputPath))) {
+        throw new HttpError(400, 'inputPath does not exist');
+      }
+      const { gcode, plateFiles, inputUnits } = await runJob(job);
+      const headers = {
         'Content-Type': 'application/octet-stream',
         'Content-Length': gcode.length,
         'X-Plate-Files': String(plateFiles),
-      });
+      };
+      if (inputUnits) headers['X-Input-Units'] = JSON.stringify(inputUnits);
+      res.writeHead(200, headers);
       res.end(gcode);
     } finally {
       busy = false;

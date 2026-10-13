@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { sharedWithOf } from './job-shared-plate';
 
 @Injectable()
 export class JobSchedulingService {
@@ -104,6 +105,7 @@ export class JobSchedulingService {
             quantityToProduce: true,
             colorChanges: true,
             createdAt: true,
+            orderPlateId: true,
             order: { select: { id: true, orderNumber: true } },
           },
         },
@@ -121,10 +123,17 @@ export class JobSchedulingService {
         quantityToProduce: true,
         colorChanges: true,
         createdAt: true,
+        orderPlateId: true,
         order: { select: { id: true, orderNumber: true } },
       },
     });
 
-    return { printers, unassigned };
+    // Jobs of one order plate print together: each names the others (v2.19.0).
+    const shared = await sharedWithOf(this.prisma, [...printers.flatMap((p) => p.productionJobs), ...unassigned]);
+    const withShared = <J extends { id: string }>(j: J) => ({ ...j, sharedWith: shared.get(j.id) ?? [] });
+    return {
+      printers: printers.map((p) => ({ ...p, productionJobs: p.productionJobs.map(withShared) })),
+      unassigned: unassigned.map(withShared),
+    };
   }
 }
