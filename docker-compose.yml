@@ -188,8 +188,9 @@ services:
   # Headless OrcaSlicer sidecar: the API posts a model path (inside pf-uploads)
   # plus flattened presets to /slice and gets plate_1.gcode back. Internal
   # network only, no published port, uploads read-only, scratch on tmpfs.
-  # Memory limit: 3 GB from the Phase 0 gate was too little live (a 30-unit plate
-  # was killed while generating supports, exit 137), raised to 6 GB (owner, v2.19.1).
+  # Memory limit 3 GB (Phase 0 gate). It must stay below what docker-vm really has
+  # free: a limit above physical RAM protects nothing, and the host-wide OOM killer
+  # may then pick Postgres or the api instead (seen live 2026-10-28 on a 4 GB VM).
   slicer:
     build:
       context: ./docker/slicer
@@ -216,7 +217,7 @@ services:
       resources:
         limits:
           cpus: "2.0"
-          memory: 6144M
+          memory: 3072M
 
   db-backup:
     build:
