@@ -26,6 +26,11 @@ describe('orcaFailureSentence', () => {
     expect(orcaFailureSentence(cli, '')).toBe(sentence);
   });
 
+  it('137 (-119) is the slicer killed by the server, seen live on a 30-unit plate', () => {
+    expect(orcaFailureSentence(137, '')).toBe('The slicer ran out of memory and was stopped; try fewer units on the plate');
+    expect(orcaFailureSentence(-119, '')).toBe('The slicer ran out of memory and was stopped; try fewer units on the plate');
+  });
+
   it('239 is -17, the code seen live', () => {
     expect(orcaFailureSentence(239, 'record_exit_reson:459, saved config to /scratch/job-EsX382/out/result.json')).toContain('process preset does not match this printer');
   });
@@ -38,7 +43,7 @@ describe('orcaFailureSentence', () => {
     expect(orcaFailureSentence(1, '')).toBe('The slicer stopped with an error (code 1)');
     expect(orcaFailureSentence(exit(-105), '')).toBe('The slicer stopped with an error (code -105)');
     expect(orcaFailureSentence(exit(-99), '')).toBe('The slicer stopped with an error (code -99)');
-    expect(orcaFailureSentence(137, '')).toBe('The slicer stopped with an error (code -119)');
+    expect(orcaFailureSentence(exit(-120), '')).toBe('The slicer stopped with an error (code -120)');
   });
 
   it('never an em dash, never the raw log', () => {

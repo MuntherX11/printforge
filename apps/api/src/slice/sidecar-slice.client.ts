@@ -105,6 +105,8 @@ export function orcaFailureSentence(exitCode: number | null, _logTail: string = 
     case -3: return 'The model file could not be read';
     case -5: return 'A slicer preset could not be loaded';
     case -14: return 'The slicer ran out of memory; try fewer units';
+    // 137 = 128 + SIGKILL: the server stopped the slicer, in practice because it ran out of memory.
+    case -119: return 'The slicer ran out of memory and was stopped; try fewer units on the plate';
     case -15:
     case -16: return 'This project is for a printer the slicer does not support';
     case -17: return 'The process preset does not match this printer; set a default process for it in Settings › Slicer';
