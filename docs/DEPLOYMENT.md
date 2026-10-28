@@ -234,7 +234,7 @@ on a 1 GB tmpfs that is wiped after every job.
 
 It is built on Vault and shipped by `scripts/build-and-ship.sh` exactly like the other four images
 (the AppImage is downloaded during the build, so Vault needs GitHub access), and `deploy.sh
---prebuilt` retags it as `<project>-slicer`. Compose gives it 2 CPUs and 3 GB (keep the limit below the free RAM of docker-vm; a limit above it protects nothing), `shm_size` 1g, the
+--prebuilt` retags it as `<project>-slicer`. Compose gives it 2 CPUs and 4 GB, sized for docker-vm at 10 GB RAM + 2 GB swap (keep the limit below the free RAM of docker-vm; a limit above it protects nothing), `shm_size` 1g, the
 internal network only, no published port, and `pf-uploads` mounted read-only at `/uploads`. The
 base image is `ubuntu:24.04` rather than bookworm because the AppImage needs glibc 2.38+.
 
@@ -441,7 +441,7 @@ Default resource limits in `docker-compose.yml`:
 | db | 1.0 | 512MB | Large dataset or complex queries |
 | worker | 0.5 | 256MB | Many background jobs |
 | bridge | 0.5 | 256MB | Many Moonraker printers |
-| slicer | 2.0 | 3GB | Large plates (40+ repetitions of a multi-part 3MF); see Slicer image |
+| slicer | 2.0 | 4GB | Large plates (40+ repetitions of a multi-part 3MF); see Slicer image |
 | redis | 0.5 | 128MB | Rarely needs adjustment |
 | nginx | 0.5 | 128MB | Rarely needs adjustment |
 
